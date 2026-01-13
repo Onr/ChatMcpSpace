@@ -1,0 +1,59 @@
+{
+  "name": "chatmcpspace",
+  "version": "1.0.0",
+  "description": "AI Agent Messaging Platform - bidirectional communication between users and AI agents",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage",
+    "test:watch": "jest --runInBand --watch"
+  },
+  "keywords": [
+    "ai",
+    "messaging",
+    "agents",
+    "mcp",
+    "chat"
+  ],
+  "author": "onr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onr/ChatMcpSpace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/onr/ChatMcpSpace/issues"
+  },
+  "homepage": "https://github.com/onr/ChatMcpSpace#readme",
+  "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
+    "bcrypt": "^5.1.1",
+    "blessed": "^0.1.81",
+    "connect-redis": "^7.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "ejs": "^3.1.9",
+    "express": "^4.18.2",
+    "express-ejs-layouts": "^2.5.1",
+    "express-session": "^1.17.3",
+    "google-tts-api": "^0.0.6",
+    "helmet": "^7.2.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.10",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.11.3",
+    "redis": "^4.6.12"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/preset-env": "^7.26.0",
+    "babel-jest": "^27.5.1",
+    "jest": "^27.5.1",
+    "pg-mem": "^2.8.3",
+    "supertest": "^6.3.4",
+    "uuid": "^9.0.1"
+  }
+}

@@ -1,0 +1,96 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+# Agent-specific .env files (contain secrets)
+chatspace/*/.env
+chatspace/**/.env
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Project/collab files
+.vscode/
+.kiro/
+.kiro
+kiro/
+.env.eample/
+.env.example/
+
+# Testing and coverage
+coverage
+*.lcov
+
+# Build artifacts
+dist/
+build/
+.cache
+
+# Tooling
+.eslintcache
+.npm
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Generated Audio
+public/audio/cache/
+
+# Agent chatspace (runtime agent data)
+chatspace/
+
+# User uploaded files
+uploads/
+
+# Agent instruction files (generated per-user)
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# Temporary files and debugging
+tmp/
+backups/
+cookies.txt
+verify_fix.js
+run_read_tracking_migration.js
+src/utils/debug_db.js
+src/utils/debug_orphans.js
+server_status.txt
+
+# IDE and editor files
+.claude/
+
+# Documentation (work in progress)
+TODO_TESTS.md
+
+# Local agent instruction/script files
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+agent-cli.sh
+
+# Google Cloud Service Account Key
+keys/service-account.json
+
+# TLS certificates / private keys
+keys/*.pem
+keys/*.key
+keys/*.crt
