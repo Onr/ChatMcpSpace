@@ -94,3 +94,9 @@ keys/service-account.json
 keys/*.pem
 keys/*.key
 keys/*.crt
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
