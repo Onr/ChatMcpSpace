@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>
+    <%= typeof title !=='undefined' ? title : 'ChatMCPSpace' %>
+  </title>
+  <link rel="icon" type="image/png" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    /* Styles moved to public/css/style.css */
+
+    /* Onboarding callout - Redesigned */
+    .onboarding-callout {
+      position: fixed;
+      z-index: 99999;
+      pointer-events: none;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+      transform: translateX(-50%) translateY(10px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.5));
+    }
+
+    .onboarding-callout.is-visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .onboarding-callout__content {
+      background: #10b981;
+      /* Emerald 500 */
+      color: #022c22;
+      /* Emerald 950 */
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    /* CSS Triangle Arrow */
+    .onboarding-callout__content::before {
+      content: '';
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-bottom: 8px solid #10b981;
+    }
+
+    .onboarding-callout__title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.8;
+      margin-bottom: 2px;
+    }
+
+    .onboarding-callout__message {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    /* Settings button highlight */
+    .settings-highlight {
+      position: relative;
+      z-index: 50;
+      animation: settings-pulse 2s infinite;
+      background: rgba(16, 185, 129, 0.1) !important;
+      border-color: #10b981 !important;
+    }
+
+    @keyframes settings-pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      }
+
+      70% {
+        box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+  </style>
+</head>
+
+<body class="min-h-screen text-slate-100 antialiased">
+  <% if (user) { %>
+    <!-- Email Verification Banner -->
+    <% if (typeof emailVerified !=='undefined' && emailVerified===false) { %>
+      <div class="bg-amber-500/10 border-b border-amber-500/30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p class="text-sm text-amber-200">
+                <strong>Verify your email</strong> to unlock all features. Check your inbox for the verification link.
+              </p>
+            </div>
+            <a href="/verify-email-sent"
+              class="text-sm font-medium text-amber-400 hover:text-amber-300 transition whitespace-nowrap">
+              Resend Email →
+            </a>
+          </div>
+        </div>
+      </div>
+      <% } %>
+
+        <nav class="px-4 sm:px-6 lg:px-8 pt-6 overflow-visible">
+          <div class="max-w-7xl mx-auto overflow-visible">
+            <div class="glass-panel px-6 py-4 flex flex-wrap items-center justify-between gap-4 overflow-visible">
+              <div>
+                <div class="flex items-center gap-3">
+                  <svg class="w-12 h-12 flex-shrink-0" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Central command center -->
+                    <circle cx="128" cy="128" r="56" fill="none" stroke="#22d3ee" stroke-width="4" />
+                    <!-- Inner thin orbit ring -->
+                    <circle cx="128" cy="128" r="72" fill="none" stroke="#0891b2" stroke-width="2" />
+                    <!-- Outer thin orbit ring -->
+                    <circle cx="128" cy="128" r="88" fill="none" stroke="#06b6d4" stroke-width="3" />
+                    <!-- Agent dots -->
+                    <circle cx="128" cy="56" r="7" fill="#22d3ee" />
+                    <circle cx="190.2" cy="65.8" r="7" fill="#14b8a6" />
+                    <circle cx="216" cy="128" r="7" fill="#22d3ee" />
+                    <circle cx="178.9" cy="178.9" r="7" fill="#14b8a6" />
+                    <circle cx="128" cy="216" r="7" fill="#22d3ee" />
+                    <circle cx="65.8" cy="190.2" r="7" fill="#14b8a6" />
+                    <circle cx="40" cy="128" r="7" fill="#22d3ee" />
+                    <circle cx="65.8" cy="65.8" r="7" fill="#14b8a6" />
+                  </svg>
+                  <p class="text-sm sm:text-base font-bold uppercase tracking-[0.15em] text-emerald-500/80">Chat MCP Space</p>
+                </div>
+                <p class="text-[10px] text-slate-400 mt-0.5" style="display: none;">Monitor every agent, maintain
+                  control, and delegate with focus.</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-sm text-slate-300 overflow-visible">
+                <span
+                  class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs tracking-wide uppercase">Signed
+                  in
+                  as <%= user.email %></span>
+                <div class="relative overflow-visible" id="settingsButtonWrapper">
+                  <a href="/settings" id="navToggleButton"
+                    class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Settings</a>
+                </div>
+                <script>
+                  // Toggle button based on current page
+                  (function () {
+                    const btn = document.getElementById('navToggleButton');
+                    if (!btn) return;
+                    const path = window.location.pathname;
+                    if (path === '/settings' || path.startsWith('/settings/')) {
+                      btn.href = '/dashboard';
+                      btn.textContent = 'Dashboard';
+                    } else {
+                      btn.href = '/settings';
+                      btn.textContent = 'Settings';
+                    }
+                  })();
+                </script>
+                <% if (typeof showSetupShortcut !=='undefined' && showSetupShortcut) { %>
+                  <button id="navCopySetupButton" type="button" onclick="copyMainCLIScript(this)"
+                    class="px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition flex items-center gap-2 text-xs font-medium">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    Setup Script
+                  </button>
+                  <% } %>
+                    <a href="/logout"
+                      class="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-xs font-medium">Logout</a>
+              </div>
+            </div>
+          </div>
+        </nav>
+
+        <script>
+          // Onboarding tooltip for first-time users
+          (function () {
+            const ONBOARDING_KEY = 'chatmcp_setup_script_onboarding_v1'; // Key for setup script hint
+            const setupBtn = document.getElementById('navCopySetupButton');
+
+            // If no setup button, user doesn't have it enabled - skip onboarding
+            if (!setupBtn) return;
+
+            const hasSeenOnboarding = localStorage.getItem(ONBOARDING_KEY);
+            if (hasSeenOnboarding) return;
+
+            // Create callout element
+            const callout = document.createElement('div');
+            callout.className = 'onboarding-callout';
+            callout.innerHTML = `
+        <div class="onboarding-callout__content">
+          <div class="onboarding-callout__title">👋 First Time?</div>
+          <div class="onboarding-callout__message">Click to copy, then paste in your workspace</div>
+        </div>
+      `;
+            document.body.appendChild(callout);
+
+            function positionCallout() {
+              const rect = setupBtn.getBoundingClientRect();
+
+              // Center below the button using CSS transform for perfect centering
+              // Round values to avoid sub-pixel rendering issues
+              const top = rect.bottom + 8;
+              const left = rect.left + (rect.width / 2);
+
+              callout.style.top = `${Math.round(top)}px`;
+              callout.style.left = `${Math.round(left)}px`;
+            }
+
+            // Show and position - highlight the setup button
+            setupBtn.classList.add('settings-highlight');
+
+            // Wait for layout
+            requestAnimationFrame(() => {
+              positionCallout();
+              requestAnimationFrame(() => {
+                callout.classList.add('is-visible');
+              });
+            });
+
+            const reposition = () => positionCallout();
+            window.addEventListener('resize', reposition);
+            window.addEventListener('scroll', reposition);
+
+            function hideCallout() {
+              localStorage.setItem(ONBOARDING_KEY, 'true');
+              callout.classList.remove('is-visible');
+              setupBtn.classList.remove('settings-highlight');
+              setTimeout(() => callout.remove(), 300);
+              window.removeEventListener('resize', reposition);
+              window.removeEventListener('scroll', reposition);
+            }
+
+            setupBtn.addEventListener('click', hideCallout);
+
+            // Auto-hide if user clicks elsewhere
+            setTimeout(() => {
+              document.addEventListener('click', (e) => {
+                if (!e.target.closest('#navCopySetupButton')) {
+                  hideCallout();
+                }
+              }, { once: true });
+            }, 1000);
+          })();
+        </script>
+        <% } %>
+
+          <main class="<%= user ? 'py-8' : 'py-4' %>">
+            <%- body %>
+          </main>
+          <script src="/js/setup-script.js"></script>
+</body>
+
+</html>

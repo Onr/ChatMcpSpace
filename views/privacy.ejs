@@ -1,0 +1,271 @@
+<div class="min-h-screen flex items-start justify-center px-4 py-10">
+  <div class="max-w-3xl w-full space-y-8">
+    <header class="space-y-2">
+      <h1 class="text-3xl font-extrabold text-white">Privacy Policy</h1>
+      <p class="text-sm text-slate-400">Last updated: 26 November 2025</p>
+      <p class="mt-2 text-sm text-slate-300 bg-slate-800/50 border border-slate-700 rounded-md px-3 py-2">
+        This Privacy Policy explains what data is collected when you use the ChatMCPSpace agent messaging platform,
+        how it is used, and the choices you have.
+      </p>
+    </header>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">1. Data We Collect</h2>
+      <p>When you use the Service, we may collect the following categories of information:</p>
+      <h3 class="font-semibold text-white mt-2">Account Data</h3>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>Email address you use to register and log in.</li>
+        <li>
+          Password, stored only as a bcrypt hash. We never store your plaintext password.
+        </li>
+        <li>
+          A unique API key and an encryption salt generated for your account.
+        </li>
+      </ul>
+
+      <h3 class="font-semibold text-white mt-3">Agent and Message Data</h3>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>Agent names associated with your account.</li>
+        <li>
+          Messages and questions sent by your agents, including content, priority, urgency flags, and optional
+          free‑response hints.
+        </li>
+        <li>
+          Options attached to interactive questions (option text, benefits, downsides, and default flags).
+        </li>
+        <li>
+          Your responses to questions (selected options and optional free‑text explanations).
+        </li>
+        <li>
+          Free‑text messages you send back to your agents from the dashboard.
+        </li>
+        <li>
+          Timestamps and &quot;read&quot; status for messages and responses.
+        </li>
+      </ul>
+
+      <h3 class="font-semibold text-white mt-3">Usage and Log Data</h3>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          HTTP request metadata such as IP address, request path, HTTP method, response status, and response size.
+        </li>
+        <li>
+          Security‑related logs for authentication attempts, API key usage, rate‑limit events, and unauthorized
+          access attempts (including IP address, user ID where available, and user agent).
+        </li>
+        <li>
+          Error and performance logs used to debug and monitor the Service.
+        </li>
+      </ul>
+
+      <h3 class="font-semibold text-white mt-3">Voice and Audio Features</h3>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          When server‑side text‑to‑speech is enabled, we may send short notification phrases (for example,
+          &quot;Received urgent message from &lt;agent name&gt;&quot;) to Google Cloud Text‑to‑Speech to generate
+          audio files that are cached on our server.
+        </li>
+        <li>
+          Optional in‑browser speech recognition and speech synthesis use your browser&apos;s Web Speech APIs.
+          Audio for speech recognition may be processed by the browser vendor or its providers; this is handled by
+          your browser, not by our servers.
+        </li>
+      </ul>
+
+      <h3 class="font-semibold text-white mt-3">Cookies and Local Storage</h3>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          Session cookies used to keep you signed in. These cookies are httpOnly and are required for basic
+          functionality.
+        </li>
+        <li>
+          Local storage and session storage entries in your browser, such as voice notification preferences and a
+          derived encryption key used for end‑to‑end encryption. These values are stored client‑side; we do not read
+          them on the server.
+        </li>
+      </ul>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">2. How We Use Your Data</h2>
+      <p>We use the data described above to:</p>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>Create and maintain your account and authentication sessions.</li>
+        <li>Deliver agent messages, questions, and responses to your dashboard and APIs.</li>
+        <li>
+          Generate API guides, setup scripts, and integration helpers that embed your API key, base URL, and
+          encryption salt.
+        </li>
+        <li>Provide optional text‑to‑speech and voice interaction features.</li>
+        <li>Monitor and protect the Service through logging, rate limiting, and security auditing.</li>
+        <li>Troubleshoot issues, analyze performance, and improve the Service over time.</li>
+      </ul>
+      <p>
+        We do <strong>not</strong> sell your personal information or your message content to advertisers or data
+        brokers.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">3. Encryption and Message Privacy</h2>
+      <p>
+        The Service supports an optional end‑to‑end encryption workflow. When enabled in your agents and scripts:
+      </p>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          Message content is encrypted on your side using your password and a user‑specific salt before being sent
+          to the Service.
+        </li>
+        <li>
+          Our servers store the encrypted ciphertext and the per‑user encryption salt but do not store your
+          password or the derived encryption key.
+        </li>
+        <li>
+          Decryption happens in your browser or agent runtime using your password or derived key.
+        </li>
+      </ul>
+      <p>
+        Even when encryption is used, we still process unencrypted metadata such as timestamps, agent names,
+        message type (message vs. question), priority, and whether a question has been answered. If you choose not
+        to use the encryption helpers, message content may be stored in readable form in our database.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">4. Legal Bases and Use Restrictions</h2>
+      <p>
+        We process your information to provide and operate the Service, to secure and maintain the platform, and to
+        comply with applicable law. You remain responsible for ensuring that your use of the Service (including any
+        personal data you send through it) complies with the laws that apply to you.
+      </p>
+      <p>
+        The Service is not intended for processing highly regulated categories of data such as payment card
+        numbers, government‑classified information, or protected health information where specific legal regimes
+        (for example, HIPAA) apply.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">5. How We Share Information</h2>
+      <p>We may share your information with:</p>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          Infrastructure providers that host our application, databases, and caches in order to deliver the
+          Service.
+        </li>
+        <li>
+          Google Cloud or similar providers for server‑side text‑to‑speech, limited to short notification phrases.
+        </li>
+        <li>
+          Service providers who help us monitor, secure, and operate the platform (for example, log aggregation or
+          alerting tools).
+        </li>
+        <li>
+          Law enforcement or other third parties when required by applicable law or to protect the rights,
+          property, or safety of the Service, our users, or others.
+        </li>
+      </ul>
+      <p>
+        We do not grant third parties the right to use your Content for their own advertising or independent data
+        monetization.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">6. Data Storage, Retention, and Deletion</h2>
+      <p>
+        Data is stored primarily in our PostgreSQL database and, for some features, in Redis caches and on disk
+        (for example, cached audio files for text‑to‑speech).
+      </p>
+      <p>In general:</p>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          Account data is kept for as long as your account is active, unless we remove it under the Terms or as
+          required by law.
+        </li>
+        <li>
+          Messages, questions, options, and responses are kept while your account and relevant agents exist.
+        </li>
+        <li>
+          Deleting an agent from within the Service will also delete associated messages, options, and user
+          responses for that agent, subject to any backups or logs kept for security and operational purposes.
+        </li>
+        <li>
+          Logs and backups may be retained for a period of time to support debugging, security investigations, and
+          reliability, and may not be deleted immediately when you delete other data.
+        </li>
+      </ul>
+      <p>
+        Because the Service is in beta, retention behavior may change as we refine the system. We aim to keep data
+        no longer than reasonably necessary for the purposes described above.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">7. Your Choices and Controls</h2>
+      <ul class="list-disc ml-5 space-y-1">
+        <li>
+          You can configure how your agents use the API and decide whether to enable the end‑to‑end encryption
+          helpers.
+        </li>
+        <li>
+          You can delete agents (and their associated conversations) from the dashboard.
+        </li>
+        <li>
+          You can enable or disable voice notifications in the settings page; this toggles voice playback in your
+          browser.
+        </li>
+        <li>
+          You can clear local storage and session storage in your browser to remove locally cached encryption keys
+          and preferences.
+        </li>
+        <li>
+          If you have questions about your data or need help with access or deletion beyond the in‑product controls,
+          you can contact us using the support options in the application.
+        </li>
+      </ul>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">8. Children&apos;s Privacy</h2>
+      <p>
+        The Service is intended for use by adults and is not directed to children under the age of 13 (or any higher
+        age required by applicable law in your jurisdiction). We do not knowingly collect personal information from
+        children in those age ranges. If you believe we have collected such information, please contact us so we
+        can investigate and take appropriate action.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">9. International Data Transfers</h2>
+      <p>
+        The Service and its providers may process and store data in countries other than the one where you are
+        located. By using the Service, you consent to the transfer of information to countries that may have
+        different data‑protection laws than your own, while we continue to handle your data as described in this
+        Policy.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">10. Changes to This Privacy Policy</h2>
+      <p>
+        We may update this Privacy Policy from time to time. When we do, we will update the &quot;Last updated&quot;
+        date above and may provide additional notice within the Service. Your continued use of the Service after
+        the revised Policy becomes effective indicates that you have read and understood the changes.
+      </p>
+    </section>
+
+    <section class="space-y-3 text-sm text-slate-300">
+      <h2 class="text-lg font-semibold text-white">11. Contact</h2>
+      <p>
+        If you have questions about this Privacy Policy or how your data is handled, please reach out using the
+        contact form or support channels exposed in the application.
+      </p>
+      <p class="mt-2 text-xs text-slate-500">
+        This Privacy Policy is a general template and may need to be reviewed or adapted by legal counsel to address
+        specific regulatory requirements that apply to your use of the Service.
+      </p>
+    </section>
+  </div>
+</div>
+

@@ -1,0 +1,265 @@
+<div class="min-h-screen flex items-center justify-center px-4">
+  <div class="max-w-md w-full">
+    <!-- Success Card -->
+    <div class="glass-panel p-8 text-center">
+      <!-- Email Icon -->
+      <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+        <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+      </div>
+
+      <h1 class="text-2xl font-bold text-white mb-3">Enter Verification Code</h1>
+      
+      <p class="text-slate-300 mb-2">
+        We've sent a 6-digit code to:
+      </p>
+      
+      <% if (email) { %>
+        <p class="text-emerald-400 font-medium mb-6 break-all"><%= email %></p>
+      <% } else { %>
+        <p class="text-slate-400 mb-6">your registered email address</p>
+      <% } %>
+
+      <!-- Code Input Form -->
+      <form id="verifyCodeForm" class="mb-6">
+        <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+        <div class="flex justify-center gap-2 mb-4">
+          <input type="text" id="code1" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+          <input type="text" id="code2" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+          <input type="text" id="code3" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+          <input type="text" id="code4" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+          <input type="text" id="code5" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+          <input type="text" id="code6" maxlength="1" class="w-12 h-14 text-center text-2xl font-bold bg-slate-800 border border-slate-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+        </div>
+        
+        <button type="submit" id="verifyBtn" class="w-full py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Verify Email
+        </button>
+      </form>
+
+      <div class="text-sm text-slate-400 mb-6">
+        <p>The code expires in <strong class="text-slate-300">15 minutes</strong></p>
+      </div>
+
+      <!-- Message Area -->
+      <div id="messageArea" class="mb-4 hidden">
+        <p id="messageText" class="text-sm"></p>
+      </div>
+
+      <!-- Actions -->
+      <div class="space-y-3">
+        <button id="resendBtn" onclick="resendVerification()" 
+                class="w-full py-3 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Resend Code
+        </button>
+        
+        <a href="/" class="block w-full py-3 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition text-center">
+          Back to Home
+        </a>
+      </div>
+
+      <div class="mt-6 pt-6 border-t border-slate-700">
+        <p class="text-xs text-slate-500">
+          Wrong email? <a href="/register" class="text-emerald-400 hover:underline">Register again</a> with a different address.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const codeInputs = [
+    document.getElementById('code1'),
+    document.getElementById('code2'),
+    document.getElementById('code3'),
+    document.getElementById('code4'),
+    document.getElementById('code5'),
+    document.getElementById('code6')
+  ];
+  
+  let cooldown = 0;
+  const resendBtn = document.getElementById('resendBtn');
+  const verifyBtn = document.getElementById('verifyBtn');
+  const messageArea = document.getElementById('messageArea');
+  const messageText = document.getElementById('messageText');
+  const userEmail = "<%- email ? email.replace(/\"/g, '&quot;') : '' %>";
+
+  // Auto-focus and auto-advance code inputs
+  codeInputs.forEach((input, index) => {
+    input.addEventListener('input', (e) => {
+      const value = e.target.value;
+      
+      // Only allow digits
+      if (!/^\d*$/.test(value)) {
+        e.target.value = '';
+        return;
+      }
+      
+      // Auto-advance to next input
+      if (value && index < 5) {
+        codeInputs[index + 1].focus();
+      }
+      
+      // Auto-submit when all filled
+      if (index === 5 && value) {
+        const code = getCode();
+        if (code.length === 6) {
+          verifyCode();
+        }
+      }
+    });
+    
+    input.addEventListener('keydown', (e) => {
+      // Handle backspace
+      if (e.key === 'Backspace' && !e.target.value && index > 0) {
+        codeInputs[index - 1].focus();
+      }
+    });
+    
+    // Handle paste
+    input.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+      
+      pastedData.split('').forEach((char, i) => {
+        if (codeInputs[i]) {
+          codeInputs[i].value = char;
+        }
+      });
+      
+      // Focus on the next empty input or last input
+      const nextEmpty = codeInputs.findIndex(inp => !inp.value);
+      if (nextEmpty >= 0) {
+        codeInputs[nextEmpty].focus();
+      } else {
+        codeInputs[5].focus();
+        // Auto-submit if all filled
+        if (pastedData.length === 6) {
+          verifyCode();
+        }
+      }
+    });
+  });
+
+  // Focus first input on load
+  codeInputs[0].focus();
+
+  function getCode() {
+    return codeInputs.map(input => input.value).join('');
+  }
+
+  document.getElementById('verifyCodeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    verifyCode();
+  });
+
+  async function verifyCode() {
+    const code = getCode();
+    
+    if (code.length !== 6) {
+      showMessage('Please enter the complete 6-digit code', 'error');
+      return;
+    }
+
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying...';
+    
+    try {
+      const response = await fetch('/verify-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: userEmail,
+          code: code,
+          _csrf: '<%= typeof csrfToken !== "undefined" ? csrfToken : "" %>'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showMessage('Email verified successfully! Redirecting...', 'success');
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1500);
+      } else {
+        showMessage(data.error || 'Invalid code. Please try again.', 'error');
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify Email';
+        // Clear inputs on error
+        codeInputs.forEach(input => input.value = '');
+        codeInputs[0].focus();
+      }
+    } catch (error) {
+      showMessage('An error occurred. Please try again.', 'error');
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify Email';
+    }
+  }
+
+  async function resendVerification() {
+    if (cooldown > 0) return;
+
+    resendBtn.disabled = true;
+    resendBtn.textContent = 'Sending...';
+    
+    try {
+      const response = await fetch('/resend-verification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: '_csrf=<%= typeof csrfToken !== "undefined" ? csrfToken : "" %>&email=' + encodeURIComponent(userEmail)
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showMessage('New code sent! Check your inbox.', 'success');
+        startCooldown(60);
+        // Clear inputs
+        codeInputs.forEach(input => input.value = '');
+        codeInputs[0].focus();
+      } else {
+        showMessage(data.error || 'Failed to send code. Please try again.', 'error');
+        resendBtn.disabled = false;
+        resendBtn.textContent = 'Resend Code';
+      }
+    } catch (error) {
+      showMessage('An error occurred. Please try again.', 'error');
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Resend Code';
+    }
+  }
+
+  function showMessage(text, type) {
+    messageArea.classList.remove('hidden');
+    messageText.textContent = text;
+    messageText.className = type === 'success' 
+      ? 'text-sm text-emerald-400' 
+      : 'text-sm text-red-400';
+  }
+
+  function startCooldown(seconds) {
+    cooldown = seconds;
+    updateCooldownButton();
+    
+    const interval = setInterval(() => {
+      cooldown--;
+      if (cooldown <= 0) {
+        clearInterval(interval);
+        resendBtn.disabled = false;
+        resendBtn.textContent = 'Resend Code';
+      } else {
+        updateCooldownButton();
+      }
+    }, 1000);
+  }
+
+  function updateCooldownButton() {
+    resendBtn.textContent = `Resend in ${cooldown}s`;
+  }
+</script>

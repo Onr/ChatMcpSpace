@@ -1,0 +1,451 @@
+<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+  <div class="space-y-8">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 slide-in-left">
+      <div>
+        <h1 class="text-3xl font-bold text-slate-100 tracking-tight">Account Settings</h1>
+        <p class="mt-1 text-slate-400">Manage your API key, voice preferences, and agent setup</p>
+      </div>
+    </div>
+
+    <% if (success) { %>
+      <div class="glass-panel border-l-4 border-emerald-500 p-4 slide-in-right" role="alert">
+        <div class="flex">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-emerald-200">
+              <%= success %>
+            </p>
+          </div>
+        </div>
+      </div>
+      <% } %>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <!-- Left Column -->
+          <div class="lg:col-span-2 space-y-8">
+
+            <!-- API Key Section -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.1s;">
+              <div class="border-b border-slate-700/50 pb-4 mb-6">
+                <h2 class="text-xl font-semibold text-slate-100">API Configuration</h2>
+                <p class="mt-1 text-sm text-slate-400">Your secret key for authenticating AI agents</p>
+              </div>
+
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-slate-300 mb-2">Current API Key</label>
+                  <div class="flex items-center gap-3">
+                    <div class="relative flex-1 group">
+                      <input type="text" readonly value="<%= apiKey %>" id="apiKeyInput"
+                        class="w-full pl-4 pr-10 py-3 bg-slate-900/50 border border-slate-700 rounded-xl text-slate-300 font-mono text-sm focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all duration-200">
+                      <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                        <svg class="h-5 w-5 text-slate-500 group-hover:text-slate-400 transition-colors" fill="none"
+                          viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <button onclick="copyApiKey()"
+                      class="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl font-medium transition-all duration-200 border border-slate-700 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900">
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                <div class="pt-4 flex items-center justify-between border-t border-slate-700/50">
+                  <div class="text-xs text-amber-500/80 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span>Regenerating invalidates existing connections</span>
+                  </div>
+                  <button onclick="regenerateApiKey()"
+                    class="text-sm text-red-400 hover:text-red-300 font-medium transition-colors focus:outline-none hover:underline">
+                    Regenerate Key
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Main CLI Setup Section -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.15s;">
+              <div class="border-b border-slate-700/50 pb-4 mb-6">
+                <div>
+                  <h2 class="text-xl font-semibold text-slate-100 flex items-center gap-3">
+                    <div
+                      class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center border border-slate-700">
+                      <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 6h16M4 12h16m-7 6h7" />
+                      </svg>
+                    </div>
+                    Agent Manager CLI
+                  </h2>
+                  <p class="mt-1 text-sm text-slate-400">
+                    Command-line interface for managing your agent fleet
+                  </p>
+                </div>
+              </div>
+
+              <!-- Quick Install Command -->
+              <div class="mb-6">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Run this command to get started:</label>
+                <div class="flex items-center gap-3">
+                  <div class="relative flex-1">
+                    <code id="curlCommand" class="block w-full pl-4 pr-10 py-3 bg-slate-900/50 border border-slate-700 rounded-xl text-emerald-300 font-mono text-sm overflow-x-auto whitespace-nowrap">curl -sL <%= baseUrl %>/setup | bash</code>
+                  </div>
+                  <button id="copyBtn" onclick="copyCurlCommand()"
+                    class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40">
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <div class="space-y-6">
+                <!-- Features Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="p-4 rounded-xl">
+                    <div class="flex items-center gap-3 mb-2">
+                      <div class="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                      </div>
+                      <h4 class="font-medium text-slate-200">Create Agents</h4>
+                    </div>
+                    <p class="text-xs text-slate-400 leading-relaxed">Interactive wizard for agent creation and model
+                      selection</p>
+                  </div>
+
+                  <div class="p-4 rounded-xl">
+                    <div class="flex items-center gap-3 mb-2">
+                      <div
+                        class="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                        </svg>
+                      </div>
+                      <h4 class="font-medium text-slate-200">Model Choice</h4>
+                    </div>
+                    <p class="text-xs text-slate-400 leading-relaxed">Support for OpenAI, Anthropic, Gemini, Ollama &
+                      more</p>
+                  </div>
+
+                  <div class="p-4 rounded-xl">
+                    <div class="flex items-center gap-3 mb-2">
+                      <div class="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center text-green-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
+                          </path>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                      </div>
+                      <h4 class="font-medium text-slate-200">Continue Sessions</h4>
+                    </div>
+                    <p class="text-xs text-slate-400 leading-relaxed">Resume existing agents from where they left off
+                    </p>
+                  </div>
+
+                  <div class="p-4 rounded-xl">
+                    <div class="flex items-center gap-3 mb-2">
+                      <div class="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1">
+                          </path>
+                        </svg>
+                      </div>
+                      <h4 class="font-medium text-slate-200">Connect to Panel</h4>
+                    </div>
+                    <p class="text-xs text-slate-400 leading-relaxed">Link agents to this dashboard for control</p>
+                  </div>
+                </div>
+
+                <!-- Quick Start -->
+                <div class="rounded-xl bg-slate-900/50 border border-slate-700 p-4">
+                  <h3 class="text-sm font-semibold text-emerald-400 mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Quick Start Guide
+                  </h3>
+                  <div class="font-mono text-xs text-slate-300 space-y-2">
+                    <div class="flex items-center gap-3">
+                      <span class="text-slate-500 select-none">1.</span>
+                      <span>Copy your API key above</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="text-slate-500 select-none">2.</span>
+                      <span>Run the setup command in your terminal</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="text-slate-500 select-none">3.</span>
+                      <span>Enter your API key when prompted</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="text-slate-500 select-none">4.</span>
+                      <div class="flex items-center gap-2">
+                        <span>Run</span>
+                        <code
+                          class="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-300 border border-slate-700">bash agent-cli.sh</code>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Prerequisites -->
+                <div class="rounded-xl bg-amber-500/5 border border-amber-500/10 p-4">
+                  <h3 class="text-sm font-semibold text-amber-400 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Prerequisites
+                  </h3>
+                  <p class="text-xs text-amber-200/80 mb-2">Requires one of the following coding engines:</p>
+                  <div class="flex flex-wrap gap-2">
+                    <a href="https://github.com/openai/codex" target="_blank"
+                      class="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors">Codex
+                      CLI</a>
+                    <a href="https://ai.google.dev/gemini-api/docs/quickstart?lang=python" target="_blank"
+                      class="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors">Gemini
+                      CLI</a>
+                    <a href="https://docs.anthropic.com/en/api/getting-started" target="_blank"
+                      class="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs hover:bg-amber-500/20 transition-colors">Claude
+                      CLI</a>
+                  </div>
+                </div>
+
+                <!-- View Code Toggle -->
+                <div class="pt-2">
+                  <button
+                    class="toggle-collapse w-full flex items-center justify-between px-4 py-3 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-xl transition-all duration-200 text-sm font-medium text-slate-300 hover:text-white group">
+                    <span class="flex items-center gap-2">
+                      <svg class="w-5 h-5 text-slate-500 group-hover:text-emerald-400 transition-colors chevron-icon"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                      <span>View Script Source</span>
+                    </span>
+                    <span class="text-xs text-slate-500 font-mono group-hover:text-slate-400">Expand</span>
+                  </button>
+                  <div class="collapsible-content overflow-hidden transition-all duration-300" style="max-height: 0;">
+                    <div class="pt-2">
+                      <pre
+                        class="bg-slate-950 text-slate-300 p-4 rounded-xl overflow-x-auto text-xs border border-slate-800 shadow-inner max-h-96 font-mono custom-scrollbar"><code id="mainCLIScript"><%- typeof directSetupScript !== 'undefined' ? directSetupScript : '' %></code></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="space-y-8">
+
+            <!-- Voice Settings -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.3s;">
+              <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-slate-100">Voice Notification</h2>
+                  <p class="text-xs text-slate-400">Audio feedback settings</p>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                <div>
+                  <h3 class="text-sm font-medium text-slate-200">Notifications</h3>
+                  <p class="text-xs text-slate-500 mt-0.5">Read notification for incoming messages</p>
+                </div>
+                <button id="voiceSettingsToggle" type="button"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 bg-slate-700"
+                  role="switch" aria-checked="false">
+                  <span class="sr-only">Use voice notifications</span>
+                  <span id="voiceSettingsKnob"
+                    class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0"></span>
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Encryption Settings -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.35s;">
+              <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-slate-100">Encryption Settings</h2>
+                  <p class="text-xs text-slate-400">End-to-end message decryption</p>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                <div class="p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                  <p class="text-xs text-sky-300 leading-relaxed">
+                    <span class="font-semibold">🔐 Local storage only:</span> Your decryption password is stored in your
+                    browser and is <strong>never sent to our servers</strong>. Use the same password you set when
+                    creating agents via CLI.
+                  </p>
+                </div>
+
+                <div>
+                  <label for="settingsDecryptionPassword"
+                    class="block text-sm font-medium text-slate-300 mb-2">Decryption Password</label>
+                  <div class="flex items-center gap-3">
+                    <input type="password" id="settingsDecryptionPassword"
+                      class="flex-1 bg-slate-900/50 border border-slate-700 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/50 text-white rounded-lg px-4 py-3 text-sm placeholder:text-slate-500 transition"
+                      placeholder="Enter your agent encryption password" autocomplete="off" />
+                    <button id="settingsDecryptionSaveBtn" type="button"
+                      class="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed">
+                      Save
+                    </button>
+                  </div>
+                </div>
+
+                <div id="encryptionKeyStatus"
+                  class="flex items-center gap-2 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                  <div id="encryptionKeyStatusIcon" class="w-2 h-2 rounded-full bg-slate-500"></div>
+                  <span id="encryptionKeyStatusText" class="text-xs text-slate-400">Checking encryption key
+                    status...</span>
+                </div>
+
+                <button id="clearEncryptionKeyBtn" type="button"
+                  class="text-sm text-red-400 hover:text-red-300 font-medium transition-colors focus:outline-none hover:underline">
+                  Clear Saved Encryption Key
+                </button>
+              </div>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="glass-panel p-6 slide-in-up border-red-500/20" style="animation-delay: 0.4s;">
+              <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center text-red-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-red-400">Danger Zone</h2>
+                  <p class="text-xs text-red-400/60">Irreversible actions</p>
+                </div>
+              </div>
+
+              <div class="p-4 rounded-xl bg-red-500/5 border border-red-500/10 space-y-4">
+                <div>
+                  <h3 class="text-sm font-medium text-red-200">Delete Account</h3>
+                  <p class="text-xs text-red-300/50 mt-1">Permanently remove all data, agents, and history.</p>
+                </div>
+                <button onclick="showDeleteAccountModal()"
+                  class="w-full px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-red-900/20">
+                  Delete Account
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+  </div>
+</div>
+
+<!-- Delete Account Confirmation Modal -->
+<div id="deleteAccountModal" class="fixed inset-0 z-50 hidden overflow-y-auto" aria-labelledby="modal-title"
+  role="dialog" aria-modal="true">
+  <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+    <!-- Background overlay -->
+    <div class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity" aria-hidden="true"
+      onclick="hideDeleteAccountModal()"></div>
+
+    <!-- Modal panel -->
+    <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+    <div
+      class="relative inline-block align-bottom bg-slate-800 rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full border border-slate-700">
+      <div class="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="sm:flex sm:items-start">
+          <div
+            class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-500/10 sm:mx-0 sm:h-10 sm:w-10">
+            <svg class="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+            <h3 class="text-lg leading-6 font-medium text-slate-100" id="modal-title">Delete Account</h3>
+            <div class="mt-2">
+              <p class="text-sm text-slate-400">
+                Are you sure you want to delete your account? This action cannot be undone. All of your data will be
+                permanently removed.
+              </p>
+              <ul
+                class="mt-3 text-sm text-red-400/80 list-disc list-inside space-y-1 bg-red-500/5 p-3 rounded-lg border border-red-500/10">
+                <li>Account credentials</li>
+                <li>Agent configurations</li>
+                <li>Conversation history</li>
+                <li>API keys</li>
+              </ul>
+            </div>
+
+            <div class="mt-4">
+              <label for="confirmEmailInput" class="block text-sm font-medium text-slate-300 mb-2">
+                Type <span class="text-slate-100 font-mono bg-slate-700 px-1.5 py-0.5 rounded">
+                  <%= user.email %>
+                </span> to confirm:
+              </label>
+              <input type="email" id="confirmEmailInput"
+                class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 placeholder-slate-600 sm:text-sm"
+                placeholder="Enter your email address">
+            </div>
+
+            <div id="deleteAccountError" class="hidden mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <p class="text-xs text-red-400" id="deleteAccountErrorText"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-slate-800/50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse border-t border-slate-700">
+        <button type="button" onclick="confirmDeleteAccount()" id="confirmDeleteBtn"
+          class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+          Delete Account
+        </button>
+        <button type="button" onclick="hideDeleteAccountModal()"
+          class="mt-3 w-full inline-flex justify-center rounded-lg border border-slate-600 shadow-sm px-4 py-2 bg-slate-700 text-base font-medium text-slate-200 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Make CSRF token available to JavaScript
+  window.csrfToken = '<%= csrfToken %>';
+  window.apiGuideConfig = <%- JSON.stringify({
+    apiKey,
+    baseUrl,
+    defaultAgentName,
+    encryptionSalt: typeof encryptionSalt !== 'undefined' ? encryptionSalt : null
+  }) %>;
+</script>
+<script src="/js/encryption.js"></script>
+<script src="/js/voice-control.js"></script>
+<script src="/js/settings.js"></script>

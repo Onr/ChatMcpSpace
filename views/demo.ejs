@@ -1,0 +1,804 @@
+<!-- Global Floating Context Menu for Agents -->
+<div id="floatingAgentMenu"
+    class="hidden fixed w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-[100] overflow-hidden">
+    <button id="floatingCopyInstructionBtn"
+        class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+        </svg>
+        Copy Instruction
+    </button>
+    <button id="floatingClearConversationBtn"
+        class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Clear Conversation
+    </button>
+    <button id="floatingDeleteAgentBtn"
+        class="w-full px-4 py-3 text-left text-xs text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete Agent
+    </button>
+</div>
+
+<!-- Council Chamber Interface -->
+<div id="dashboardRoot" data-encryption-salt="<%= encryptionSalt || '' %>"
+    data-is-google-auth="<%= isGoogleAuth ? 'true' : 'false' %>"
+    class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 space-y-6 lg:h-[calc(100vh-8rem)] flex flex-col">
+
+    <!-- Council Chamber - Main View -->
+    <div class="grid gap-5 lg:grid-cols-[45fr,55fr] flex-1 lg:overflow-hidden min-h-0">
+
+        <!-- Council Chamber Circle -->
+        <div class="council-chamber glass-panel flex flex-col h-full relative overflow-hidden">
+            <div class="px-5 pt-3 pb-2 border-b border-white/5 z-10">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-xl font-semibold text-white mt-1">Council Chamber</h2>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="openDecryptionModalBtn" type="button"
+                            class="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-slate-400 hover:text-emerald-400 hover:border-emerald-400/50 hover:bg-emerald-400/10 transition text-xs flex items-center gap-2"
+                            title="Set Decryption Password">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                            </svg>
+                            <span>Set Password</span>
+                        </button>
+                        <button id="voiceToggle" type="button"
+                            class="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-emerald-400 border-emerald-400/50 bg-emerald-400/10 hover:text-emerald-300 hover:border-emerald-400/50 transition text-xs flex items-center gap-2">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                            </svg>
+                            <span>Voice On</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile Agent Dock (visible on small screens) -->
+            <div class="mobile-agent-dock" id="mobileAgentDock">
+                <!-- Left Navigation Arrow -->
+                <button class="dock-nav-btn dock-nav-btn--left" id="dockNavLeft" aria-label="Previous agents">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+
+                <!-- Right Navigation Arrow -->
+                <button class="dock-nav-btn dock-nav-btn--right" id="dockNavRight" aria-label="Next agents">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+
+                <div class="dock-carousel-stack">
+                    <!-- Agent Carousel -->
+                    <div class="dock-carousel" id="dockCarousel">
+                        <!-- Agents will be populated dynamically by JavaScript -->
+                    </div>
+
+                    <!-- Mobile list expand/collapse toggle (always visible on mobile) -->
+                    <button id="collapseMobileListBtn" class="dock-list-toggle-btn lg:hidden" title="Expand List"
+                        aria-label="Expand agent list" type="button">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Position Indicator Dots -->
+                <div class="dock-position-indicator" id="dockPositionIndicator">
+                    <!-- Dots generated dynamically -->
+                </div>
+
+                <!-- Swipe/Drag Hints -->
+                <div
+                    class="dock-interaction-hints absolute bottom-1 left-0 right-0 flex justify-center items-center pointer-events-none opacity-50">
+                    <div class="dock-drag-handle w-12 h-1 bg-white/20 rounded-full"></div>
+                </div>
+                <div class="dock-swipe-hint absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full flex justify-between px-12 pointer-events-none opacity-0 transition-opacity duration-500"
+                    id="dockSwipeHint">
+                    <svg class="w-6 h-6 text-white/20 animate-pulse" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <svg class="w-6 h-6 text-white/20 animate-pulse" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Circular Agent Display -->
+            <div id="councilCircle" class="flex-1 flex items-center justify-center p-8 min-h-0 relative">
+                <div class="council-orbit">
+                    <!-- Orbital rings that visualize urgency distance -->
+                    <div class="council-rings pointer-events-none">
+                        <div class="orbital-ring orbital-ring--urgent"></div>
+                        <div class="orbital-ring orbital-ring--attention"></div>
+                        <div class="orbital-ring orbital-ring--idle"></div>
+                        <div class="orbital-label orbital-label--urgent">Urgent</div>
+                        <div class="orbital-label orbital-label--attention">Needs reply</div>
+                        <div class="orbital-label orbital-label--idle">All clear</div>
+                    </div>
+
+                    <!-- Center User Position -->
+                    <div class="council-center absolute" style="left: 50%; top: 50%; transform: translate(-50%, -50%);">
+                        <div
+                            class="w-16 h-16 rounded-full border border-slate-500/30 flex items-center justify-center shadow-2xl shadow-emerald-900/50 backdrop-blur-xl relative overflow-hidden group cursor-pointer transition-transform duration-500 hover:scale-105">
+                            <!-- Planet Image -->
+                            <img src="/images/center-planet-v2.jpg" alt="You"
+                                class="w-full h-full object-cover rounded-full" />
+                            <div class="absolute inset-0 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] rounded-full"></div>
+                        </div>
+                        <p
+                            class="text-center text-[10px] uppercase tracking-widest text-emerald-400/80 font-bold mt-4 text-shadow">
+                            You</p>
+                    </div>
+
+                    <!-- Agent Seats (populated dynamically) -->
+                    <div id="agentSeats" class="absolute inset-0">
+                        <% if (agents && agents.length> 0) {
+                            const ringRadii = { urgent: 26, attention: 36, idle: 46 };
+                            const ringIndex = { urgent: 0, attention: 1, idle: 2 };
+                            const orderedAgents = [...agents].sort((a, b) => (a.position || 0) - (b.position || 0));
+                            const orbitLayout = {};
+                            const totalAgents = orderedAgents.length;
+
+                            if (totalAgents) {
+                            orderedAgents.forEach((agent, index) => {
+                            const ringKey = agent.lastMessagePriority === 'high' ? 'urgent' :
+                            (agent.lastMessagePriority === 'normal' ? 'attention' : 'idle');
+                            const radius = ringRadii[ringKey] ?? ringRadii.idle;
+                            const ringIdx = ringIndex[ringKey] ?? ringIndex.idle;
+                            const angle = (index * 360 / totalAgents) - 90;
+                            const x = 50 + radius * Math.cos(angle * Math.PI / 180);
+                            const y = 50 + radius * Math.sin(angle * Math.PI / 180);
+                            orbitLayout[agent.agentId] = { x, y, ringKey, ringIndex: ringIdx };
+                            });
+                            }
+
+                            orderedAgents.forEach((agent, index)=> {
+                            const totalAgents = agents.length;
+                            const positionValue = Number.isFinite(agent.position) ? agent.position :
+                            Number(agent.position);
+                            const safePosition = Number.isFinite(positionValue) ? positionValue : (index + 1);
+                            const orbit = orbitLayout[agent.agentId] || { x: 50, y: 50, ringKey: 'idle', ringIndex:
+                            ringIndex.idle };
+                            const ringKey = orbit.ringKey;
+                            const ringIdx = orbit.ringIndex;
+                            const x = orbit.x;
+                            const y = orbit.y;
+
+                            // statusLabel uses lastMessagePriority for ring styling
+                            const statusLabel = ringKey;
+                            const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0;
+
+                            // Dynamic sizing
+                            // Dynamic sizing - Standardized
+                            let sizeClass = 'w-14 h-14';
+                            %>
+                            <div class="agent-seat absolute cursor-pointer transition-all duration-300 agent-seat--<%= statusLabel %> <%= needsAttention ? 'agent-seat--active' : '' %>"
+                                data-agent-id="<%= agent.agentId %>" data-agent-name="<%= agent.name %>"
+                                data-agent-priority="<%= agent.highestPriority %>"
+                                data-agent-last-message-priority="<%= agent.lastMessagePriority || 'low' %>"
+                                data-agent-unread="<%= agent.unreadCount %>"
+                                data-agent-last-message="<%= agent.lastMessageTime ? agent.lastMessageTime : '' %>"
+                                data-agent-last-activity="<%= agent.lastActivityTime ? agent.lastActivityTime : '' %>"
+                                data-agent-ring="<%= ringKey %>" data-agent-ring-index="<%= ringIdx %>"
+                                data-agent-index="<%= index %>"
+                                style="left: <%= x %>%; top: <%= y %>%; transform: translate(-50%, -50%);">
+                                <!-- Agent Number Badge -->
+                                <div
+                                    class="agent-number-badge absolute -top-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+                                    <span
+                                        class="text-[10px] font-mono font-bold text-sky-400/70 bg-slate-900/80 px-1.5 py-0.5 rounded border border-sky-400/30">
+                                        <%= safePosition %>
+                                    </span>
+                                </div>
+                                <!-- Agent Avatar -->
+                                <div class="agent-avatar relative group w-fit mx-auto">
+                                    <div
+                                        class="<%= sizeClass %> rounded-full relative z-10 transition-transform duration-300 group-hover:scale-110 overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900">
+                                        <div class="w-full h-full marble-container">
+                                            <%- agent.marbleSvg %>
+                                        </div>
+                                        <!-- Agent Initials Overlay -->
+                                        <div
+                                            class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <span class="text-white font-bold text-xl opacity-90"
+                                                style="text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);">
+                                                <%= agent.name.substring(0, 2).toUpperCase() %>
+                                            </span>
+                                        </div>
+                                        <div
+                                            class="absolute inset-0 rounded-full shadow-[inset_0_0_10px_rgba(0,0,0,0.5)] pointer-events-none">
+                                        </div>
+                                    </div>
+
+                                    <!-- Status Indicator -->
+                                    <% if (agent.highestPriority==='high' ) { %>
+                                        <div
+                                            class="absolute -top-1 -right-1 z-20 w-6 h-6 rounded-full bg-red-500 border-2 border-slate-900 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.6)] flex items-center justify-center">
+                                            <span class="text-white text-xs font-bold">!</span>
+                                        </div>
+                                        <% } else if (agent.unreadCount> 0) { %>
+                                            <div
+                                                class="absolute -top-1 -right-1 z-20 w-6 h-6 rounded-full bg-amber-400 border-2 border-slate-900 flex items-center justify-center shadow-[0_0_15px_rgba(251,191,36,0.6)]">
+                                                <span class="text-slate-900 text-xs font-bold">
+                                                    <%= agent.unreadCount %>
+                                                </span>
+                                            </div>
+                                            <% } else { %>
+                                                <div class="absolute bottom-0 right-0 z-20 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-900 shadow-[0_0_10px_rgba(52,211,153,0.6)]"
+                                                    title="Waiting for instructions">
+                                                </div>
+                                                <% } %>
+                                </div>
+
+                                <!-- Agent Name -->
+                                <div
+                                    class="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-max text-center opacity-80 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                    <p
+                                        class="text-[10px] font-bold uppercase tracking-wider text-slate-200 text-shadow-sm">
+                                        <%= agent.name %>
+                                    </p>
+                                </div>
+
+                                <!-- Connection Line to Center -->
+                                <svg class="connection-line absolute"
+                                    style="position: absolute; top: 50%; left: 50%; pointer-events: none; overflow: visible; width: 200px; height: 200px; transform: translate(-50%, -50%); z-index: -1;">
+                                    <line x1="100" y1="100" x2="100" y2="100" stroke="url(#gradient-<%= index %>)"
+                                        stroke-width="1" />
+                                    <defs>
+                                        <linearGradient id="gradient-<%= index %>" x1="0%" y1="0%" x2="100%" y2="0%">
+                                            <stop offset="0%" stop-color="rgba(16, 185, 129, 0)" />
+                                            <stop offset="100%" stop-color="rgba(16, 185, 129, 0.4)" />
+                                        </linearGradient>
+                                    </defs>
+                                </svg>
+                            </div>
+                            <% }); %>
+                                <% } else { %>
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <div class="text-center text-slate-500">
+                                            <svg class="w-16 h-16 mx-auto mb-4 text-slate-600 opacity-50" fill="none"
+                                                stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                            </svg>
+                                            <p class="text-sm font-medium tracking-wide">No agents in your
+                                                council yet</p>
+                                            <p class="text-xs text-slate-600 mt-1">Agents will appear here once
+                                                they connect</p>
+                                        </div>
+                                    </div>
+                                    <% } %>
+                    </div>
+                </div>
+
+                <!-- Keyboard Hints -->
+                <div class="absolute bottom-4 left-0 right-0 text-center pointer-events-none">
+                    <p class="text-[10px] text-slate-500 font-medium tracking-wide uppercase opacity-60">
+                        <span class="mx-1"><kbd class="font-sans">Tab</kbd> switch view</span>
+                        <span class="mx-1">•</span>
+                        <span class="mx-1"><kbd class="font-sans">←/→</kbd> or <kbd class="font-sans">J/K</kbd> to
+                            move</span>
+                        <span class="mx-1">•</span>
+                        <span class="mx-1"><kbd class="font-sans">Enter</kbd> to chat</span>
+                        <span class="mx-1">•</span>
+                        <span class="mx-1"><kbd class="font-sans">Esc</kbd> back</span>
+                    </p>
+                </div>
+            </div>
+
+
+            <!-- Quick Stats Bar (Now Header) - Moved ABOVE list -->
+            <div id="mobileStatsToggle"
+                class="px-6 py-3 border-t border-white/5 bg-black/20 backdrop-blur group relative transition-colors z-20">
+                <div class="grid grid-cols-3 gap-4 text-center text-xs">
+                    <div>
+                        <p class="text-emerald-400 font-bold text-lg" id="statsTotal">
+                            <%= agents ? agents.length : 0 %>
+                        </p>
+                        <p class="text-slate-400">Total Agents</p>
+                    </div>
+                    <div>
+                        <p class="text-amber-400 font-bold text-lg" id="statsAttention">
+                            <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
+                        </p>
+                        <p class="text-slate-400">Need Attention</p>
+                    </div>
+                    <div>
+                        <p class="text-red-400 font-bold text-lg" id="statsUrgent">
+                            <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
+                        </p>
+                        <p class="text-slate-400">Urgent</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent List Panel (scrollable list below orbit) -->
+            <div id="agentListPanel" class="agent-list-panel">
+                <div class="agent-list-header flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="agent-list-title">Agents</span>
+                        <span class="agent-list-count" id="agentListCount">
+                            <%= agents ? agents.length : 0 %>
+                        </span>
+                    </div>
+                </div>
+                <div class="agent-list-scroll" id="agentListScroll">
+                    <% if (agents && agents.length> 0) {
+                        const orderedAgents = [...agents].sort((a, b) => (a.position || 0) - (b.position || 0));
+                        orderedAgents.forEach((agent, index) => {
+                        const ringKey = agent.lastMessagePriority === 'high' ? 'urgent' :
+                        (agent.lastMessagePriority === 'normal' ? 'attention' : 'idle');
+                        const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0;
+                        %>
+                        <div class="agent-list-item agent-list-item--<%= ringKey %> <%= needsAttention ? 'agent-list-item--attention' : '' %>"
+                            data-agent-id="<%= agent.agentId %>" data-agent-name="<%= agent.name %>"
+                            data-agent-type="<%= agent.agentType || 'standard' %>"
+                            data-agent-priority="<%= agent.highestPriority %>"
+                            data-agent-unread="<%= agent.unreadCount %>"
+                            data-agent-last-activity="<%= agent.lastActivityTime ? agent.lastActivityTime : '' %>"
+                            data-agent-last-message="<%= agent.lastMessageTime ? agent.lastMessageTime : '' %>">
+                            <div class="agent-list-item__avatar">
+                                <div class="agent-list-item__marble">
+                                    <%- agent.marbleSvg %>
+                                </div>
+                                <span class="agent-list-item__initials">
+                                    <%= agent.name.substring(0, 2).toUpperCase() %>
+                                </span>
+                            </div>
+                            <div class="agent-list-item__info">
+                                <span class="agent-list-item__name">
+                                    <%= agent.name %>
+                                </span>
+                                <div class="agent-list-item__status-row">
+                                    <span class="agent-list-item__status">
+                                        <% if (agent.highestPriority==='high' ) { %>
+                                            <span class="agent-list-item__badge agent-list-item__badge--urgent">!</span>
+                                            Urgent
+                                            <% } else if (agent.unreadCount> 0) { %>
+                                                <span class="agent-list-item__badge agent-list-item__badge--unread">
+                                                    <%= agent.unreadCount %>
+                                                </span> Unread
+                                                <% } else { %>
+                                                    <span
+                                                        class="agent-list-item__badge agent-list-item__badge--idle"></span>
+                                                    Ready
+                                                    <% } %>
+                                    </span>
+                                    <div class="agent-list-item__timestamps">
+                                        <!-- Populated by JS on load -->
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="agent-list-item__arrow">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-4 h-4">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 5l7 7-7 7" />
+                                </svg>
+                            </div>
+                        </div>
+                        <% }); } else { %>
+                            <div class="agent-list-empty">
+                                <p>No agents connected</p>
+                            </div>
+                            <% } %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Panel -->
+        <aside class="glass-panel flex flex-col h-full min-h-0">
+            <!-- Selected Agent Header -->
+            <div id="agentPanelHeader" class="hidden px-5 pt-3 pb-2 border-b border-white/5 relative z-20">
+                <div class="flex items-start gap-3">
+                    <div
+                        class="w-14 h-14 rounded-full border-2 border-emerald-400/60 shadow-lg shadow-emerald-500/30 relative overflow-hidden bg-slate-900">
+                        <div id="selectedAgentImage" class="w-full h-full marble-container"></div>
+                        <!-- Agent Initials Overlay in Chat Header -->
+                        <div id="selectedAgentInitials"
+                            class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <span class="text-white font-bold text-lg opacity-90"
+                                style="text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);"></span>
+                        </div>
+                        <div class="absolute inset-0 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]"></div>
+                    </div>
+                    <div class="flex-1 relative group cursor-pointer" id="agentHeaderInfo">
+                        <h3 id="selectedAgentName"
+                            class="text-lg font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                        </h3>
+                        <p id="agentLastActive" class="text-xs text-slate-400 mt-0.5"></p>
+                        <div class="flex gap-2 mt-2">
+                            <span id="agentStatusPill" class="status-pill status-pill--neutral text-[10px]">Idle</span>
+                            <span id="agentUnreadBadge" class="hidden status-pill status-pill--warn text-[10px]"></span>
+                        </div>
+
+                        <!-- Context Menu (Floating) -->
+                        <div id="agentContextMenu"
+                            class="hidden absolute top-full left-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                            <button id="copyInstructionBtn"
+                                class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
+                                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                </svg>
+                                Copy Instruction
+                            </button>
+                            <button id="clearConversationBtn"
+                                class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+                                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Clear Conversation
+                            </button>
+                            <button id="deleteAgentBtn"
+                                class="w-full px-4 py-3 text-left text-xs text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Delete Agent
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Placeholder -->
+            <div id="agentPanelPlaceholder" class="flex-1 flex items-center justify-center p-6">
+                <div class="text-center text-slate-500">
+                    <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    <p class="text-sm font-semibold">Select an agent from the council</p>
+                    <p class="text-xs text-slate-600 mt-1">Click on any agent to view their messages</p>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div id="conversationArea"
+                class="hidden flex-1 overflow-y-auto px-5 py-4 pb-48 space-y-4 text-sm min-h-0 outline-none"
+                tabindex="0">
+            </div>
+
+            <!-- Message Input -->
+            <div id="messageInputArea"
+                class="hidden absolute bottom-0 left-0 right-0 z-20 border-t border-white/10 px-5 py-4 bg-slate-900/40 backdrop-blur-xl shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.5)]">
+                <form id="userMessageForm" class="space-y-3">
+                    <!-- Image Preview Area -->
+                    <div id="imagePreviewArea" class="hidden">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs text-slate-400 uppercase tracking-wider font-medium">Attachments</span>
+                            <button type="button" id="clearAllImagesBtn"
+                                class="text-xs text-red-400 hover:text-red-300 transition">
+                                Clear All
+                            </button>
+                        </div>
+                        <div id="imagePreviewContainer"
+                            class="flex flex-wrap gap-2 p-2 bg-white/5 rounded-lg border border-white/10 max-h-40 overflow-y-auto">
+                            <!-- Image previews will be inserted here dynamically -->
+                        </div>
+                    </div>
+                    <div class="relative">
+                        <textarea id="userMessageInput" rows="3"
+                            class="w-full bg-white/5 border border-white/10 focus:border-emerald-400/70 focus:ring-0 text-sm text-slate-100 rounded-xl p-3 pr-12 placeholder:text-slate-500 transition resize-none"
+                            placeholder="Type your message..." disabled></textarea>
+                        <!-- File Input Button (inside textarea area) -->
+                        <label for="imageFileInput" id="imageUploadLabel"
+                            class="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-400 cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Attach images">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                        </label>
+                        <input type="file" id="imageFileInput" accept="image/png,image/jpeg,image/webp,image/gif"
+                            multiple class="hidden" disabled />
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Ctrl+Enter to send • ESC
+                            to
+                            select agent</p>
+                        <div class="flex items-center gap-2">
+                            <!-- Agent Config Dropdown -->
+                            <div class="relative" id="agentConfigContainer">
+                                <button id="agentConfigBtn" type="button"
+                                    class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/50 hover:bg-slate-700/80 hover:border-slate-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 group"
+                                    disabled title="Agent Configuration">
+                                    <div class="flex items-center gap-1.5 text-[10px]">
+                                        <span id="configStatusProvider"
+                                            class="text-emerald-400 font-medium whitespace-nowrap">-</span>
+                                        <span class="text-slate-600 mx-0.5">|</span>
+                                        <span id="configStatusMode"
+                                            class="text-sky-400 font-medium whitespace-nowrap">-</span>
+                                    </div>
+                                    <div class="w-px h-3 bg-slate-700 mx-0.5"></div>
+                                    <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors"
+                                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                </button>
+                                <!-- Config Dropdown Panel -->
+                                <div id="agentConfigDropdown"
+                                    class="hidden absolute bottom-full right-0 mb-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                                    <div class="px-4 py-3 border-b border-slate-700/50 bg-slate-900/50">
+                                        <h4 class="text-sm font-semibold text-white">Agent Configuration</h4>
+                                        <p class="text-[10px] text-slate-400">Changes apply at next loop</p>
+                                    </div>
+                                    <div class="p-4 space-y-3">
+                                        <!-- Provider -->
+                                        <div>
+                                            <label
+                                                class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Provider</label>
+                                            <select id="configProvider"
+                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                <option value="codex">Codex (Default)</option>
+                                                <option value="claude">Claude</option>
+                                                <option value="gemini">Gemini</option>
+                                                <option value="ollama">Ollama</option>
+                                                <option value="openrouter">OpenRouter</option>
+                                            </select>
+                                        </div>
+
+                                        <!-- Model (populated dynamically) -->
+                                        <div>
+                                            <label
+                                                class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Model</label>
+                                            <select id="configModel"
+                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                <option value="default">Default</option>
+                                            </select>
+                                        </div>
+
+                                        <!-- Codex-specific options -->
+                                        <div id="codexOptions" class="space-y-2">
+                                            <label
+                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Codex
+                                                Sandbox</label>
+                                            <select id="configCodexSandbox"
+                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                <option value="read-only">Read Only</option>
+                                                <option value="workspace-write">Workspace Write</option>
+                                                <option value="danger-full-access">Full Access (Danger)</option>
+                                            </select>
+                                            <label
+                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                <input type="checkbox" id="configCodexBypass"
+                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                Bypass All (--yolo)
+                                            </label>
+                                        </div>
+
+                                        <!-- Claude-specific options -->
+                                        <div id="claudeOptions" class="hidden space-y-2">
+                                            <label
+                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Claude
+                                                Permission Mode</label>
+                                            <select id="configClaudeMode"
+                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                <option value="default">Default</option>
+                                                <option value="acceptEdits">Accept Edits</option>
+                                                <option value="plan">Plan Only</option>
+                                                <option value="bypassPermissions">Bypass Permissions</option>
+                                            </select>
+                                            <label
+                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                <input type="checkbox" id="configClaudeSkip"
+                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                Skip All Permissions (Dangerous)
+                                            </label>
+                                        </div>
+
+                                        <!-- Gemini-specific options -->
+                                        <div id="geminiOptions" class="hidden space-y-2">
+                                            <label
+                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Gemini
+                                                Mode</label>
+                                            <select id="configGeminiMode"
+                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                <option value="sandbox">Sandboxed</option>
+                                                <option value="no-sandbox">No Sandbox</option>
+                                            </select>
+                                            <label
+                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                <input type="checkbox" id="configGeminiYolo"
+                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                YOLO Mode (Auto-approve all)
+                                            </label>
+                                        </div>
+
+                                        <button id="saveConfigBtn" type="button"
+                                            class="w-full px-3 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition">
+                                            Save Config
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Stop Agent Button -->
+                            <button id="agentStopBtn" type="button"
+                                class="px-3 py-2 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-xs font-semibold tracking-wide hover:bg-red-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                disabled title="Stop Agent">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                                </svg>
+                                <span class="hidden sm:inline">Stop</span>
+                            </button>
+                            <button id="userMessageSend" type="submit"
+                                class="px-4 py-2 rounded-full bg-emerald-400 text-slate-950 font-semibold text-xs tracking-wide uppercase shadow-lg shadow-emerald-500/30 hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none"
+                                disabled>
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </aside>
+
+    </div>
+</div>
+
+<!-- Image Lightbox Modal -->
+<div id="imageLightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-label="Image viewer">
+    <div class="image-lightbox-content">
+        <button type="button" class="image-lightbox-close" id="lightboxCloseBtn" aria-label="Close image viewer">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        </button>
+        <img id="lightboxImage" class="image-lightbox-image" src="" alt="Full size image" />
+        <div class="image-lightbox-info">
+            <span id="lightboxFilename" class="image-lightbox-filename"></span>
+            <a id="lightboxDownload" class="image-lightbox-download" href="#" download>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+            </a>
+        </div>
+    </div>
+    <span class="image-lightbox-hint">Press ESC or click outside to close</span>
+</div>
+
+<!-- Decryption Password Modal (for Google OAuth users) -->
+<div id="decryptionPasswordModal"
+    class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Decrypt Agent Messages</h3>
+                    <p class="text-xs text-slate-400">Enter your agent encryption password</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="px-6 py-5">
+            <div class="mb-4 p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                <p class="text-xs text-sky-300 leading-relaxed">
+                    <span class="font-semibold">🔐 End-to-end encrypted:</span> Enter the same password you used
+                    when
+                    creating your agent via CLI. This password is stored <strong>locally in your browser
+                        only</strong>
+                    and is never sent to our servers.
+                </p>
+            </div>
+
+            <form id="decryptionPasswordForm" class="space-y-4">
+                <div>
+                    <label for="decryptionPasswordInput"
+                        class="block text-sm font-medium text-slate-300 mb-2">Decryption Password</label>
+                    <input type="password" id="decryptionPasswordInput"
+                        class="w-full bg-slate-900/50 border border-slate-600 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/50 text-white rounded-lg px-4 py-3 text-sm placeholder:text-slate-500 transition"
+                        placeholder="Enter the password you used in CLI" autocomplete="off" />
+                </div>
+
+                <div id="decryptionPasswordError" class="hidden p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                    <p class="text-xs text-red-300">Failed to derive encryption key. Please check your password.
+                    </p>
+                </div>
+            </form>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-between items-center gap-3">
+            <button id="decryptionSkipBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Skip for now
+            </button>
+            <button id="decryptionSubmitBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-emerald-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Unlock Messages
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/encryption.js"></script>
+<script src="/js/marble-generator.js"></script>
+<script src="/js/voice-control.js"></script>
+<script src="/js/vendor/marked.min.js"></script>
+<script src="/js/vendor/dompurify.min.js"></script>
+<script>
+    window.isDemo = true;
+    window.csrfToken = '<%= csrfToken %>';
+
+    // Mock Fetch API for Demo Mode
+    const originalFetch = window.fetch;
+    const demoAgents = <%- agentsJSON %>;
+
+    window.fetch = async (url, options) => {
+        // Mock Agent List
+        if (url === '/api/user/agents') {
+            console.log('Demo: Serving mocked agents');
+            // Return deep copy to prevent mutation issues if any
+            return {
+                ok: true,
+                json: async () => ({ agents: JSON.parse(JSON.stringify(demoAgents)) })
+            };
+        }
+
+        // Mock Messages
+        if (typeof url === 'string' && url.includes('/messages') && url.includes('/api/agents/')) {
+            console.log('Demo: Serving mocked messages for', url);
+            const agentId = url.split('/api/agents/')[1].split('/')[0];
+            const agent = demoAgents.find(a => a.agentId === agentId);
+            const name = agent ? agent.name : 'Agent';
+            
+            return {
+                ok: true,
+                json: async () => ({
+                    messages: [
+                        { 
+                            messageId: 'm1', 
+                            role: 'user', 
+                            content: `Hello ${name}, this is a demo message.`, 
+                            createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+                            priority: 1
+                        },
+                        { 
+                            messageId: 'm2', 
+                            role: 'assistant', 
+                            content: `Greetings! I am ${name}, a simulated agent in this demo environment. I can display messages but I am not connected to a live LLM back-end.`, 
+                            createdAt: new Date().toISOString(),
+                            priority: 1
+                        }
+                    ],
+                    pagination: { hasMore: false }
+                })
+            };
+        }
+
+        return originalFetch(url, options);
+    };
+</script>
+<script src="/js/dashboard.js?v=<%= Date.now() %>"></script>

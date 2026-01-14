@@ -1,0 +1,49 @@
+<!-- Interactive Question Options -->
+<div class="question-options mt-3 space-y-2" data-question-id="<%= message.message_id %>">
+  <% if (message.options && message.options.length > 0) { %>
+    <% message.options.forEach(option => { %>
+      <div 
+        class="option-card p-4 border rounded-lg cursor-pointer transition-all <%= option.is_default ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300 hover:bg-gray-50' %> <%= message.selected_option_id === option.option_id ? 'bg-green-50 border-green-500' : '' %>"
+        data-option-id="<%= option.option_id %>"
+        data-question-id="<%= message.message_id %>"
+        onclick="<%= message.selected_option_id ? '' : 'selectOption(this)' %>"
+      >
+        <div class="flex items-start justify-between">
+          <div class="flex-1">
+            <div class="flex items-center gap-2">
+              <p class="font-medium text-gray-900"><%= option.option_text %></p>
+              <% if (option.is_default) { %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                  Recommended
+                </span>
+              <% } %>
+              <% if (message.selected_option_id === option.option_id) { %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                  ✓ Selected
+                </span>
+              <% } %>
+            </div>
+            
+            <% if (option.benefits) { %>
+              <div class="mt-2">
+                <p class="text-xs font-semibold text-green-700">Benefits:</p>
+                <p class="text-sm text-gray-700"><%= option.benefits %></p>
+              </div>
+            <% } %>
+            
+            <% if (option.downsides) { %>
+              <div class="mt-2">
+                <p class="text-xs font-semibold text-red-700">Downsides:</p>
+                <p class="text-sm text-gray-700"><%= option.downsides %></p>
+              </div>
+            <% } %>
+          </div>
+        </div>
+      </div>
+    <% }); %>
+  <% } %>
+</div>
+
+<% if (message.selected_option_id) { %>
+  <p class="text-xs text-gray-500 mt-2 italic">You have already responded to this question</p>
+<% } %>

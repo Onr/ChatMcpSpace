@@ -1,0 +1,73 @@
+<div class="min-h-screen flex items-center justify-center px-4">
+  <div class="max-w-md w-full">
+    <div class="glass-panel p-8 text-center">
+      <% if (success) { %>
+        <!-- Success State -->
+        <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+          <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+
+        <% if (alreadyVerified) { %>
+          <h1 class="text-2xl font-bold text-white mb-3">Already Verified</h1>
+          <p class="text-slate-300 mb-6">
+            Your email <strong class="text-emerald-400"><%= email %></strong> was already verified. You're all set!
+          </p>
+        <% } else { %>
+          <h1 class="text-2xl font-bold text-white mb-3">Email Verified!</h1>
+          <p class="text-slate-300 mb-6">
+            Your email <strong class="text-emerald-400"><%= email %></strong> has been successfully verified.
+          </p>
+          
+          <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 mb-6">
+            <p class="text-sm text-emerald-300">
+              🎉 Your account is now fully activated. You have access to all features!
+            </p>
+          </div>
+        <% } %>
+
+        <div class="space-y-3">
+          <a href="/dashboard" class="block w-full py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition">
+            Go to Dashboard
+          </a>
+          <a href="/settings" class="block w-full py-3 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium transition">
+            View Settings
+          </a>
+        </div>
+
+      <% } else { %>
+        <!-- Error State -->
+        <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+          <svg class="w-10 h-10 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </div>
+
+        <h1 class="text-2xl font-bold text-white mb-3">Verification Failed</h1>
+        
+        <p class="text-red-400 mb-4"><%= error %></p>
+        
+        <div class="bg-slate-800/50 rounded-lg p-4 mb-6 text-left">
+          <h3 class="text-sm font-medium text-white mb-2">Common reasons:</h3>
+          <ul class="text-sm text-slate-400 space-y-1 list-disc list-inside">
+            <li>The verification link has expired (24 hours)</li>
+            <li>The link was already used</li>
+            <li>The link was copied incorrectly</li>
+          </ul>
+        </div>
+
+        <div class="space-y-3">
+          <a href="/" class="block w-full py-3 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition">
+            Back to Home
+          </a>
+          <% if (typeof user !== 'undefined' && user) { %>
+            <a href="/verify-email-sent" class="block w-full py-3 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium transition">
+              Request New Verification Email
+            </a>
+          <% } %>
+        </div>
+      <% } %>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,297 @@
+<!-- Background Logo (spinning) -->
+<div class="fixed inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden">
+  <svg class="w-[80vmin] h-[80vmin] opacity-10 animate-spin-slow" viewBox="0 0 256 256"
+    xmlns="http://www.w3.org/2000/svg">
+    <!-- Central command center -->
+    <circle cx="128" cy="128" r="56" fill="none" stroke="#22d3ee" stroke-width="4" />
+    <!-- Inner thin orbit ring (middle circle) -->
+    <circle cx="128" cy="128" r="72" fill="none" stroke="#0891b2" stroke-width="2" />
+    <!-- Outer thin orbit ring -->
+    <circle cx="128" cy="128" r="88" fill="none" stroke="#06b6d4" stroke-width="3" />
+    <!-- Eight agent dots -->
+    <circle cx="128" cy="56" r="7" fill="#22d3ee" />
+    <circle cx="190.2" cy="65.8" r="7" fill="#14b8a6" />
+    <circle cx="216" cy="128" r="7" fill="#22d3ee" />
+    <circle cx="178.9" cy="178.9" r="7" fill="#14b8a6" />
+    <circle cx="128" cy="216" r="7" fill="#22d3ee" />
+    <circle cx="65.8" cy="190.2" r="7" fill="#14b8a6" />
+    <circle cx="40" cy="128" r="7" fill="#22d3ee" />
+    <circle cx="65.8" cy="65.8" r="7" fill="#14b8a6" />
+  </svg>
+</div>
+
+<div class="min-h-screen flex items-center justify-center px-4 relative z-10">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Logo and Title linking to landing page -->
+    <div class="text-center">
+      <a href="/" class="inline-flex flex-col items-center gap-3 hover:opacity-80 transition-opacity">
+        <svg class="w-16 h-16" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+          <!-- Dark circular background -->
+          <circle cx="128" cy="128" r="128" fill="#020617" />
+          <!-- Central command center -->
+          <circle cx="128" cy="128" r="56" fill="#020617" stroke="#22d3ee" stroke-width="4" />
+          <!-- Inner thin orbit ring -->
+          <circle cx="128" cy="128" r="72" fill="none" stroke="#0891b2" stroke-width="2" />
+          <!-- Outer thin orbit ring -->
+          <circle cx="128" cy="128" r="88" fill="none" stroke="#06b6d4" stroke-width="3" />
+          <!-- Eight agent dots -->
+          <circle cx="128" cy="56" r="7" fill="#22d3ee" />
+          <circle cx="190.2" cy="65.8" r="7" fill="#14b8a6" />
+          <circle cx="216" cy="128" r="7" fill="#22d3ee" />
+          <circle cx="178.9" cy="178.9" r="7" fill="#14b8a6" />
+          <circle cx="128" cy="216" r="7" fill="#22d3ee" />
+          <circle cx="65.8" cy="190.2" r="7" fill="#14b8a6" />
+          <circle cx="40" cy="128" r="7" fill="#22d3ee" />
+          <circle cx="65.8" cy="65.8" r="7" fill="#14b8a6" />
+        </svg>
+        <span class="text-2xl font-bold text-white">ChatMCPspace</span>
+      </a>
+    </div>
+
+    <div class="bg-slate-900/80 backdrop-blur-sm rounded-2xl p-8 border border-white/10 shadow-2xl">
+      <h2 class="text-center text-2xl font-bold text-white mb-2">
+        Create your account
+      </h2>
+      <p class="text-center text-sm text-slate-400 mb-6">
+        Already have an account?
+        <a href="/login" class="font-medium text-cyan-400 hover:text-cyan-300 transition-colors">
+          Sign in
+        </a>
+      </p>
+    
+      <% if (error) { %>
+      <div class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm" role="alert">
+        <span class="block sm:inline"><%= error %></span>
+      </div>
+      <% } %>
+
+      <!-- Google Sign-Up -->
+      <a href="/auth/google"
+        class="w-full py-3.5 rounded-lg text-sm font-medium bg-slate-800/50 hover:bg-slate-700/50 text-white border border-white/10 transition-all shadow-lg flex items-center justify-center gap-3 mb-4">
+        <svg class="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4"
+            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+          <path fill="#34A853"
+            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+          <path fill="#FBBC05"
+            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+          <path fill="#EA4335"
+            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+        </svg>
+        Sign up with Google
+      </a>
+
+      <!-- Divider -->
+      <div class="relative my-6">
+        <div class="absolute inset-0 flex items-center">
+          <div class="w-full border-t border-white/10"></div>
+        </div>
+        <div class="relative flex justify-center text-xs">
+          <span class="px-2 bg-slate-900/80 text-slate-400">or sign up with email</span>
+        </div>
+      </div>
+      
+      <form class="space-y-4" action="/register" method="POST" id="registerForm">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div class="space-y-4">
+          <div>
+            <label for="email" class="block text-sm font-medium text-slate-300 mb-1">Email address</label>
+            <input 
+              id="email" 
+              name="email" 
+              type="email" 
+              required 
+              class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
+              placeholder="you@example.com"
+              value="<%= email || '' %>"
+            >
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-slate-300 mb-1">Password</label>
+            <input 
+              id="password" 
+              name="password" 
+              type="password" 
+              required 
+              minlength="8"
+              class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
+              placeholder="Min 8 characters"
+            >
+          </div>
+          <div>
+            <label for="confirmPassword" class="block text-sm font-medium text-slate-300 mb-1">Confirm Password</label>
+            <input 
+              id="confirmPassword" 
+              name="confirmPassword" 
+              type="password" 
+              required 
+              minlength="8"
+              class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
+              placeholder="Re-enter your password"
+            >
+          </div>
+        </div>
+
+        <!-- Terms of Service Agreement -->
+        <div class="bg-amber-900/30 border border-amber-500/30 rounded-lg p-3">
+          <div class="flex items-start gap-3">
+            <input
+              id="agreeTerms"
+              name="agreeTerms"
+              type="checkbox"
+              required
+              class="mt-0.5 h-4 w-4 rounded border-amber-500/50 bg-slate-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0 cursor-pointer"
+            >
+            <label for="agreeTerms" class="text-xs text-slate-300 cursor-pointer">
+              <span class="text-amber-400 font-medium">⚠️ Notice:</span> By registering, I agree to the 
+              <a href="/terms" target="_blank" class="text-amber-400 hover:text-amber-300 underline">Terms of Service</a> 
+              and <a href="/privacy" target="_blank" class="text-amber-400 hover:text-amber-300 underline">Privacy Policy</a>.
+            </label>
+          </div>
+        </div>
+
+        <button 
+          type="submit" 
+          class="w-full py-3.5 rounded-lg text-sm font-medium bg-white hover:bg-slate-200 text-slate-900 transition-all shadow-lg"
+        >
+          Create Account
+        </button>
+      </form>
+
+      <p class="text-center text-xs text-slate-500 mt-4">
+        <svg class="inline-block w-3 h-3 mr-1 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Email verification required
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const form = document.getElementById('registerForm');
+  const submitButton = form.querySelector('button[type="submit"]');
+  const originalButtonText = submitButton.textContent;
+
+  // Helper function to start countdown on the button
+  function startButtonCountdown(seconds) {
+    submitButton.disabled = true;
+    submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+    submitButton.classList.remove('hover:bg-blue-700');
+    
+    let remaining = seconds;
+    submitButton.textContent = `Wait ${remaining}s`;
+    
+    const interval = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(interval);
+        submitButton.textContent = originalButtonText;
+        submitButton.disabled = false;
+        submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+        submitButton.classList.add('hover:bg-blue-700');
+      } else {
+        submitButton.textContent = `Wait ${remaining}s`;
+      }
+    }, 1000);
+  }
+
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    
+    if (!email || !email.includes('@')) {
+      alert('Please enter a valid email address');
+      return;
+    }
+    
+    if (password.length < 8) {
+      alert('Password must be at least 8 characters long');
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      alert('Passwords do not match');
+      return;
+    }
+
+    const agreeTerms = document.getElementById('agreeTerms').checked;
+    if (!agreeTerms) {
+      alert('You must agree to the Terms of Service and Privacy Policy to create an account');
+      return;
+    }
+
+    // Cache password for post-registration decryption key derivation
+    try {
+      sessionStorage.setItem('pendingEncryptionPassword', password);
+    } catch (err) {
+      console.warn('Unable to cache password for encryption setup', err);
+    }
+
+    submitButton.textContent = 'Creating account...';
+    submitButton.disabled = true;
+
+    try {
+      const formData = new FormData(form);
+      const data = new URLSearchParams(formData);
+      
+      const response = await fetch(form.action, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: data,
+        redirect: 'follow'
+      });
+      
+      // Check if rate limited
+      if (response.status === 429) {
+        const result = await response.json();
+        const retryAfter = result.error?.retryAfter || 30;
+        startButtonCountdown(retryAfter);
+        return;
+      }
+      
+      // If redirected, follow it
+      if (response.redirected) {
+        window.location.href = response.url;
+        return;
+      }
+      
+      // Check if response is HTML (success or error page)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        const html = await response.text();
+        document.open();
+        document.write(html);
+        document.close();
+        return;
+      }
+    } catch (error) {
+      console.error('Form submission error:', error);
+      submitButton.textContent = originalButtonText;
+      submitButton.disabled = false;
+    }
+  });
+})();
+</script>
+
+<style>
+  @keyframes spin-slow {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .animate-spin-slow {
+    animation: spin-slow 120s linear infinite;
+  }
+</style>
