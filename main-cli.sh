@@ -33,10 +33,9 @@ command_preview() {
   shift 2
   local -a cmd=("$@")
 
-  local preview=""
-  for part in "${cmd[@]}"; do
-    preview+="$(printf '%q ' "$part")"
-  done
+  # Use printf to build preview string efficiently
+  local preview
+  printf -v preview '%q ' "$@"
 
   gum style --margin "1 0" --bold "$title"
   gum style --foreground 250 "$detail"

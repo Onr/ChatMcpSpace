@@ -45,9 +45,11 @@ async function checkDatabase() {
             console.log(`- ${m.migration_name} (${m.applied_at})`);
         });
         
+        await db.end();
         process.exit(0);
     } catch (error) {
         console.error('Error:', error.message);
+        await db.end();
         process.exit(1);
     }
 }

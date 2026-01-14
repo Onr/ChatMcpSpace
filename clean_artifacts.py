@@ -26,24 +26,24 @@ num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh, 
 print(f"Found {num_labels} components.")
 
 # Find the label with the largest area (ignoring label 0 which is background)
-max_area = 0
-max_label = -1
-
-for i in range(1, num_labels):
-    area = stats[i, cv2.CC_STAT_AREA]
-    if area > max_area:
-        max_area = area
-        max_label = i
-
-print(f"Largest component is label {max_label} with area {max_area}")
-
-# Create a mask for the largest component
-mask = np.zeros_like(alpha)
-mask[labels == max_label] = 255
-
-# Apply mask to alpha channel
-# Everything NOT in the mask becomes fully transparent
-img[:, :, 3] = cv2.bitwise_and(alpha, mask)
+if num_labels > 1:
+    # Get areas for all labels except background (label 0)
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    # Find the index of the largest area (add 1 to account for skipping label 0)
+    max_label = np.argmax(areas) + 1
+    max_area = areas[max_label - 1]
+    
+    print(f"Largest component is label {max_label} with area {max_area}")
+    
+    # Create a mask for the largest component
+    mask = np.zeros_like(alpha)
+    mask[labels == max_label] = 255
+    
+    # Apply mask to alpha channel
+    # Everything NOT in the mask becomes fully transparent
+    img[:, :, 3] = cv2.bitwise_and(alpha, mask)
+else:
+    print("No components found besides background")
 
 # Save output
 cv2.imwrite(OUTPUT_PATH, img)
