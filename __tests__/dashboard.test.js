@@ -4,6 +4,9 @@
  * These tests verify that the double notification bug is fixed
  */
 
+// Test constants
+const TEST_AGENT_NAME = 'test3';
+
 describe('Dashboard Notification System', () => {
   // Mock the DOM and browser APIs
   let mockDocument;
@@ -106,8 +109,8 @@ describe('Dashboard Notification System', () => {
       // This test verifies Bug #1 is fixed
       
       const messages = [
-        { id: '1', content: 'Message 1', agentName: 'test3' },
-        { id: '2', content: 'Message 2', agentName: 'test3' }
+        { id: '1', content: 'Message 1', agentName: TEST_AGENT_NAME },
+        { id: '2', content: 'Message 2', agentName: TEST_AGENT_NAME }
       ];
       
       // Simulate the FIXED code (dispatching once per message)
@@ -125,7 +128,7 @@ describe('Dashboard Notification System', () => {
       // This test shows what the bug looked like
       
       const messages = [
-        { id: '1', content: 'Message 1', agentName: 'test3' }
+        { id: '1', content: 'Message 1', agentName: TEST_AGENT_NAME }
       ];
       
       // Simulate the BUGGY code (dispatching twice per message)
@@ -167,7 +170,7 @@ describe('Dashboard Notification System', () => {
       mockDocument.addEventListener('newAgentMessage', handleNewMessage);
       
       // Dispatch event once
-      const message = { id: '1', content: 'Test', agentName: 'test3' };
+      const message = { id: '1', content: 'Test', agentName: TEST_AGENT_NAME };
       mockDocument.dispatchEvent(new CustomEvent('newAgentMessage', { 
         detail: message 
       }));
@@ -185,7 +188,7 @@ describe('Dashboard Notification System', () => {
     });
 
     test('should use message ID as tag to prevent browser duplicate notifications', () => {
-      const message = { id: 'unique-123', content: 'Test', agentName: 'test3' };
+      const message = { id: 'unique-123', content: 'Test', agentName: TEST_AGENT_NAME };
       
       new Notification('New message from ' + message.agentName, {
         body: message.content,
