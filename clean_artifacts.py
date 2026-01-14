@@ -1,9 +1,16 @@
 
+import os
+import sys
 import cv2
 import numpy as np
 
-INPUT_PATH = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final_v2.png'
-OUTPUT_PATH = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final_v3.png'
+# Use command-line arguments or default to relative paths
+script_dir = os.path.dirname(os.path.abspath(__file__))
+default_input = os.path.join(script_dir, 'public', 'images', 'space_agent_final_v2.png')
+default_output = os.path.join(script_dir, 'public', 'images', 'space_agent_final_v3.png')
+
+INPUT_PATH = sys.argv[1] if len(sys.argv) > 1 else default_input
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else default_output
 
 print(f"Reading {INPUT_PATH}...")
 # Read image with alpha channel
@@ -11,7 +18,7 @@ img = cv2.imread(INPUT_PATH, cv2.IMREAD_UNCHANGED)
 
 if img is None:
     print("Error: Image not found!")
-    exit(1)
+    sys.exit(1)
 
 # Extract alpha channel
 alpha = img[:, :, 3]
