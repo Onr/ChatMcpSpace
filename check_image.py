@@ -1,8 +1,12 @@
 
 import os
+import sys
 from PIL import Image
 
-image_path = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final.png'
+# Use command-line argument or default to relative path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+default_path = os.path.join(script_dir, 'public', 'images', 'space_agent_final.png')
+image_path = sys.argv[1] if len(sys.argv) > 1 else default_path
 
 try:
     img = Image.open(image_path)
@@ -25,3 +29,4 @@ try:
 
 except Exception as e:
     print(f"Error: {e}")
+    sys.exit(1)
