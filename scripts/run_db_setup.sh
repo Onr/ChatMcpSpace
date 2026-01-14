@@ -19,7 +19,7 @@ fi
 
 echo "[run-db-setup] Loading environment variables..."
 if [ -f ".env" ]; then
-  export $(grep -v '^#' .env | xargs)
+  export $(grep -v '^#' .env | sed 's/#.*//' | xargs)
 else
   echo "[run-db-setup] WARNING: .env file not found. Using defaults."
 fi

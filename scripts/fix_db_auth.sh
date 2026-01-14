@@ -12,7 +12,7 @@ echo ""
 
 # Load environment variables
 if [ -f ".env" ]; then
-  export $(grep -v '^#' .env | xargs)
+  export $(grep -v '^#' .env | sed 's/#.*//' | xargs)
 else
   echo "[fix-db-auth] ERROR: .env file not found." >&2
   exit 1

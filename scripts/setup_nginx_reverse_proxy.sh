@@ -12,7 +12,7 @@ cd "$ROOT_DIR"
 # Load PORT/BASE_URL if .env exists
 if [ -f ".env" ]; then
   # shellcheck disable=SC2046
-  export $(grep -v '^#' .env | xargs)
+  export $(grep -v '^#' .env | sed 's/#.*//' | xargs)
 fi
 
 APP_PORT="${PORT:-3000}"
