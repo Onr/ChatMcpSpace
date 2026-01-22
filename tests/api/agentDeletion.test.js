@@ -5,31 +5,19 @@ const request = require('supertest');
 const { newDb } = require('pg-mem');
 const { v4: uuidv4 } = require('uuid');
 
-const schemaPath = path.join(__dirname, '../../src/db/schema.sql');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
-function loadSchema(db) {
-  const raw = fs.readFileSync(schemaPath, 'utf8').replace(/```/g, '');
-  db.public.registerFunction({ name: 'gen_random_uuid', returns: 'uuid', implementation: uuidv4 });
-  db.public.none(raw);
-}
+const schemaPath = path.join(__dirname, '../../src/db/schema.sql');
 
 async function createTestContext() {
   jest.resetModules();
-  const db = newDb({ autoCreateForeignKeyIndices: true });
-  loadSchema(db);
-  const pg = db.adapters.createPg();
-  const pool = new pg.Pool();
-  const query = (text, params) => pool.query(text, params);
+  const { pool, query } = createTestDatabase();
 
   // Mirror runtime columns expected by middleware
-  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE');
-  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP');
+  await applyRuntimeUserColumns(query);
+  await applyArchiveSchema(query);
 
-  const userId = uuidv4();
-  await query(
-    'INSERT INTO users (user_id, email, password_hash, api_key, encryption_salt, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE)',
-    [userId, 'test@example.com', 'hash', 'api-key', 'salt']
-  );
+  const { userId } = await seedUser(query, { emailVerified: true });
 
   jest.doMock('../../src/db/connection', () => ({
     query: (text, params) => query(text, params),
@@ -48,8 +36,8 @@ async function createTestContext() {
   }));
 
   jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
-    pollingRateLimiter: (_req, _res, next) => next(),
-    userPollingRateLimiter: (_req, _res, next) => next()
+    userPollingRateLimiter: (_req, _res, next) => next(),
+    feedbackRateLimiter: (_req, _res, next) => next(),
   }));
 
   jest.doMock('../../src/services/ttsService', () => ({

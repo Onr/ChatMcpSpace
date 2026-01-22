@@ -22,6 +22,7 @@ const {
 const { validationError, handleDatabaseError, internalError } = require('../utils/errorHandler');
 const { uploadAttachment, downloadAttachment } = require('../controllers/agentAttachmentController');
 const { generateMainCLIScript } = require('../utils/apiGuideGenerator');
+const { isAgentArchived } = require('../services/archiveService');
 
 // Apply API key authentication to all agent routes
 router.use(requireApiKey);
@@ -115,6 +116,18 @@ router.post('/messages', async (req, res) => {
       agentId = newAgentResult.rows[0].agent_id;
     }
 
+    // Check if agent is archived - prevent sending messages to archived agents
+    const archived = await isAgentArchived(agentId);
+    if (archived) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: {
+          code: 'AGENT_ARCHIVED',
+          message: 'Cannot send messages to an archived agent'
+        }
+      });
+    }
+
     // Verify attachments exist, belong to this agent, and are not already attached to another message
     if (hasAttachments) {
       const attachmentCheck = await client.query(
@@ -175,7 +188,7 @@ router.post('/messages', async (req, res) => {
     const unreadResult = await query(
       `SELECT user_message_id, content, encrypted, created_at
        FROM user_messages
-       WHERE agent_id = $1 AND read_at IS NULL
+       WHERE agent_id = $1 AND read_at IS NULL AND (hidden_from_agent = FALSE OR hidden_from_agent IS NULL)
        ORDER BY created_at ASC`,
       [agentId]
     );
@@ -323,6 +336,18 @@ router.post('/questions', async (req, res) => {
         [userId, agentName, 'standard']
       );
       agentId = newAgentResult.rows[0].agent_id;
+    }
+
+    // Check if agent is archived - prevent sending questions to archived agents
+    const archived = await isAgentArchived(agentId);
+    if (archived) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: {
+          code: 'AGENT_ARCHIVED',
+          message: 'Cannot send questions to an archived agent'
+        }
+      });
     }
 
     // Verify attachments exist, belong to this agent, and are not already attached to another message
@@ -499,9 +524,12 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
     let optionWhereConditions = ['a.user_id = $1', 'ur.read_at IS NULL'];
     // Note: pg-mem has edge cases when combining `um.read_at IS NULL` with other predicates
     // in joined queries; use an equivalent IN-subquery for reliable behavior in tests.
+    // Also exclude archived messages using a NOT IN subquery.
     let textWhereConditions = [
       'a.user_id = $1',
-      'um.user_message_id IN (SELECT user_message_id FROM user_messages WHERE read_at IS NULL)'
+      'um.user_message_id IN (SELECT user_message_id FROM user_messages WHERE read_at IS NULL)',
+      'um.user_message_id NOT IN (SELECT user_message_id FROM archived_messages WHERE user_message_id IS NOT NULL)',
+      '(um.hidden_from_agent = FALSE OR um.hidden_from_agent IS NULL)'
     ];
     paramIndex = 2;
 
@@ -720,20 +748,21 @@ router.get('/messages/history', async (req, res) => {
       });
     }
 
-    // Fetch agent messages (messages and questions)
+    // Fetch agent messages (messages and questions), excluding archived
     const messagesResult = await query(
       `SELECT 
-        message_id,
-        message_type,
-        content,
-        priority,
-        urgent,
-        allow_free_response,
-        free_response_hint,
-        created_at
-      FROM messages
-      WHERE agent_id = $1
-      ORDER BY created_at ASC`,
+        m.message_id,
+        m.message_type,
+        m.content,
+        m.priority,
+        m.urgent,
+        m.allow_free_response,
+        m.free_response_hint,
+        m.created_at
+      FROM messages m
+      LEFT JOIN archived_messages am ON m.message_id = am.message_id
+      WHERE m.agent_id = $1 AND am.archived_message_id IS NULL AND (m.hidden_from_agent = FALSE OR m.hidden_from_agent IS NULL)
+      ORDER BY m.created_at ASC`,
       [agent.agent_id]
     );
 
@@ -753,15 +782,16 @@ router.get('/messages/history', async (req, res) => {
       [agent.agent_id]
     );
 
-    // Fetch user messages (free-text messages from the user)
+    // Fetch user messages (free-text messages from the user), excluding archived and hidden
     const userMessagesResult = await query(
       `SELECT 
-        user_message_id,
-        content,
-        created_at
-      FROM user_messages
-      WHERE agent_id = $1
-      ORDER BY created_at ASC`,
+        um.user_message_id,
+        um.content,
+        um.created_at
+      FROM user_messages um
+      LEFT JOIN archived_messages am ON um.user_message_id = am.user_message_id
+      WHERE um.agent_id = $1 AND am.archived_message_id IS NULL AND (um.hidden_from_agent = FALSE OR um.hidden_from_agent IS NULL)
+      ORDER BY um.created_at ASC`,
       [agent.agent_id]
     );
 
@@ -852,17 +882,18 @@ router.get('/messages/latest', async (req, res) => {
 
     const latestResult = await query(
       `SELECT 
-        message_id,
-        message_type,
-        content,
-        priority,
-        urgent,
-        allow_free_response,
-        free_response_hint,
-        created_at
-      FROM messages
-      WHERE agent_id = $1
-      ORDER BY created_at DESC
+        m.message_id,
+        m.message_type,
+        m.content,
+        m.priority,
+        m.urgent,
+        m.allow_free_response,
+        m.free_response_hint,
+        m.created_at
+      FROM messages m
+      LEFT JOIN archived_messages am ON m.message_id = am.message_id
+      WHERE m.agent_id = $1 AND am.archived_message_id IS NULL
+      ORDER BY m.created_at DESC
       LIMIT 1`,
       [agent.agent_id]
     );

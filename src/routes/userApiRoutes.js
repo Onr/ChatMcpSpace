@@ -4,15 +4,44 @@
  */
 
 const express = require('express');
+const fs = require('fs');
+const fsPromises = require('fs').promises;
+const path = require('path');
+
+// Simple mutex for serializing feedback CSV writes to prevent race conditions
+const feedbackWriteMutex = {
+  locked: false,
+  queue: [],
+  async acquire() {
+    return new Promise((resolve) => {
+      if (!this.locked) {
+        this.locked = true;
+        resolve();
+      } else {
+        this.queue.push(resolve);
+      }
+    });
+  },
+  release() {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
+};
 const router = express.Router();
 const { attachUserFromSession } = require('../middleware/authMiddleware');
-const { userPollingRateLimiter } = require('../middleware/rateLimitMiddleware');
+const { userPollingRateLimiter, feedbackRateLimiter } = require('../middleware/rateLimitMiddleware');
 const { query, getClient } = require('../db/connection');
 const { validateTimestamp, isValidUUID, formatTimestampForDatabase, validateMessageContent, validateAttachmentIds } = require('../utils/validation');
 const { validationError, forbiddenError, handleDatabaseError, internalError } = require('../utils/errorHandler');
 const { logUnauthorizedAccess } = require('../utils/securityLogger');
 const ttsService = require('../services/ttsService');
 const { uploadAttachment, downloadAttachment } = require('../controllers/userAttachmentController');
+const archiveService = require('../services/archiveService');
+const { createArchiveAwareQuery } = require('../utils/archiveQueryWrapper');
 
 /**
  * Build short notification text for voice announcements
@@ -78,46 +107,96 @@ router.get('/agents', async (req, res) => {
     // Query agents for authenticated user with calculated metadata.
     // Note: we avoid correlated subqueries here to improve compatibility with pg-mem (tests)
     // and to keep the query planner's work predictable.
-    const result = await query(`
-      WITH last_message AS (
-        SELECT DISTINCT ON (agent_id)
-          agent_id,
-          message_id AS last_message_id,
-          priority AS last_message_priority
-        FROM messages
-        ORDER BY agent_id, created_at DESC
-      )
-      SELECT 
-        agents.agent_id,
-        agents.agent_name,
-        agents.agent_type,
-        agents.position,
-        agents.last_seen_at,
-        MAX(m.created_at) as last_message_time,
-        COUNT(CASE WHEN m.read_at IS NULL THEN 1 END) as unread_count,
-        MAX(CASE 
-          WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 2 THEN 3 
-          WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 1 THEN 2 
-          WHEN m.message_type = 'question' AND ur.response_id IS NULL THEN 1 
-          ELSE 0
-        END) as priority_value,
-        last_message.last_message_id,
-        last_message.last_message_priority
-      FROM agents
-      LEFT JOIN messages m ON agents.agent_id = m.agent_id
-      LEFT JOIN user_responses ur ON m.message_id = ur.message_id
-      LEFT JOIN last_message ON last_message.agent_id = agents.agent_id
-      WHERE agents.user_id = $1
-      GROUP BY
-        agents.agent_id,
-        agents.agent_name,
-        agents.agent_type,
-        agents.position,
-        agents.last_seen_at,
-        last_message.last_message_id,
-        last_message.last_message_priority
-      ORDER BY agents.position ASC
-    `, [userId]);
+
+    // Create archive-aware query with fallback for when archive tables don't exist yet
+    const agentsQuery = createArchiveAwareQuery(
+      // Primary query with archive filtering
+      () => `
+        WITH last_message AS (
+          SELECT DISTINCT ON (agent_id)
+            agent_id,
+            message_id AS last_message_id,
+            priority AS last_message_priority
+          FROM messages
+          ORDER BY agent_id, created_at DESC
+        )
+        SELECT
+          agents.agent_id,
+          agents.agent_name,
+          agents.agent_type,
+          agents.position,
+          agents.last_seen_at,
+          MAX(m.created_at) as last_message_time,
+          COUNT(CASE WHEN m.read_at IS NULL THEN 1 END) as unread_count,
+          MAX(CASE
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 2 THEN 3
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 1 THEN 2
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL THEN 1
+            ELSE 0
+          END) as priority_value,
+          last_message.last_message_id,
+          last_message.last_message_priority
+        FROM agents
+        LEFT JOIN messages m ON agents.agent_id = m.agent_id
+        LEFT JOIN user_responses ur ON m.message_id = ur.message_id
+        LEFT JOIN last_message ON last_message.agent_id = agents.agent_id
+        LEFT JOIN archived_agents aa ON agents.agent_id = aa.agent_id
+        WHERE agents.user_id = $1 AND aa.archived_agent_id IS NULL
+        GROUP BY
+          agents.agent_id,
+          agents.agent_name,
+          agents.agent_type,
+          agents.position,
+          agents.last_seen_at,
+          last_message.last_message_id,
+          last_message.last_message_priority
+        ORDER BY agents.position ASC
+      `,
+      // Fallback query without archive filtering (for when tables don't exist)
+      () => `
+        WITH last_message AS (
+          SELECT DISTINCT ON (agent_id)
+            agent_id,
+            message_id AS last_message_id,
+            priority AS last_message_priority
+          FROM messages
+          ORDER BY agent_id, created_at DESC
+        )
+        SELECT
+          agents.agent_id,
+          agents.agent_name,
+          agents.agent_type,
+          agents.position,
+          agents.last_seen_at,
+          MAX(m.created_at) as last_message_time,
+          COUNT(CASE WHEN m.read_at IS NULL THEN 1 END) as unread_count,
+          MAX(CASE
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 2 THEN 3
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL AND m.priority = 1 THEN 2
+            WHEN m.message_type = 'question' AND ur.response_id IS NULL THEN 1
+            ELSE 0
+          END) as priority_value,
+          last_message.last_message_id,
+          last_message.last_message_priority
+        FROM agents
+        LEFT JOIN messages m ON agents.agent_id = m.agent_id
+        LEFT JOIN user_responses ur ON m.message_id = ur.message_id
+        LEFT JOIN last_message ON last_message.agent_id = agents.agent_id
+        WHERE agents.user_id = $1
+        GROUP BY
+          agents.agent_id,
+          agents.agent_name,
+          agents.agent_type,
+          agents.position,
+          agents.last_seen_at,
+          last_message.last_message_id,
+          last_message.last_message_priority
+        ORDER BY agents.position ASC
+      `,
+      'get_agents'
+    );
+
+    const result = await agentsQuery([userId]);
 
     // Format agent data with pre-generated TTS audio URLs for new agent notifications
     const agents = await Promise.all(result.rows.map(async (row) => {
@@ -336,29 +415,54 @@ router.get('/messages/:agentId', async (req, res) => {
       return '';
     };
 
-    const messageQuery = `
-      SELECT
-        m.message_id,
-        m.message_type,
-        m.content,
-        m.encrypted,
-        m.priority,
-        m.urgent,
-        m.allow_free_response,
-        m.free_response_hint,
-        m.created_at,
-        (EXTRACT(EPOCH FROM m.created_at) * 1000000)::BIGINT as created_at_micro
-      FROM messages m
-      WHERE m.agent_id = $1${buildTimeFilter('m')}
-      ORDER BY m.created_at ASC
-    `;
-
     const messageParams = [agentId];
     if (cursorValue !== null || sinceValue) {
       messageParams.push(cursorValue !== null ? cursorValue : sinceValue);
     }
 
-    const messagesResult = await query(messageQuery, messageParams);
+    // Create archive-aware query with fallback
+    const messagesQueryFn = createArchiveAwareQuery(
+      // Primary query with archive filtering
+      () => `
+        SELECT
+          m.message_id,
+          m.message_type,
+          m.content,
+          m.encrypted,
+          m.priority,
+          m.urgent,
+          m.allow_free_response,
+          m.free_response_hint,
+          m.hidden_from_agent,
+          m.created_at,
+          (EXTRACT(EPOCH FROM m.created_at) * 1000000)::BIGINT as created_at_micro
+        FROM messages m
+        LEFT JOIN archived_messages am ON m.message_id = am.message_id
+        WHERE m.agent_id = $1 AND am.archived_message_id IS NULL${buildTimeFilter('m')}
+        ORDER BY m.created_at ASC
+      `,
+      // Fallback query without archive filtering
+      () => `
+        SELECT
+          m.message_id,
+          m.message_type,
+          m.content,
+          m.encrypted,
+          m.priority,
+          m.urgent,
+          m.allow_free_response,
+          m.free_response_hint,
+          m.hidden_from_agent,
+          m.created_at,
+          (EXTRACT(EPOCH FROM m.created_at) * 1000000)::BIGINT as created_at_micro
+        FROM messages m
+        WHERE m.agent_id = $1${buildTimeFilter('m')}
+        ORDER BY m.created_at ASC
+      `,
+      'get_messages'
+    );
+
+    const messagesResult = await messagesQueryFn(messageParams);
 
     // Mark all fetched messages as read.
     // Prefer bulk updates, but fall back to per-row updates for test DBs (pg-mem)
@@ -436,6 +540,7 @@ router.get('/messages/:agentId', async (req, res) => {
         urgent: row.urgent,
         allowFreeResponse: row.allow_free_response,
         freeResponseHint: row.free_response_hint,
+        hiddenFromAgent: row.hidden_from_agent || false,
         timestamp: row.created_at.toISOString(),
         cursor: row.created_at_micro,
         attachments: agentAttachmentsMap[row.message_id] || []
@@ -491,24 +596,44 @@ router.get('/messages/:agentId', async (req, res) => {
       messages.push(message);
     }
 
-    const userMessagesQuery = `
-      SELECT
-        um.user_message_id,
-        um.content,
-        um.created_at,
-        um.read_at,
-        (EXTRACT(EPOCH FROM um.created_at) * 1000000)::BIGINT as created_at_micro
-      FROM user_messages um
-      WHERE um.agent_id = $1${buildTimeFilter('um')}
-      ORDER BY um.created_at ASC
-    `;
-
     const userMessageParams = [agentId];
     if (cursorValue !== null || sinceValue) {
       userMessageParams.push(cursorValue !== null ? cursorValue : sinceValue);
     }
 
-    const userMessagesResult = await query(userMessagesQuery, userMessageParams);
+    // Create archive-aware query with fallback
+    const userMessagesQueryFn = createArchiveAwareQuery(
+      // Primary query with archive filtering
+      () => `
+        SELECT
+          um.user_message_id,
+          um.content,
+          um.created_at,
+          um.read_at,
+          um.hidden_from_agent,
+          (EXTRACT(EPOCH FROM um.created_at) * 1000000)::BIGINT as created_at_micro
+        FROM user_messages um
+        LEFT JOIN archived_messages am ON um.user_message_id = am.user_message_id
+        WHERE um.agent_id = $1 AND am.archived_message_id IS NULL${buildTimeFilter('um')}
+        ORDER BY um.created_at ASC
+      `,
+      // Fallback query without archive filtering
+      () => `
+        SELECT
+          um.user_message_id,
+          um.content,
+          um.created_at,
+          um.read_at,
+          um.hidden_from_agent,
+          (EXTRACT(EPOCH FROM um.created_at) * 1000000)::BIGINT as created_at_micro
+        FROM user_messages um
+        WHERE um.agent_id = $1${buildTimeFilter('um')}
+        ORDER BY um.created_at ASC
+      `,
+      'get_user_messages'
+    );
+
+    const userMessagesResult = await userMessagesQueryFn(userMessageParams);
 
     // Fetch attachments for user messages (avoid N+1 queries)
     const userMessageIds = userMessagesResult.rows.map(row => row.user_message_id);
@@ -556,7 +681,7 @@ router.get('/messages/:agentId', async (req, res) => {
       }
     }
 
-    // Build user messages array (read_at is already in the query result)
+    // Build user messages array (read_at and hidden_from_agent are already in the query result)
     const userMessages = userMessagesResult.rows.map(row => ({
       messageId: row.user_message_id,
       type: 'user_message',
@@ -566,6 +691,7 @@ router.get('/messages/:agentId', async (req, res) => {
       timestamp: row.created_at.toISOString(),
       cursor: row.created_at_micro,
       readAt: row.read_at ? row.read_at.toISOString() : null,
+      hiddenFromAgent: row.hidden_from_agent || false,
       attachments: userAttachmentsMap[row.user_message_id] || []
     }));
 
@@ -626,6 +752,113 @@ router.get('/messages/:agentId/status/:messageId', async (req, res) => {
 
   } catch (error) {
     return handleDatabaseError(res, error, 'fetching message status');
+  }
+});
+
+/**
+ * PUT /api/user/messages/:messageId/hidden
+ * Toggle whether a user message is hidden from the agent
+ * 
+ * Messages that are hidden will still be visible to the user in the dashboard,
+ * but will not be sent to the agent when they poll for responses.
+ * 
+ * Request body:
+ * - hidden: boolean (required) - Whether to hide the message from the agent
+ * 
+ * Response: 200 OK
+ * - success: boolean - Operation status
+ * - hidden: boolean - New hidden state
+ */
+router.put('/messages/:messageId/hidden', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { messageId } = req.params;
+    const { hidden } = req.body;
+
+    if (!isValidUUID(messageId)) {
+      return validationError(res, 'Invalid message ID format');
+    }
+
+    if (typeof hidden !== 'boolean') {
+      return validationError(res, 'hidden must be a boolean');
+    }
+
+    // Verify the message belongs to an agent owned by this user
+    const verifyResult = await query(
+      `SELECT um.user_message_id 
+       FROM user_messages um
+       JOIN agents a ON um.agent_id = a.agent_id
+       WHERE um.user_message_id = $1 AND a.user_id = $2`,
+      [messageId, userId]
+    );
+
+    if (verifyResult.rows.length === 0) {
+      return forbiddenError(res, 'Message not found or access denied');
+    }
+
+    await query(
+      'UPDATE user_messages SET hidden_from_agent = $1 WHERE user_message_id = $2',
+      [hidden, messageId]
+    );
+
+    res.status(200).json({ success: true, hidden });
+  } catch (error) {
+    return handleDatabaseError(res, error, 'toggling message visibility');
+  }
+});
+
+/**
+ * PUT /api/user/agent-messages/:messageId/hidden
+ * Toggle visibility of an agent message from being sent back to the agent
+ *
+ * This allows users to hide specific agent responses from the conversation
+ * history that gets sent to the agent on future polls
+ *
+ * Path parameters:
+ * - messageId: string (required) - UUID of the agent message
+ *
+ * Request body:
+ * - hidden: boolean (required) - Whether to hide the message from the agent
+ *
+ * Response: 200 OK
+ * - success: boolean
+ * - hidden: boolean - The new hidden state
+ */
+router.put('/agent-messages/:messageId/hidden', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { messageId } = req.params;
+    const { hidden } = req.body;
+
+    if (!isValidUUID(messageId)) {
+      return validationError(res, 'Invalid message ID format');
+    }
+
+    if (typeof hidden !== 'boolean') {
+      return validationError(res, 'hidden must be a boolean');
+    }
+
+    // Verify the message belongs to an agent owned by this user
+    const verifyResult = await query(
+      `SELECT m.message_id
+       FROM messages m
+       JOIN agents a ON m.agent_id = a.agent_id
+       WHERE m.message_id = $1 AND a.user_id = $2`,
+      [messageId, userId]
+    );
+
+    if (verifyResult.rows.length === 0) {
+      return forbiddenError(res, 'Message not found or access denied');
+    }
+
+    await query(
+      'UPDATE messages SET hidden_from_agent = $1 WHERE message_id = $2',
+      [hidden, messageId]
+    );
+
+    res.status(200).json({ success: true, hidden });
+  } catch (error) {
+    return handleDatabaseError(res, error, 'toggling agent message visibility');
   }
 });
 
@@ -1262,5 +1495,516 @@ router.post('/attachments', uploadAttachment);
  * - 500: Storage error
  */
 router.get('/attachments/:attachmentId', downloadAttachment);
+
+/**
+ * POST /api/user/feedback
+ * Submit anonymous feedback (no user_id stored)
+ * Users must be logged in to access this endpoint, but feedback is completely anonymous
+ *
+ * Request body:
+ * - kind: 'feedback' | 'love' (required) - Type of feedback
+ * - message: string (required for kind='feedback') - Feedback message
+ * - pageUrl: string (optional) - Current page URL
+ *
+ * Response: 201 Created
+ * - success: boolean - Whether feedback was saved
+ * - feedbackId: string - UUID of the created feedback (for reference only)
+ */
+router.post('/feedback', feedbackRateLimiter, async (req, res) => {
+  try {
+    const { kind, message, pageUrl } = req.body;
+
+    // Validate kind
+    if (!kind || !['feedback', 'love'].includes(kind)) {
+      return validationError(res, 'Kind must be either "feedback" or "love"');
+    }
+
+    // Validate message for feedback kind
+    if (kind === 'feedback') {
+      if (!message || typeof message !== 'string' || message.trim().length === 0) {
+        return validationError(res, 'Message is required for feedback');
+      }
+      if (message.length > 5000) {
+        return validationError(res, 'Message exceeds maximum length of 5000 characters');
+      }
+    }
+
+    // Validate pageUrl if provided
+    if (pageUrl && typeof pageUrl !== 'string') {
+      return validationError(res, 'Invalid page URL');
+    }
+
+    const trimmedMessage = kind === 'feedback' ? message.trim() : null;
+    const trimmedPageUrl = pageUrl ? pageUrl.substring(0, 2048) : null;
+    // PRIVACY: user_agent intentionally not collected to ensure true anonymity
+    // (user_agent + page_url + timestamp enables browser fingerprinting)
+
+    // Insert into PostgreSQL (no user_id for anonymity)
+    const result = await query(
+      `INSERT INTO feedback (message, kind, page_url)
+       VALUES ($1, $2, $3)
+       RETURNING feedback_id, created_at`,
+      [trimmedMessage, kind, trimmedPageUrl]
+    );
+
+    const feedbackId = result.rows[0].feedback_id;
+    const createdAt = result.rows[0].created_at;
+
+    // Append to CSV for easy export (create file with header if it doesn't exist)
+    const csvDir = path.join(__dirname, '../../data');
+    const csvPath = path.join(csvDir, 'feedback.csv');
+
+    // Escape CSV fields (handle commas, quotes, newlines)
+    const escapeCSV = (field) => {
+      if (field === null || field === undefined) return '';
+      const str = String(field);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const csvLine = [
+      feedbackId,
+      kind,
+      escapeCSV(trimmedMessage),
+      escapeCSV(trimmedPageUrl),
+      createdAt.toISOString()
+    ].join(',') + '\n';
+
+    // Use mutex to serialize concurrent CSV writes and prevent race conditions
+    await feedbackWriteMutex.acquire();
+    try {
+      // Ensure data directory exists (recursive: true is idempotent)
+      await fsPromises.mkdir(csvDir, { recursive: true });
+
+      // Try to create CSV with header atomically (fails if file exists)
+      // PRIVACY: user_agent intentionally not included to ensure true anonymity
+      try {
+        const fileHandle = await fsPromises.open(csvPath, 'wx');
+        await fileHandle.writeFile('feedback_id,kind,message,page_url,created_at\n');
+        await fileHandle.close();
+      } catch (err) {
+        // EEXIST means file already exists, which is expected - ignore it
+        if (err.code !== 'EEXIST') {
+          throw err;
+        }
+      }
+
+      // Append the feedback line
+      await fsPromises.appendFile(csvPath, csvLine);
+    } finally {
+      feedbackWriteMutex.release();
+    }
+
+    res.status(201).json({
+      success: true,
+      feedbackId: feedbackId
+    });
+
+  } catch (error) {
+    console.error('Feedback submission error:', error);
+    return handleDatabaseError(res, error, 'submitting feedback');
+  }
+});
+
+/**
+ * POST /api/user/agents/:agentId/archive
+ * Archive an agent with all its messages
+ */
+router.post('/agents/:agentId/archive', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { agentId } = req.params;
+    const { reason } = req.body;
+
+    // Validate UUID format
+    if (!isValidUUID(agentId)) {
+      return validationError(res, 'Invalid agent ID format');
+    }
+
+    // Archive the agent using archiveService
+    const result = await archiveService.archiveAgent(userId, agentId, reason);
+
+    res.status(200).json({
+      success: true,
+      archivedAgentId: result.archivedAgentId,
+      messageCount: result.messageCount
+    });
+
+  } catch (error) {
+    // Handle specific error cases
+    if (error.message === 'Agent not found or access denied') {
+      return res.status(404).json({
+        error: {
+          code: 'AGENT_NOT_FOUND',
+          message: 'Agent not found or you do not have access to it'
+        }
+      });
+    }
+
+    if (error.message === 'Agent is already archived') {
+      return res.status(409).json({
+        error: {
+          code: 'ALREADY_ARCHIVED',
+          message: 'Agent is already archived'
+        }
+      });
+    }
+
+    return handleDatabaseError(res, error, 'archiving agent');
+  }
+});
+
+/**
+ * DELETE /api/user/agents/:agentId/archive
+ * Unarchive (restore) an archived agent
+ */
+router.delete('/agents/:agentId/archive', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { agentId } = req.params;
+
+    // Validate UUID format
+    if (!isValidUUID(agentId)) {
+      return validationError(res, 'Invalid agent ID format');
+    }
+
+    // Look up archived_agent_id from agent_id
+    const lookupResult = await query(
+      'SELECT archived_agent_id FROM archived_agents WHERE agent_id = $1 AND user_id = $2',
+      [agentId, userId]
+    );
+
+    if (lookupResult.rows.length === 0) {
+      return res.status(404).json({
+        error: {
+          code: 'ARCHIVED_AGENT_NOT_FOUND',
+          message: 'Archived agent not found or you do not have access to it'
+        }
+      });
+    }
+
+    const archivedAgentId = lookupResult.rows[0].archived_agent_id;
+
+    // Unarchive the agent
+    const result = await archiveService.unarchiveAgent(userId, archivedAgentId);
+
+    res.status(200).json({
+      success: true,
+      agentId: result.agentId
+    });
+
+  } catch (error) {
+    if (error.message === 'Archived agent not found or access denied') {
+      return res.status(404).json({
+        error: {
+          code: 'ARCHIVED_AGENT_NOT_FOUND',
+          message: 'Archived agent not found or you do not have access to it'
+        }
+      });
+    }
+
+    return handleDatabaseError(res, error, 'unarchiving agent');
+  }
+});
+
+/**
+ * POST /api/user/messages/:messageId/archive
+ * Archive a single message (agent message or user message)
+ */
+router.post('/messages/:messageId/archive', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { messageId } = req.params;
+    const { messageType, note } = req.body;
+
+    // Validate UUID format
+    if (!isValidUUID(messageId)) {
+      return validationError(res, 'Invalid message ID format');
+    }
+
+    // Validate messageType
+    if (!messageType || !['agent_message', 'user_message'].includes(messageType)) {
+      return validationError(res, 'messageType must be either "agent_message" or "user_message"');
+    }
+
+    // Archive the message using archiveService
+    const result = await archiveService.archiveMessage(userId, messageId, messageType, note);
+
+    res.status(200).json({
+      success: true,
+      archivedMessageId: result.archivedMessageId
+    });
+
+  } catch (error) {
+    if (error.message === 'Message not found or access denied') {
+      return res.status(404).json({
+        error: {
+          code: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found or you do not have access to it'
+        }
+      });
+    }
+
+    if (error.message === 'Message is already archived') {
+      return res.status(409).json({
+        error: {
+          code: 'ALREADY_ARCHIVED',
+          message: 'Message is already archived'
+        }
+      });
+    }
+
+    if (error.message && error.message.includes('Invalid messageType')) {
+      return validationError(res, error.message);
+    }
+
+    return handleDatabaseError(res, error, 'archiving message');
+  }
+});
+
+/**
+ * DELETE /api/user/messages/archive/:archivedMessageId
+ * Unarchive (restore) an archived message
+ */
+router.delete('/messages/archive/:archivedMessageId', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { archivedMessageId } = req.params;
+
+    // Validate UUID format
+    if (!isValidUUID(archivedMessageId)) {
+      return validationError(res, 'Invalid archived message ID format');
+    }
+
+    // Unarchive the message
+    const result = await archiveService.unarchiveMessage(userId, archivedMessageId);
+
+    res.status(200).json({
+      success: true,
+      messageId: result.messageId
+    });
+
+  } catch (error) {
+    if (error.message === 'Archived message not found or access denied') {
+      return res.status(404).json({
+        error: {
+          code: 'ARCHIVED_MESSAGE_NOT_FOUND',
+          message: 'Archived message not found or you do not have access to it'
+        }
+      });
+    }
+
+    if (error.message === 'Cannot restore message: associated agent no longer exists') {
+      return res.status(404).json({
+        error: {
+          code: 'AGENT_NOT_FOUND',
+          message: 'Cannot restore message: the associated agent no longer exists'
+        }
+      });
+    }
+
+    return handleDatabaseError(res, error, 'unarchiving message');
+  }
+});
+
+/**
+ * GET /api/user/archive/agents
+ * Get list of archived agents with pagination
+ */
+router.get('/archive/agents', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Validate pagination parameters
+    if (limit < 1 || limit > 100) {
+      return validationError(res, 'Limit must be between 1 and 100');
+    }
+
+    if (offset < 0) {
+      return validationError(res, 'Offset must be non-negative');
+    }
+
+    // Get archived agents
+    const result = await archiveService.getArchivedAgents(userId, { limit, offset });
+
+    // Format response with camelCase
+    const archivedAgents = result.archivedAgents.map(agent => ({
+      archivedAgentId: agent.archived_agent_id,
+      agentId: agent.agent_id,
+      agentName: agent.agent_name,
+      agentType: agent.agent_type,
+      totalMessages: agent.total_messages,
+      archiveReason: agent.archive_reason,
+      archivedAt: agent.archived_at.toISOString()
+    }));
+
+    res.status(200).json({
+      archivedAgents,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset
+    });
+
+  } catch (error) {
+    return handleDatabaseError(res, error, 'fetching archived agents');
+  }
+});
+
+/**
+ * GET /api/user/archive/agents/:archivedAgentId
+ * Get details of a specific archived agent
+ */
+router.get('/archive/agents/:archivedAgentId', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { archivedAgentId } = req.params;
+
+    // Validate UUID format
+    if (!isValidUUID(archivedAgentId)) {
+      return validationError(res, 'Invalid archived agent ID format');
+    }
+
+    // Get archived agent details
+    const agent = await archiveService.getArchivedAgentDetails(userId, archivedAgentId);
+
+    res.status(200).json({
+      archivedAgentId: agent.archived_agent_id,
+      agentId: agent.agent_id,
+      agentName: agent.agent_name,
+      agentType: agent.agent_type,
+      totalMessages: agent.total_messages,
+      archiveReason: agent.archive_reason,
+      archivedAt: agent.archived_at.toISOString()
+    });
+
+  } catch (error) {
+    if (error.message === 'Archived agent not found or access denied') {
+      return res.status(404).json({
+        error: {
+          code: 'ARCHIVED_AGENT_NOT_FOUND',
+          message: 'Archived agent not found or you do not have access to it'
+        }
+      });
+    }
+
+    return handleDatabaseError(res, error, 'fetching archived agent details');
+  }
+});
+
+/**
+ * GET /api/user/archive/messages
+ * Get list of archived messages with optional agent filter and pagination
+ */
+router.get('/archive/messages', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const agentId = req.query.agentId || null;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Validate agentId if provided
+    if (agentId && !isValidUUID(agentId)) {
+      return validationError(res, 'Invalid agent ID format');
+    }
+
+    // Validate pagination parameters
+    if (limit < 1 || limit > 100) {
+      return validationError(res, 'Limit must be between 1 and 100');
+    }
+
+    if (offset < 0) {
+      return validationError(res, 'Offset must be non-negative');
+    }
+
+    // Get archived messages
+    const result = await archiveService.getArchivedMessages(userId, { agentId, limit, offset });
+
+    // Format response with camelCase
+    const archivedMessages = result.archivedMessages.map(msg => ({
+      archivedMessageId: msg.archived_message_id,
+      messageId: msg.message_id,
+      userMessageId: msg.user_message_id,
+      agentId: msg.agent_id,
+      messageType: msg.message_type,
+      contentSnapshot: msg.content_snapshot,
+      hasAttachments: msg.has_attachments,
+      archiveNote: msg.archive_note,
+      archivedAt: msg.archived_at.toISOString()
+    }));
+
+    res.status(200).json({
+      archivedMessages,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset
+    });
+
+  } catch (error) {
+    return handleDatabaseError(res, error, 'fetching archived messages');
+  }
+});
+
+/**
+ * DELETE /api/user/archive/:archivedAgentId
+ * Permanently delete an archived agent and its archived messages
+ */
+router.delete('/archive/:archivedAgentId', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { archivedAgentId } = req.params;
+
+    // Validate UUID format
+    if (!isValidUUID(archivedAgentId)) {
+      return validationError(res, 'Invalid archived agent ID format');
+    }
+
+    // Verify ownership - user must own the archived agent
+    const verifyResult = await query(
+      'SELECT archived_agent_id FROM archived_agents WHERE archived_agent_id = $1 AND user_id = $2',
+      [archivedAgentId, userId]
+    );
+
+    if (verifyResult.rows.length === 0) {
+      return res.status(404).json({
+        error: {
+          code: 'ARCHIVED_AGENT_NOT_FOUND',
+          message: 'Archived agent not found or access denied'
+        }
+      });
+    }
+
+    // Use transaction to ensure both deletes succeed or fail together
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      // Delete archived messages first
+      await client.query('DELETE FROM archived_messages WHERE archived_agent_id = $1', [archivedAgentId]);
+
+      // Then delete the archived agent
+      await client.query('DELETE FROM archived_agents WHERE archived_agent_id = $1', [archivedAgentId]);
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Archived agent permanently deleted'
+    });
+
+  } catch (error) {
+    console.error('Error permanently deleting archived agent:', error);
+    return handleDatabaseError(res, error, 'deleting archived agent');
+  }
+});
 
 module.exports = router;

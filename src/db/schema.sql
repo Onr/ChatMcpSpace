@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS user_responses CASCADE;
 DROP TABLE IF EXISTS question_options CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS user_messages CASCADE;
+DROP TABLE IF EXISTS feedback CASCADE;
 DROP TABLE IF EXISTS agents CASCADE;
 DROP TABLE IF EXISTS migrations CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
@@ -154,3 +155,17 @@ CREATE INDEX idx_attachments_sha256 ON attachments(sha256);
 CREATE INDEX idx_attachments_created_at ON attachments(created_at DESC);
 CREATE INDEX idx_message_attachments_message_id ON message_attachments(message_id);
 CREATE INDEX idx_user_message_attachments_user_message_id ON user_message_attachments(user_message_id);
+
+-- Feedback table (anonymous user feedback - no user_id for true anonymity)
+-- PRIVACY NOTE: user_agent intentionally omitted to ensure true anonymity.
+-- Storing user_agent alongside page_url and created_at enables browser fingerprinting
+-- that could potentially identify users, contradicting the anonymity promise.
+CREATE TABLE feedback (
+  feedback_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message TEXT,                           -- Nullable for love-only feedback
+  kind VARCHAR(20) NOT NULL DEFAULT 'feedback' CHECK (kind IN ('feedback', 'love')),
+  page_url TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_feedback_created_at ON feedback(created_at DESC);

@@ -32,14 +32,51 @@ const MAX_FILENAME_LENGTH = 200;
 
 
 /**
- * Allowed content types for image uploads
+ * Feature flag for general file uploads (PDFs, text, archives, etc.)
+ * Set ENABLE_GENERAL_FILE_UPLOADS=true in .env to enable
+ * When disabled, only images are accepted (prevents API bypass)
  */
-const ALLOWED_CONTENT_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif'
-];
+const ENABLE_GENERAL_FILE_UPLOADS = process.env.ENABLE_GENERAL_FILE_UPLOADS === 'true';
+
+/**
+ * Allowed content types for file uploads
+ * When ENABLE_GENERAL_FILE_UPLOADS is false, only images are allowed
+ */
+const ALLOWED_CONTENT_TYPES = ENABLE_GENERAL_FILE_UPLOADS
+  ? [
+    // Images
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'image/svg+xml',
+    // Documents
+    'application/pdf',
+    'text/plain',
+    'text/markdown',
+    'text/csv',
+    // Archives
+    'application/zip',
+    'application/gzip',
+    'application/x-tar',
+    // Code/Data
+    'application/json',
+    'application/xml',
+    'text/xml',
+    'text/html',
+    'text/css',
+    'text/javascript',
+    'application/javascript',
+    // Generic binary (fallback for unknown types)
+    'application/octet-stream'
+  ]
+  : [
+    // Images only (default - more restrictive)
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif'
+  ];
 
 /**
  * Configure multer for memory storage (we handle file storage ourselves)

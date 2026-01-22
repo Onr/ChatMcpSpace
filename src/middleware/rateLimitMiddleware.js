@@ -177,6 +177,17 @@ const agentApiRateLimiter = createRateLimiter({
   keyPrefix: 'agent-api'
 });
 
+/**
+ * Rate limiter for feedback submissions
+ * 5 requests per minute per IP to prevent spam
+ */
+const feedbackRateLimiter = createRateLimiter({
+  windowMs: 60000, // 1 minute
+  max: 5,
+  message: 'Too many feedback submissions, please try again later',
+  keyPrefix: 'feedback'
+});
+
 // Legacy alias for backwards compatibility
 const pollingRateLimiter = agentPollingRateLimiter;
 
@@ -187,5 +198,6 @@ module.exports = {
   userPollingRateLimiter,
   agentPollingRateLimiter,
   pollingRateLimiter,
-  agentApiRateLimiter
+  agentApiRateLimiter,
+  feedbackRateLimiter
 };

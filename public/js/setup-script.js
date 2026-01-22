@@ -22,31 +22,37 @@
   }
 
   function showSetupSuccess(message) {
-    if (typeof window.showSuccessMessage === 'function') {
-      window.showSuccessMessage(message);
+    if (typeof window.showSuccess === 'function') {
+      window.showSuccess(message);
       return;
     }
-
-    createToast('success', message);
+    // Fallback if notifications.js not loaded (unlikely)
+    console.log('Success:', message);
   }
 
   function showSetupError(message) {
-    if (typeof window.showErrorMessage === 'function') {
-      window.showErrorMessage(message);
+    if (typeof window.showError === 'function') {
+      window.showError(message);
       return;
     }
-
-    createToast('error', message);
+    // Fallback
+    console.error('Error:', message);
   }
 
   function createToast(type, message) {
-    const toast = document.createElement('div');
-    const isSuccess = type === 'success';
-    toast.className = `fixed top-4 right-4 ${isSuccess ? 'bg-emerald-500/90 border border-emerald-400/50' : 'bg-red-500/90 border border-red-400/50'} text-white px-4 py-3 rounded-xl shadow-2xl z-50 backdrop-blur text-sm`;
-    toast.textContent = message;
-
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    if (type === 'success') {
+      if (typeof window.showSuccess === 'function') {
+        window.showSuccess(message);
+      } else {
+        console.warn('showSuccess handler not available:', message);
+      }
+    } else {
+      if (typeof window.showError === 'function') {
+        window.showError(message);
+      } else {
+        console.error('Error:', message);
+      }
+    }
   }
 
   async function copyTextToClipboard(text) {

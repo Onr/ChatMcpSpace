@@ -4,17 +4,70 @@
  */
 
 /**
+ * Mask an API key for display
+ */
+function maskApiKey(apiKey) {
+  if (!apiKey) return '';
+  // Show masked version like ••••••••-••••-••••-••••-••••••••••••
+  const parts = apiKey.split('-');
+  if (parts.length === 5) {
+    // UUID format
+    return parts.map(part => '•'.repeat(part.length)).join('-');
+  }
+  // Generic masking
+  return '•'.repeat(Math.min(apiKey.length, 32));
+}
+
+/**
+ * Toggle API key visibility
+ */
+let apiKeyVisible = false;
+
+function toggleApiKeyVisibility() {
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const eyeClosedIcon = document.getElementById('eyeClosedIcon');
+  const eyeOpenIcon = document.getElementById('eyeOpenIcon');
+
+  if (!apiKeyInput) return;
+
+  const realKey = apiKeyInput.dataset.realKey || '';
+  apiKeyVisible = !apiKeyVisible;
+
+  if (apiKeyVisible) {
+    // Show the real key
+    apiKeyInput.value = realKey;
+    eyeClosedIcon.classList.add('hidden');
+    eyeOpenIcon.classList.remove('hidden');
+  } else {
+    // Hide with masked version
+    apiKeyInput.value = maskApiKey(realKey);
+    eyeClosedIcon.classList.remove('hidden');
+    eyeOpenIcon.classList.add('hidden');
+  }
+}
+
+/**
+ * Initialize API key display (masked by default)
+ */
+function initApiKeyDisplay() {
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  if (apiKeyInput && apiKeyInput.dataset.realKey) {
+    apiKeyInput.value = maskApiKey(apiKeyInput.dataset.realKey);
+  }
+}
+
+/**
  * Copy API key to clipboard
  */
 function copyApiKey() {
   const apiKeyInput = document.getElementById('apiKeyInput');
+  if (!apiKeyInput) return;
 
-  // Select the text
-  apiKeyInput.select();
-  apiKeyInput.setSelectionRange(0, 99999); // For mobile devices
+  // Always copy the real key, not the masked version
+  const realKey = apiKeyInput.dataset.realKey || apiKeyInput.value;
 
   // Copy to clipboard
-  navigator.clipboard.writeText(apiKeyInput.value)
+  navigator.clipboard.writeText(realKey)
     .then(() => {
       showSuccessMessage('API key copied to clipboard!');
     })
@@ -23,7 +76,14 @@ function copyApiKey() {
 
       // Fallback for older browsers
       try {
+        const textarea = document.createElement('textarea');
+        textarea.value = realKey;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
         document.execCommand('copy');
+        document.body.removeChild(textarea);
         showSuccessMessage('API key copied to clipboard!');
       } catch (e) {
         showErrorMessage('Failed to copy API key. Please copy manually.');
@@ -257,44 +317,22 @@ function copyCurlCommand() {
  * Show success message
  */
 function showSuccessMessage(message) {
-  // Create success toast
-  const toast = document.createElement('div');
-  toast.className = 'fixed top-4 right-4 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2';
-  toast.innerHTML = `
-    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-    </svg>
-    <span>${message}</span>
-  `;
-
-  document.body.appendChild(toast);
-
-  // Remove after 3 seconds
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
+  if (typeof window.showSuccess === 'function') {
+    window.showSuccess(message);
+  } else {
+    console.warn('showSuccess handler not available:', message);
+  }
 }
 
 /**
  * Show error message
  */
 function showErrorMessage(message) {
-  // Create error toast
-  const toast = document.createElement('div');
-  toast.className = 'fixed top-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2';
-  toast.innerHTML = `
-    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-    </svg>
-    <span>${message}</span>
-  `;
-
-  document.body.appendChild(toast);
-
-  // Remove after 3 seconds
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
+  if (typeof window.showError === 'function') {
+    window.showError(message);
+  } else {
+    console.error('Error:', message);
+  }
 }
 
 // Expose to window for use by other scripts (e.g., setup-script.js)
@@ -456,6 +494,9 @@ function playSettingsNewAgentChime() {
  * Initialize agent instructions customization when settings page loads
  */
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialize API key with masked display
+  initApiKeyDisplay();
+
   if (window.apiGuideConfig) {
     initializeAgentInstructionsCustomization();
   }

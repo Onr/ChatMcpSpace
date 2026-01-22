@@ -60,6 +60,45 @@ async function applyEmailVerificationSchema(query) {
   `);
 }
 
+async function applyArchiveSchema(query) {
+  // Add hidden_from_agent to user_messages
+  await query('ALTER TABLE user_messages ADD COLUMN IF NOT EXISTS hidden_from_agent BOOLEAN DEFAULT FALSE');
+  // Add hidden_from_agent to messages (agent messages)
+  await query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS hidden_from_agent BOOLEAN DEFAULT FALSE');
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS archived_agents (
+      archived_agent_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      agent_id UUID NOT NULL UNIQUE,
+      user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      agent_name VARCHAR(255) NOT NULL,
+      agent_type VARCHAR(20) NOT NULL,
+      total_messages INTEGER NOT NULL DEFAULT 0,
+      archive_reason TEXT,
+      archived_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS archived_messages (
+      archived_message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      message_id UUID,
+      user_message_id UUID,
+      agent_id UUID NOT NULL,
+      user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      message_type VARCHAR(20) NOT NULL,
+      content_snapshot TEXT,
+      has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
+      archive_note TEXT,
+      archived_at TIMESTAMP DEFAULT NOW(),
+      CHECK (
+        (message_id IS NOT NULL AND user_message_id IS NULL) OR
+        (message_id IS NULL AND user_message_id IS NOT NULL)
+      )
+    )
+  `);
+}
+
 async function seedUser(query, overrides = {}) {
   const userId = overrides.userId || uuidv4();
   const email = overrides.email || 'test@example.com';
@@ -80,5 +119,6 @@ module.exports = {
   createTestDatabase,
   applyRuntimeUserColumns,
   applyEmailVerificationSchema,
+  applyArchiveSchema,
   seedUser,
 };

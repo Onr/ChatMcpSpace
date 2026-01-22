@@ -26,10 +26,8 @@
     <div class="text-center">
       <a href="/" class="inline-flex flex-col items-center gap-3 hover:opacity-80 transition-opacity">
         <svg class="w-16 h-16" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-          <!-- Dark circular background -->
-          <circle cx="128" cy="128" r="128" fill="#020617" />
           <!-- Central command center -->
-          <circle cx="128" cy="128" r="56" fill="#020617" stroke="#22d3ee" stroke-width="4" />
+          <circle cx="128" cy="128" r="56" fill="none" stroke="#22d3ee" stroke-width="4" />
           <!-- Inner thin orbit ring -->
           <circle cx="128" cy="128" r="72" fill="none" stroke="#0891b2" stroke-width="2" />
           <!-- Outer thin orbit ring -->
@@ -44,7 +42,7 @@
           <circle cx="40" cy="128" r="7" fill="#22d3ee" />
           <circle cx="65.8" cy="65.8" r="7" fill="#14b8a6" />
         </svg>
-        <span class="text-2xl font-bold text-white">ChatMCPspace</span>
+        <span class="text-2xl font-bold uppercase tracking-[0.15em] text-emerald-500/80">Chat MCP Space</span>
       </a>
     </div>
 
@@ -206,23 +204,39 @@
     const confirmPassword = document.getElementById('confirmPassword').value;
     
     if (!email || !email.includes('@')) {
-      alert('Please enter a valid email address');
+      if (typeof window.showError === 'function') {
+        window.showError('Please enter a valid email address');
+      } else {
+        console.error('Error: Please enter a valid email address');
+      }
       return;
     }
-    
+
     if (password.length < 8) {
-      alert('Password must be at least 8 characters long');
+      if (typeof window.showError === 'function') {
+        window.showError('Password must be at least 8 characters long');
+      } else {
+        console.error('Error: Password must be at least 8 characters long');
+      }
       return;
     }
-    
+
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      if (typeof window.showError === 'function') {
+        window.showError('Passwords do not match');
+      } else {
+        console.error('Error: Passwords do not match');
+      }
       return;
     }
 
     const agreeTerms = document.getElementById('agreeTerms').checked;
     if (!agreeTerms) {
-      alert('You must agree to the Terms of Service and Privacy Policy to create an account');
+      if (typeof window.showError === 'function') {
+        window.showError('You must agree to the Terms of Service and Privacy Policy to create an account');
+      } else {
+        console.error('Error: You must agree to the Terms of Service and Privacy Policy to create an account');
+      }
       return;
     }
 

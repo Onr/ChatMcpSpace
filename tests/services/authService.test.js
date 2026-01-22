@@ -72,7 +72,7 @@ describe('Auth Service', () => {
       expect(generateEncryptionSalt).toHaveBeenCalled();
       expect(query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO users'),
-        [validUser.email, 'hashed-password', 'mock-uuid', 'mock-salt']
+        [validUser.email, 'hashed-password', 'mock-uuid', 'mock-salt', expect.any(String)]
       );
       expect(result).toMatchObject({
         userId: 'user-id',

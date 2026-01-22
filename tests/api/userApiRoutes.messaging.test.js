@@ -2,13 +2,14 @@ const express = require('express');
 const request = require('supertest');
 const { v4: uuidv4 } = require('uuid');
 
-const { createTestDatabase, applyRuntimeUserColumns, seedUser } = require('../utils/pgMemTestUtils');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
 async function createUserApiTestContext() {
   jest.resetModules();
 
   const { pool, query } = createTestDatabase();
   await applyRuntimeUserColumns(query);
+  await applyArchiveSchema(query);
   const { userId } = await seedUser(query);
 
   jest.doMock('../../src/db/connection', () => ({
@@ -28,10 +29,10 @@ async function createUserApiTestContext() {
     logError: jest.fn(),
   }));
 
-  jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
-    userPollingRateLimiter: (_req, _res, next) => next(),
-  }));
-
+        jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
+          userPollingRateLimiter: (_req, _res, next) => next(),
+          feedbackRateLimiter: (_req, _res, next) => next(),
+        }));
   jest.doMock('../../src/services/ttsService', () => ({
     getAudioUrl: jest.fn().mockResolvedValue(null),
   }));

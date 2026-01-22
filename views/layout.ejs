@@ -155,14 +155,20 @@
                 <p class="text-[10px] text-slate-400 mt-0.5" style="display: none;">Monitor every agent, maintain
                   control, and delegate with focus.</p>
               </div>
-              <div class="flex flex-wrap items-center gap-2 text-sm text-slate-300 overflow-visible">
+              <div class="flex flex-wrap items-center gap-2 text-sm text-slate-300 overflow-visible nav-right-buttons">
                 <span
                   class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs tracking-wide uppercase">Signed
                   in
                   as <%= user.email %></span>
+                <button id="feedbackTriggerBtn" type="button"
+                  class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Feedback</button>
                 <div class="relative overflow-visible" id="settingsButtonWrapper">
                   <a href="/settings" id="navToggleButton"
-                    class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Settings</a>
+                    class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium relative"
+                    data-next-text="Dashboard">
+                    <span class="button-text">Settings</span>
+                    <span class="button-text-next">Dashboard</span>
+                  </a>
                 </div>
                 <script>
                   // Toggle button based on current page
@@ -273,6 +279,50 @@
             <%- body %>
           </main>
           <script src="/js/setup-script.js"></script>
+          <script src="/js/notifications.js"></script>
+          <script src="/js/page-transitions.js"></script>
+
+          <!-- Global Feedback Panel -->
+          <div id="feedbackPanel" class="feedback-panel hidden">
+            <div class="feedback-panel-header">
+              <h4 class="feedback-panel-title">Send Feedback</h4>
+              <button id="feedbackCloseBtn" type="button" class="feedback-close-btn" aria-label="Close feedback">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div class="feedback-panel-body">
+              <p class="feedback-panel-hint">Your feedback is completely anonymous.</p>
+              <textarea id="feedbackTextarea" class="feedback-textarea"
+                placeholder="What's on your mind? Bug reports, feature ideas, or just say hi..." rows="4"
+                maxlength="5000"></textarea>
+              <div class="feedback-char-count">
+                <span id="feedbackCharCount">0</span> / 5000
+              </div>
+            </div>
+            <div class="feedback-panel-footer">
+              <button id="feedbackLoveBtn" type="button" class="feedback-love-btn" title="Send some love!">
+                <svg fill="currentColor" viewBox="0 0 24 24" class="w-5 h-5">
+                  <path
+                    d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
+              </button>
+              <button id="feedbackSendBtn" type="button" class="feedback-send-btn" disabled>
+                Send Feedback
+              </button>
+            </div>
+
+            <!-- Success State -->
+            <div id="feedbackSuccess" class="feedback-success hidden">
+              <svg class="feedback-success-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span class="feedback-success-text">Thanks!</span>
+            </div>
+          </div>
+          <script src="/js/feedback.js"></script>
 </body>
 
 </html>

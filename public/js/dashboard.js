@@ -43,7 +43,9 @@ let activeTtsUtterance = null; // Track active SpeechSynthesisUtterance instance
 let globalNotifiedMessages = new Set(); // Track message IDs globally to prevent duplicate TTS across agents
 let ttsAudioLock = false; // Prevent overlapping TTS audio playback
 let pendingTtsQueue = []; // Queue TTS requests when audio is locked
-const GLOBAL_NOTIFICATION_TTL = 30000; // Clear global notification tracking after 30 seconds
+const GLOBAL_NOTIFICATION_TTL = 300000; // Clear global notification tracking after 5 minutes
+const NOTIFIED_MESSAGES_STORAGE_KEY = 'dashboard_notified_messages'; // sessionStorage key
+const LAST_AGENT_STORAGE_KEY = 'dashboard_last_agent_id'; // localStorage key for last opened agent
 let currentAgentList = []; // Latest agent list snapshot for orbit layout
 let currentOrbitLayout = null; // Computed orbit layout for drag/drop
 let orbitDragState = null; // Active drag state for orbit seats
@@ -52,6 +54,7 @@ let orbitDragHandlersInitialized = false; // Ensure drag handlers are attached o
 let pendingImages = []; // Array of {file, previewUrl, status, attachmentId, error} for image uploads
 let isUploadingImages = false; // Flag to track if images are currently being uploaded
 const MAX_IMAGES_PER_MESSAGE = 10; // Maximum images allowed per message
+let lastAgentRestorationAttempted = false; // Flag to ensure we only try to restore once on page load
 const ORBIT_RING_KEYS = ['urgent', 'attention', 'idle'];
 const ORBIT_CONFIG = {
   ringRadii: {
@@ -66,6 +69,75 @@ const ORBIT_CONFIG = {
     idle: 2
   }
 };
+
+// Size limits for spheres (in pixels)
+const SPHERE_SIZE_LIMITS = {
+  min: 28,  // Minimum readable size
+  max: 56,  // Default/maximum size (w-14 = 56px)
+  spacing: 6  // Minimum gap between spheres
+};
+
+/**
+ * Calculate the optimal sphere size based on the number of agents and container size.
+ * This prevents spheres from overlapping when there are many agents or the screen is small.
+ * 
+ * The calculation is based on the arc length between adjacent agents on the outermost ring.
+ * Arc length = 2 * π * radius * (angle / 360) where angle = 360 / numAgents
+ * For non-overlapping spheres: sphereDiameter + spacing <= arcLength
+ * 
+ * @param {number} numAgents - Total number of agents in the orbit
+ * @returns {number} The optimal sphere size in pixels
+ */
+function calculateDynamicSphereSize(numAgents) {
+  if (numAgents <= 0) {
+    return SPHERE_SIZE_LIMITS.max;
+  }
+
+  // Get the orbit container element to determine its actual size
+  const orbitContainer = document.querySelector('.council-orbit');
+  if (!orbitContainer) {
+    // Fallback to a reasonable estimate if container not found
+    return calculateSphereFromCircumference(numAgents, 400);
+  }
+
+  // Use the smaller dimension to ensure spheres fit in a square container
+  const containerSize = Math.min(orbitContainer.clientWidth, orbitContainer.clientHeight);
+
+  // If container is too small or not rendered yet, use minimum size
+  if (containerSize < 200) {
+    return calculateSphereFromCircumference(numAgents, 300);
+  }
+
+  return calculateSphereFromCircumference(numAgents, containerSize);
+}
+
+/**
+ * Calculate sphere size based on circumference and agent count
+ * @param {number} numAgents - Number of agents
+ * @param {number} containerSize - Container dimension in pixels
+ * @returns {number} Optimal sphere size in pixels
+ */
+function calculateSphereFromCircumference(numAgents, containerSize) {
+  // Use the outermost ring (idle) radius as reference (46% of container)
+  const outerRingRadiusPercent = ORBIT_CONFIG.ringRadii.idle;
+  const outerRingRadius = (containerSize / 2) * (outerRingRadiusPercent / 50);
+
+  // Calculate the circumference of the outermost ring
+  const circumference = 2 * Math.PI * outerRingRadius;
+
+  // Calculate the arc length per agent
+  const arcPerAgent = circumference / numAgents;
+
+  // The sphere diameter should be less than the arc length minus spacing
+  // Allow spheres to use up to 85% of available arc space for a balanced look
+  const maxSphereSize = (arcPerAgent - SPHERE_SIZE_LIMITS.spacing) * 0.85;
+
+  // Clamp between min and max sizes
+  return Math.round(
+    Math.max(SPHERE_SIZE_LIMITS.min, Math.min(SPHERE_SIZE_LIMITS.max, maxSphereSize))
+  );
+}
+
 const ORBIT_DRAG_THRESHOLD = 6;
 const MARKDOWN_RENDER_OPTIONS = {
   gfm: true,
@@ -104,6 +176,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Start polling agent list
   startAgentPolling();
 
+  // Attempt to restore last opened agent after a short delay to ensure agent list is loaded
+  setupLastAgentRestoration();
+
   // Set up agent selection handlers
   setupAgentSelectionHandlers();
 
@@ -128,11 +203,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup copy buttons
   setupCopyButtons();
 
+  // Setup archive buttons
+  setupArchiveButtons();
+
   // Setup TTS keyboard shortcuts
   setupMessageTtsShortcuts();
 
   // Initialize mobile dock
   initializeMobileDock();
+
+  // Initialize feedback widget
+  // Feedback widget initialized by feedback.js
+
 
   // Setup mobile stats toggle
   const mobileStatsToggle = document.getElementById('mobileStatsToggle');
@@ -150,6 +232,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('beforeunload', () => {
     stopAgentPolling();
     stopMessagePolling();
+  });
+
+  // Re-render agents on window resize to recalculate sphere sizes
+  let resizeTimeout = null;
+  window.addEventListener('resize', () => {
+    // Debounce resize handler
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout);
+    }
+    resizeTimeout = setTimeout(() => {
+      if (currentAgentList.length > 0) {
+        updateAgentListUI(currentAgentList);
+      }
+    }, 150);
   });
 });
 
@@ -368,9 +464,10 @@ function updateAgentListUI(agents) {
     const renderTimestamp = Date.now();
     const marbleSvg = MarbleGenerator.generateMarble(agent.agentId, 100, agent.name, `update-${renderTimestamp}`);
 
-    // Dynamic sizing
-    // Dynamic sizing - Standardized
-    let sizeClass = 'w-14 h-14';
+    // Dynamic sizing based on agent count and container size
+    // Calculate the maximum sphere size that prevents overlapping
+    const sphereSize = calculateDynamicSphereSize(totalAgents);
+    const sizeStyle = `width: ${sphereSize}px; height: ${sphereSize}px;`;
 
     return `
       <div 
@@ -398,13 +495,13 @@ function updateAgentListUI(agents) {
               <span>i</span>
             </div>
           ` : ''}
-          <div class="${sizeClass} rounded-full relative z-10 transition-transform duration-300 group-hover:scale-110 overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900">
+          <div class="rounded-full relative z-10 transition-transform duration-300 group-hover:scale-110 overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900" style="${sizeStyle}">
             <div class="w-full h-full marble-container">
                 ${marbleSvg}
             </div>
             <!-- Agent Initials Overlay -->
             <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span class="text-white font-bold text-xl opacity-90" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);">
+              <span class="text-white font-bold opacity-90" style="font-size: ${Math.max(sphereSize * 0.32, 10)}px; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);">
                 ${escapeHtml(agent.name.substring(0, 2).toUpperCase())}
               </span>
             </div>
@@ -561,7 +658,8 @@ function setupAgentListHandlers() {
         priority: item.getAttribute('data-agent-priority'),
         agentType: item.getAttribute('data-agent-type') || 'standard',
         unread: Number(item.getAttribute('data-agent-unread') || 0),
-        lastActivity: item.getAttribute('data-agent-last-activity')
+        lastActivity: item.getAttribute('data-agent-last-activity'),
+        shouldCollapse: true
       };
 
       // Update list selection
@@ -657,7 +755,8 @@ function setupAgentSelectionHandlers() {
         priority: seat.getAttribute('data-agent-priority'),
         agentType: seat.getAttribute('data-agent-type') || 'standard',
         unread: Number(seat.getAttribute('data-agent-unread') || 0),
-        lastActivity: seat.getAttribute('data-agent-last-activity')
+        lastActivity: seat.getAttribute('data-agent-last-activity'),
+        shouldCollapse: true
       };
 
       // If clicking on the already selected agent, show floating context menu (only for real mouse clicks)
@@ -1019,6 +1118,8 @@ function updateComposerState() {
   // Get file input and label elements
   const imageFileInput = document.getElementById('imageFileInput');
   const imageUploadLabel = document.getElementById('imageUploadLabel');
+  const generalFileInput = document.getElementById('generalFileInput');
+  const generalFileUploadLabel = document.getElementById('generalFileUploadLabel');
 
   // For news feed agents, show read-only activity log placeholder
   if (isNewsFeed) {
@@ -1069,6 +1170,27 @@ function updateComposerState() {
       } else {
         imageUploadLabel.classList.add('disabled');
         imageUploadLabel.title = `Maximum ${MAX_IMAGES_PER_MESSAGE} images allowed`;
+      }
+    }
+
+    // Enable/disable general file upload (same logic as images)
+    const canUploadFiles = hasAgent && hasEncryptionKey && pendingImages.length < MAX_IMAGES_PER_MESSAGE;
+    if (generalFileInput) {
+      generalFileInput.disabled = !canUploadFiles;
+    }
+    if (generalFileUploadLabel) {
+      if (canUploadFiles) {
+        generalFileUploadLabel.classList.remove('disabled');
+        generalFileUploadLabel.title = 'Attach files (PDF, TXT, etc.)';
+      } else if (!hasAgent) {
+        generalFileUploadLabel.classList.add('disabled');
+        generalFileUploadLabel.title = 'Select an agent first';
+      } else if (!hasEncryptionKey) {
+        generalFileUploadLabel.classList.add('disabled');
+        generalFileUploadLabel.title = 'Set encryption password to upload files';
+      } else {
+        generalFileUploadLabel.classList.add('disabled');
+        generalFileUploadLabel.title = `Maximum ${MAX_IMAGES_PER_MESSAGE} attachments allowed`;
       }
     }
   }
@@ -1386,8 +1508,8 @@ async function loadAgentConfig() {
           if (config.sandbox_mode === 'none') modeStr = 'FULL ACCESS';
           else modeStr = config.sandbox_mode || 'workspace-write';
         } else if (config.model_provider === 'gemini') {
-          // Gemini always runs in YOLO mode (sandbox disabled for compatibility)
-          modeStr = 'YOLO';
+          if (config.approval_mode === 'full-auto') modeStr = 'YOLO';
+          else modeStr = config.sandbox_mode === 'none' ? 'No Sandbox' : 'Sandboxed';
         } else if (config.model_provider === 'claude') {
           if (config.sandbox_mode === 'none') modeStr = 'Bypass Permissions';
           else modeStr = config.approval_mode || 'default';
@@ -1525,8 +1647,7 @@ function applyPermissionRestrictions(allowedPermissions, currentProvider) {
  * Show success message toast
  */
 function showSuccessMessage(message) {
-  // Simple alert for now - could be enhanced to toast
-  console.log('Success:', message);
+  window.showSuccess(message);
 }
 
 /**
@@ -1734,6 +1855,53 @@ function setupImageUpload() {
   if (clearAllImagesBtn) {
     clearAllImagesBtn.addEventListener('click', () => {
       clearAllImages();
+    });
+  }
+
+  // Handle general file input (for non-image files like PDFs, text, etc.)
+  const generalFileInput = document.getElementById('generalFileInput');
+  if (generalFileInput) {
+    generalFileInput.addEventListener('change', (event) => {
+      const files = Array.from(event.target.files);
+      if (files.length === 0) return;
+
+      // Check if adding these would exceed the limit
+      const remainingSlots = MAX_IMAGES_PER_MESSAGE - pendingImages.length;
+      if (files.length > remainingSlots) {
+        showErrorMessage(`You can only attach ${MAX_IMAGES_PER_MESSAGE} files per message. ${remainingSlots} slots remaining.`);
+        files.splice(remainingSlots);
+      }
+
+      // Add files to pending attachments
+      files.forEach(file => {
+        // Validate file size (20MB max for general files)
+        const maxSize = 20 * 1024 * 1024;
+        if (file.size > maxSize) {
+          showErrorMessage(`${file.name}: File too large. Maximum size is 20MB.`);
+          return;
+        }
+
+        // Create preview URL (will show file icon for non-images)
+        const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+
+        // Add to pending images (reusing the same array for all attachments)
+        pendingImages.push({
+          id: crypto.randomUUID(),
+          file,
+          previewUrl,
+          isFile: true, // Flag to indicate this is a general file, not just an image
+          status: 'pending',
+          attachmentId: null,
+          error: null
+        });
+      });
+
+      // Clear the input so the same file can be selected again
+      generalFileInput.value = '';
+
+      // Update the UI
+      renderImagePreviews();
+      updateComposerState();
     });
   }
 
@@ -1983,9 +2151,31 @@ function renderImagePreviews() {
         break;
     }
 
+    // Determine if this is an image or a general file
+    const isImage = img.file.type.startsWith('image/') && img.previewUrl;
+
+    // Content to display (image preview or file icon)
+    let contentHtml;
+    if (isImage) {
+      contentHtml = `<img src="${img.previewUrl}" alt="${escapeHtml(img.file.name)}" />`;
+    } else {
+      // Show file icon for non-image files
+      const fileExt = img.file.name.split('.').pop()?.toUpperCase() || 'FILE';
+      contentHtml = `
+        <div class="file-preview-icon">
+          <svg class="w-8 h-8 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" 
+              d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          </svg>
+          <span class="file-ext-label">${escapeHtml(fileExt)}</span>
+        </div>
+      `;
+      itemClass += ' file-preview-item';
+    }
+
     return `
       <div class="${itemClass}" data-image-id="${img.id}" title="${img.error || img.file.name}">
-        <img src="${img.previewUrl}" alt="${escapeHtml(img.file.name)}" />
+        ${contentHtml}
         <button type="button" class="image-preview-remove" onclick="removeImage('${img.id}')" title="Remove">
           &times;
         </button>
@@ -2544,6 +2734,9 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   lastMessageTimestamp = null;
   lastMessageCursor = null;
 
+  // Save this agent as the last opened conversation
+  localStorage.setItem(LAST_AGENT_STORAGE_KEY, agentId);
+
   // Show agent panel
   const placeholder = document.getElementById('agentPanelPlaceholder');
   const header = document.getElementById('agentPanelHeader');
@@ -2658,8 +2851,10 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   // Update mobile dock center to show selected agent
   syncDockToSelectedAgent(agentId);
 
-  // Auto-collapse mobile list when an agent is selected
-  setMobileListExpanded(false);
+  // Auto-collapse mobile list when an agent is directly selected (not via nav buttons)
+  if (metadata.shouldCollapse) {
+    setMobileListExpanded(false);
+  }
 }
 
 
@@ -3142,9 +3337,11 @@ function createMessageElement(message) {
       contentHtml = '';
     }
 
+    const hiddenClass = message.hiddenFromAgent ? 'message-bubble--hidden-from-agent' : '';
+
     div.innerHTML = `
       <div class="flex justify-start">
-        <div class="message-bubble p-3 ${priorityClass} ${urgentClass}">
+        <div class="message-bubble p-3 ${priorityClass} ${urgentClass} ${hiddenClass}">
           ${message.urgent ? '<span class="inline-block px-2 py-0.5 text-xs font-semibold text-red-200 bg-red-500/20 rounded mb-2">URGENT</span>' : ''}
           <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${contentHtml}</div>
           <div class="message-footer">
@@ -3220,9 +3417,12 @@ function createMessageElement(message) {
       userContentHtml = '';
     }
 
+    // Add hidden-from-agent class if applicable
+    const hiddenClass = message.hiddenFromAgent ? ' message-bubble--hidden-from-agent' : '';
+
     div.innerHTML = `
       <div class="flex justify-end">
-        <div class="message-bubble message-bubble--user p-3 text-right">
+        <div class="message-bubble message-bubble--user${hiddenClass} p-3 text-right">
           <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${userContentHtml}</div>
           <div class="message-footer">
             <p class="message-timestamp text-xs text-slate-400">${formatTimestamp(message.timestamp)}${readIcon}</p>
@@ -3365,6 +3565,147 @@ function attachMessageTtsButton(bubble, message) {
       }
     });
     utilities.appendChild(deleteButton);
+  }
+
+  // Add hide from agent toggle button (for both user and agent messages)
+  if ((message.type === 'user_message' || message.type === 'agent_message' || message.type === 'agent_question') && !utilities.querySelector('.message-hide-btn')) {
+    const hideButton = document.createElement('button');
+    hideButton.type = 'button';
+    hideButton.className = 'message-utility-btn message-hide-btn relative overflow-hidden group';
+    const isHidden = message.hiddenFromAgent || false;
+    hideButton.dataset.hidden = isHidden ? 'true' : 'false';
+    hideButton.dataset.messageId = message.messageId;
+
+    // Natural Eye Animation Configuration
+    const labelText = isHidden ? 'Show to agent' : 'Hide from agent';
+    const titleText = isHidden
+      ? 'Click to show this message to the agent'
+      : 'Click to hide this message from the agent';
+
+    hideButton.setAttribute('aria-label', labelText);
+    hideButton.title = titleText;
+
+    // New Structure: Single SVG with animating parts
+    hideButton.innerHTML = `
+      <div class="eye-icon-wrapper relative w-5 h-5 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full overflow-visible">
+            <!-- Pupil -->
+            <circle class="pupil transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]" cx="12" cy="12" r="3" style="transform-origin: 12px 12px"></circle>
+            
+            <!-- Top Lid -->
+            <path class="lid-top transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]" d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12" style="transform-origin: 12px 12px"></path>
+            
+            <!-- Bottom Lid -->
+            <path class="lid-bottom transition-all duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]" d="M1 12C1 12 5 20 12 20C19 20 23 12 23 12" style="transform-origin: 12px 12px"></path>
+            
+            <!-- Lashes (visible when closed) -->
+            <g class="lashes transition-opacity duration-200 ease-in-out" style="opacity: 0">
+               <path d="M4 14l1 2M9 16l1 2M14 16l1 2M19 14l1 2" stroke-width="1.5"></path>
+            </g>
+          </svg>
+      </div>
+      <span class="sr-only">Toggle Visibility</span>
+    `;
+
+    // Helper to apply state styles
+    const setEyeState = (element, hidden) => {
+        const pupil = element.querySelector('.pupil');
+        const lidTop = element.querySelector('.lid-top');
+        const lidBottom = element.querySelector('.lid-bottom');
+        const lashes = element.querySelector('.lashes');
+        
+        if (hidden) {
+            // Closed: Lids meet at a slight downward curve (Arch), Pupil shrinks, Lashes appear
+            pupil.style.transform = 'scale(0)';
+            pupil.style.opacity = '0';
+            
+            // Top lid flattens slightly but keeps arch shape (0.15)
+            lidTop.style.transform = 'scaleY(0.15)';
+            
+            // Bottom lid inverts to match the top lid's arch (-0.15)
+            lidBottom.style.transform = 'scaleY(-0.15)';
+            
+            lashes.style.opacity = '1';
+        } else {
+            // Open: Restore defaults
+            pupil.style.transform = 'scale(1)';
+            pupil.style.opacity = '1';
+            lidTop.style.transform = 'scaleY(1)';
+            lidBottom.style.transform = 'scaleY(1)';
+            lashes.style.opacity = '0';
+        }
+    };
+
+    // Initialize state
+    setEyeState(hideButton, isHidden);
+
+    hideButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const currentlyHidden = hideButton.dataset.hidden === 'true';
+      const newHiddenState = !currentlyHidden;
+
+      hideButton.dataset.hidden = newHiddenState ? 'true' : 'false';
+
+      // Update label (same for all message types - we're hiding FROM the agent)
+      hideButton.setAttribute('aria-label', newHiddenState ? 'Show to agent' : 'Hide from agent');
+      hideButton.title = newHiddenState ? 'Click to show this message to the agent' : 'Click to hide this message from the agent';
+
+      // Animate
+      setEyeState(hideButton, newHiddenState);
+
+      try {
+        // Determine the correct API endpoint based on message type
+        const apiEndpoint = message.type === 'user_message'
+          ? `/api/user/messages/${message.messageId}/hidden`
+          : `/api/user/agent-messages/${message.messageId}/hidden`;
+
+        const response = await fetch(apiEndpoint, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          body: JSON.stringify({ hidden: newHiddenState })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('API Error Response:', response.status, errorData);
+          throw new Error(`Failed to update message visibility: ${response.status} ${errorData.error?.message || ''}`);
+        }
+
+        // Update message bubble styling
+        const msgElement = document.querySelector(`[data-message-id="${message.messageId}"]`);
+        if (msgElement) {
+          const bubbleEl = msgElement.querySelector('.message-bubble');
+          if (bubbleEl) {
+            if (newHiddenState) {
+              bubbleEl.classList.add('message-bubble--hidden-from-agent');
+            } else {
+              bubbleEl.classList.remove('message-bubble--hidden-from-agent');
+            }
+          }
+        }
+
+        // Update cache
+        if (selectedAgentId && conversationCache.has(selectedAgentId)) {
+          const cached = conversationCache.get(selectedAgentId);
+          const msgIndex = cached.findIndex(m => m.messageId === message.messageId);
+          if (msgIndex >= 0) {
+            cached[msgIndex].hiddenFromAgent = newHiddenState;
+          }
+        }
+      } catch (error) {
+        console.error('Error toggling message visibility:', error);
+
+        // Revert UI on error
+        hideButton.dataset.hidden = currentlyHidden ? 'true' : 'false';
+        setEyeState(hideButton, currentlyHidden);
+
+        window.showError('Failed to update message visibility. Please try again.');
+      }
+    });
+    utilities.appendChild(hideButton);
   }
 }
 
@@ -3694,19 +4035,9 @@ async function selectOption(questionId, optionId, optionElement) {
 /**
  * Show error message
  */
-function showErrorMessage(message) {
-  // Create error toast
-  const toast = document.createElement('div');
-  toast.className = 'fixed top-4 right-4 bg-red-500/90 text-white px-4 py-3 rounded-xl shadow-2xl z-50 border border-red-400/50 backdrop-blur';
-  toast.textContent = message;
-
-  document.body.appendChild(toast);
-
-  // Remove after 3 seconds
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
-}
+// window.showError is defined in notifications.js
+// We map the old function name for backward compatibility if needed, but we should switch usages
+const showErrorMessage = (message) => window.showError(message);
 
 /**
  * Trigger a ripple animation on the agent's avatar
@@ -3913,13 +4244,85 @@ function getTimestampValue(timestamp) {
   return Number.isNaN(value) ? null : value;
 }
 
+/**
+ * Load notified message IDs from sessionStorage
+ * Returns a Map of messageId -> timestamp
+ */
+function loadNotifiedMessagesFromStorage() {
+  try {
+    const stored = sessionStorage.getItem(NOTIFIED_MESSAGES_STORAGE_KEY);
+    if (!stored) return new Map();
+    const parsed = JSON.parse(stored);
+    const now = Date.now();
+    const result = new Map();
+    // Filter out expired entries while loading
+    for (const [id, ts] of Object.entries(parsed)) {
+      if (now - ts < GLOBAL_NOTIFICATION_TTL) {
+        result.set(id, ts);
+      }
+    }
+    return result;
+  } catch (e) {
+    console.warn('Failed to load notified messages from storage:', e);
+    return new Map();
+  }
+}
+
+/**
+ * Save notified message IDs to sessionStorage
+ */
+function saveNotifiedMessagesToStorage(messagesMap) {
+  try {
+    const obj = Object.fromEntries(messagesMap);
+    sessionStorage.setItem(NOTIFIED_MESSAGES_STORAGE_KEY, JSON.stringify(obj));
+  } catch (e) {
+    console.warn('Failed to save notified messages to storage:', e);
+  }
+}
+
+/**
+ * Check if a message has been notified (checks both in-memory and persistent storage)
+ */
+function isMessageNotified(messageId) {
+  if (!messageId) return false;
+  // Check in-memory set first (faster)
+  if (globalNotifiedMessages.has(messageId)) return true;
+  // Check persistent storage
+  const stored = loadNotifiedMessagesFromStorage();
+  if (stored.has(messageId)) {
+    // Sync to in-memory set for faster future lookups
+    globalNotifiedMessages.add(messageId);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Mark a message as notified (in both in-memory and persistent storage)
+ */
+function markMessageAsNotified(messageId) {
+  if (!messageId) return;
+  const now = Date.now();
+  // Add to in-memory set
+  globalNotifiedMessages.add(messageId);
+  // Add to persistent storage
+  const stored = loadNotifiedMessagesFromStorage();
+  stored.set(messageId, now);
+  saveNotifiedMessagesToStorage(stored);
+  // Schedule cleanup from in-memory set (storage cleanup happens on load)
+  setTimeout(() => {
+    globalNotifiedMessages.delete(messageId);
+  }, GLOBAL_NOTIFICATION_TTL);
+}
+
 function shouldNotifyAgentMessage(agentId, timestamp, messageId) {
   if (!agentId) {
     return false;
   }
 
   // Check global notification set first - prevents duplicate TTS across agents
-  if (messageId && globalNotifiedMessages.has(messageId)) {
+  // This now checks both in-memory and persistent storage
+  if (isMessageNotified(messageId)) {
     return false;
   }
 
@@ -3943,12 +4346,8 @@ function markAgentMessageNotified(agentId, timestamp, messageId) {
   const lastNotified = lastNotifiedAgentMessage.get(agentId) || { time: 0, id: null };
 
   if (messageId) {
-    // Add to global set to prevent duplicate TTS across agents
-    globalNotifiedMessages.add(messageId);
-    // Auto-cleanup after TTL to prevent memory growth
-    setTimeout(() => {
-      globalNotifiedMessages.delete(messageId);
-    }, GLOBAL_NOTIFICATION_TTL);
+    // Add to global set AND persistent storage to prevent duplicate TTS across agents
+    markMessageAsNotified(messageId);
 
     lastNotifiedAgentMessage.set(agentId, {
       time: messageTime === null ? lastNotified.time : messageTime,
@@ -4564,7 +4963,8 @@ function setupKeyboardNavigation() {
           const metadata = {
             priority: focusedListItem.getAttribute('data-agent-priority'),
             unread: Number(focusedListItem.getAttribute('data-agent-unread') || 0),
-            lastActivity: focusedListItem.getAttribute('data-agent-last-activity')
+            lastActivity: focusedListItem.getAttribute('data-agent-last-activity'),
+            shouldCollapse: true
           };
 
           hideFloatingAgentMenu();
@@ -4661,7 +5061,8 @@ function setupKeyboardNavigation() {
             const metadata = {
               priority: seat.getAttribute('data-agent-priority'),
               unread: Number(seat.getAttribute('data-agent-unread') || 0),
-              lastActivity: seat.getAttribute('data-agent-last-activity')
+              lastActivity: seat.getAttribute('data-agent-last-activity'),
+              shouldCollapse: true
             };
 
             hideFloatingAgentMenu();
@@ -5289,6 +5690,14 @@ function setMobileListExpanded(expanded) {
   // ideally we remove dependence on body class, but keep it for safety if unrelated things use it
   document.body.classList.toggle('mobile-list-expanded', expanded);
 
+  // Collapse/expand the agent dock (spheres section) along with the list
+  const mobileAgentDock = document.getElementById('mobileAgentDock');
+  if (mobileAgentDock) {
+    // When list is collapsed, also collapse the dock
+    // When list is expanded, show the dock
+    mobileAgentDock.classList.toggle('mobile-agent-dock--collapsed', !expanded);
+  }
+
   const toggleBtn = document.getElementById('collapseMobileListBtn');
   if (toggleBtn) {
     toggleBtn.title = expanded ? 'Collapse List' : 'Expand List';
@@ -5351,12 +5760,37 @@ function initializeMobileDock() {
   const dockNavRight = document.getElementById('dockNavRight');
   const dockCarousel = document.getElementById('dockCarousel');
 
-  // Ensure the toggle button label matches current state
-  setMobileListExpanded(document.body.classList.contains('mobile-list-expanded'));
+  // Header Navigation (for collapsed state)
+  const headerNavLeft = document.getElementById('headerNavLeft');
+  const headerNavRight = document.getElementById('headerNavRight');
+  const mobileHeader = document.getElementById('mobileHeader');
 
-  // Replace scroll navigation with agent selection navigation
+  // Auto-expand list view on mobile by default
+  const isMobile = window.matchMedia('(max-width: 1023px)').matches;
+  if (isMobile) {
+    setMobileListExpanded(true);
+  } else {
+    setMobileListExpanded(document.body.classList.contains('mobile-list-expanded'));
+  }
+
+  // --- Header Navigation Buttons ---
+  if (headerNavLeft) {
+    headerNavLeft.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateDockAgent(-1);
+    });
+  }
+  if (headerNavRight) {
+    headerNavRight.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateDockAgent(1);
+    });
+  }
+
+  // --- Dock Navigation Buttons ---
   if (dockNavLeft) {
-    // Clone node to remove old listeners if any, or just overwrite
     const newLeft = dockNavLeft.cloneNode(true);
     dockNavLeft.parentNode.replaceChild(newLeft, dockNavLeft);
     newLeft.addEventListener('click', (e) => {
@@ -5364,9 +5798,8 @@ function initializeMobileDock() {
       e.stopPropagation();
       navigateDockAgent(-1);
     });
-    // Add touch listener for faster mobile response
     newLeft.addEventListener('touchstart', (e) => {
-      e.preventDefault(); // Prevent double-fire on some devices
+      e.preventDefault();
       e.stopPropagation();
       navigateDockAgent(-1);
     }, { passive: false });
@@ -5380,7 +5813,6 @@ function initializeMobileDock() {
       e.stopPropagation();
       navigateDockAgent(1);
     });
-    // Add touch listener for faster mobile response
     newRight.addEventListener('touchstart', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -5388,48 +5820,92 @@ function initializeMobileDock() {
     }, { passive: false });
   }
 
+  // --- Swipe Detection (Carousel) ---
   if (dockCarousel) {
-    // Track when user is interacting with the dock
     dockCarousel.addEventListener('touchstart', () => {
       dockSuppressAutoCentering = true;
     }, { passive: true });
 
-    // Re-enable auto-centering after a brief delay when user stops interacting
     dockCarousel.addEventListener('touchend', () => {
       setTimeout(() => {
         dockSuppressAutoCentering = false;
       }, 1000);
     });
 
-    // Vertical Swipe Detection for Mobile List View
-    let touchStartY = 0;
-    let touchStartX = 0;
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let swipeStartTime = 0;
 
-    // Attach to dock container (parent of carousel) specifically
-    const dockContainer = document.getElementById('mobileAgentDock');
-    if (dockContainer) {
-      dockContainer.addEventListener('touchstart', (e) => {
-        touchStartY = e.touches[0].clientY;
-        touchStartX = e.touches[0].clientX;
-      }, { passive: true });
+    dockCarousel.addEventListener('touchstart', (e) => {
+      swipeStartX = e.touches[0].clientX;
+      swipeStartY = e.touches[0].clientY;
+      swipeStartTime = Date.now();
+    }, { passive: true });
 
-      dockContainer.addEventListener('touchend', (e) => {
-        const touchEndY = e.changedTouches[0].clientY;
-        const touchEndX = e.changedTouches[0].clientX;
+    dockCarousel.addEventListener('touchend', (e) => {
+      const swipeEndX = e.changedTouches[0].clientX;
+      const swipeEndY = e.changedTouches[0].clientY;
+      const swipeTime = Date.now() - swipeStartTime;
+      const diffX = swipeEndX - swipeStartX;
+      const diffY = Math.abs(swipeEndY - swipeStartY);
+      const minSwipeDistance = 50;
+      const maxSwipeTime = 300;
 
-        const diffY = touchEndY - touchStartY;
-        const diffX = Math.abs(touchEndX - touchStartX);
-
-        // Detect downward swipe (positive Y diff)
-        // Must be significantly vertical and not horizontal scrolling
-        if (diffY > 50 && diffX < 30) {
-          setMobileListExpanded(true);
-        }
-      }, { passive: true });
-    }
+      if (Math.abs(diffX) > minSwipeDistance && diffY < 50 && swipeTime < maxSwipeTime) {
+        navigateDockAgent(diffX < 0 ? 1 : -1);
+        if (navigator.vibrate) navigator.vibrate(10);
+      }
+    }, { passive: true });
   }
 
-  // Robust collapse logic for mobile list using delegation
+  // --- Swipe Detection (Header - for collapsed navigation) ---
+  if (mobileHeader) {
+    let headerSwipeStartX = 0;
+    let headerSwipeStartY = 0;
+
+    mobileHeader.addEventListener('touchstart', (e) => {
+      headerSwipeStartX = e.touches[0].clientX;
+      headerSwipeStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    mobileHeader.addEventListener('touchend', (e) => {
+      const swipeEndX = e.changedTouches[0].clientX;
+      const swipeEndY = e.changedTouches[0].clientY;
+      const diffX = swipeEndX - headerSwipeStartX;
+      const diffY = Math.abs(swipeEndY - headerSwipeStartY);
+
+      // Only handle horizontal swipes on header
+      if (Math.abs(diffX) > 50 && diffY < 30) {
+        navigateDockAgent(diffX < 0 ? 1 : -1);
+        if (navigator.vibrate) navigator.vibrate(10);
+      }
+    }, { passive: true });
+  }
+
+  // --- Vertical Swipe for Mobile List Expand/Collapse ---
+  const dockContainer = document.getElementById('mobileAgentDock');
+  if (dockContainer) {
+    let listSwipeStartY = 0;
+    let listSwipeStartX = 0;
+
+    dockContainer.addEventListener('touchstart', (e) => {
+      listSwipeStartY = e.touches[0].clientY;
+      listSwipeStartX = e.touches[0].clientX;
+    }, { passive: true });
+
+    dockContainer.addEventListener('touchend', (e) => {
+      const touchEndY = e.changedTouches[0].clientY;
+      const touchEndX = e.changedTouches[0].clientX;
+      const diffY = touchEndY - listSwipeStartY;
+      const diffX = Math.abs(touchEndX - listSwipeStartX);
+
+      if (diffY > 50 && diffX < 30) {
+        setMobileListExpanded(true);
+      }
+    }, { passive: true });
+  }
+
+  // --- Collapse Button Handler ---
   document.addEventListener('click', (e) => {
     if (e.target.closest('#collapseMobileListBtn')) {
       if (navigator.vibrate) navigator.vibrate(10);
@@ -5446,11 +5922,9 @@ function initializeMobileDock() {
     }
   }, { passive: false });
 
-  // Close expanded list when tapping chat area or swiping up
-  const chatArea = document.querySelector('.grid.gap-5'); // Main container
+  // --- Auto-collapse on Interaction ---
+  const chatArea = document.querySelector('.grid.gap-5');
   if (chatArea) {
-
-    // Auto-collapse when scrolling down in chat or focusing input
     const conversationArea = document.getElementById('conversationArea');
     if (conversationArea) {
       conversationArea.addEventListener('scroll', () => {
@@ -5459,13 +5933,42 @@ function initializeMobileDock() {
         }
       }, { passive: true });
     }
-
     const messageInput = document.getElementById('userMessageInput');
     if (messageInput) {
       messageInput.addEventListener('focus', () => {
         setMobileListExpanded(false);
       });
     }
+  }
+
+  // --- Folding Header Scroll Logic ---
+  const listScroll = document.getElementById('agentListScroll');
+
+  if (listScroll && dockContainer && mobileHeader) {
+    let lastScrollTop = 0;
+
+    listScroll.addEventListener('scroll', () => {
+      if (!window.matchMedia('(max-width: 1023px)').matches) return;
+
+      const scrollTop = listScroll.scrollTop;
+      if (Math.abs(scrollTop - lastScrollTop) < 10) return;
+
+      if (scrollTop < 10) {
+        // At top: Show Dock, Hide Header Nav
+        dockContainer.classList.remove('mobile-agent-dock--collapsed');
+        mobileHeader.classList.remove('header--compact-nav-active');
+      } else if (scrollTop > lastScrollTop && scrollTop > 50) {
+        // Scrolling Down: Collapse Dock, Show Header Nav
+        dockContainer.classList.add('mobile-agent-dock--collapsed');
+        mobileHeader.classList.add('header--compact-nav-active');
+      } else if (scrollTop < lastScrollTop) {
+        // Scrolling Up: Show Dock, Hide Header Nav
+        dockContainer.classList.remove('mobile-agent-dock--collapsed');
+        mobileHeader.classList.remove('header--compact-nav-active');
+      }
+
+      lastScrollTop = scrollTop;
+    }, { passive: true });
   }
 }
 
@@ -5818,3 +6321,375 @@ function scrollDockToAgent(agentId, behavior = 'smooth') {
 function syncDockToSelectedAgent(agentId) {
   scrollDockToAgent(agentId);
 }
+
+/**
+ * ============================================
+ * Archive Feature
+ * ============================================
+ */
+
+let pendingArchive = null; // { agentId, archivedAgentId, timeout }
+
+/**
+ * Setup archive feature event listeners
+ */
+function setupArchiveButtons() {
+  const archiveAgentBtn = document.getElementById('archiveAgentBtn');
+  const floatingArchiveAgentBtn = document.getElementById('floatingArchiveAgentBtn');
+  const contextMenu = document.getElementById('agentContextMenu');
+  const archiveCancelBtn = document.getElementById('archiveCancelBtn');
+  const archiveConfirmBtn = document.getElementById('archiveConfirmBtn');
+  const archiveModal = document.getElementById('archiveConfirmationModal');
+
+  // Archive button in header context menu
+  if (archiveAgentBtn) {
+    archiveAgentBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      showArchiveConfirmationModal(selectedAgentId, selectedAgentName);
+      if (contextMenu) {
+        contextMenu.classList.add('hidden');
+      }
+    });
+  }
+
+  // Archive button in floating menu
+  if (floatingArchiveAgentBtn) {
+    floatingArchiveAgentBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      showArchiveConfirmationModal(selectedAgentId, selectedAgentName);
+      hideFloatingAgentMenu();
+    });
+  }
+
+  // Modal cancel button
+  if (archiveCancelBtn) {
+    archiveCancelBtn.addEventListener('click', () => {
+      hideArchiveConfirmationModal();
+    });
+  }
+
+  // Modal confirm button
+  if (archiveConfirmBtn) {
+    archiveConfirmBtn.addEventListener('click', async () => {
+      const agentId = archiveModal?.dataset?.agentId;
+      const agentName = archiveModal?.dataset?.agentName || selectedAgentName;
+      const reason = document.getElementById('archiveReasonInput')?.value?.trim() || null;
+
+      if (!agentId) {
+        showErrorMessage('Invalid agent selection');
+        return;
+      }
+
+      hideArchiveConfirmationModal();
+      await archiveAgent(agentId, agentName, reason);
+    });
+  }
+
+  // Close modal on backdrop click
+  if (archiveModal) {
+    archiveModal.addEventListener('click', (e) => {
+      if (e.target === archiveModal) {
+        hideArchiveConfirmationModal();
+      }
+    });
+  }
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && archiveModal && !archiveModal.classList.contains('hidden')) {
+      hideArchiveConfirmationModal();
+    }
+  });
+}
+
+/**
+ * Show archive confirmation modal
+ */
+function showArchiveConfirmationModal(agentId, agentName) {
+  const modal = document.getElementById('archiveConfirmationModal');
+  const modalLabel = document.getElementById('archiveModalAgentNameLabel');
+  const reasonInput = document.getElementById('archiveReasonInput');
+
+  if (!modal) return;
+
+  // Set agent info in dataset and label
+  modal.dataset.agentId = agentId;
+  modal.dataset.agentName = agentName;
+
+  if (modalLabel) {
+    modalLabel.innerHTML = `Archive "<strong>${agentName}</strong>"?`;
+  }
+
+  // Clear reason input
+  if (reasonInput) {
+    reasonInput.value = '';
+  }
+
+  // Show modal
+  modal.classList.remove('hidden');
+
+  // Focus reason input after modal appears
+  setTimeout(() => {
+    reasonInput?.focus();
+  }, 100);
+}
+
+/**
+ * Hide archive confirmation modal
+ */
+function hideArchiveConfirmationModal() {
+  const modal = document.getElementById('archiveConfirmationModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    delete modal.dataset.agentId;
+    delete modal.dataset.agentName;
+  }
+}
+
+/**
+ * Archive an agent
+ */
+async function archiveAgent(agentId, agentName, reason = null) {
+  try {
+    // Make API call
+    const response = await fetch(`/api/user/agents/${agentId}/archive`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': window.csrfToken
+      },
+      body: JSON.stringify({ reason })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorCode = errorData.error?.code;
+
+      if (errorCode === 'AGENT_NOT_FOUND') {
+        throw new Error('Agent not found');
+      } else if (errorCode === 'AGENT_ALREADY_ARCHIVED') {
+        throw new Error('Agent is already archived');
+      }
+      throw new Error(errorData.error?.message || 'Failed to archive agent');
+    }
+
+    const data = await response.json();
+
+    // Store undo information
+    pendingArchive = {
+      agentId: agentId,
+      agentName: agentName,
+      archivedAgentId: data.archivedAgentId,
+      messageCount: data.messageCount || 0,
+      timeout: null
+    };
+
+    // Remove agent from UI immediately
+    removeAgentFromUI(agentId);
+
+    // Show success toast with undo option
+    showArchiveSuccessToast(agentName, data.messageCount || 0);
+
+    // Set timeout to clear undo option after 10 seconds
+    pendingArchive.timeout = setTimeout(() => {
+      pendingArchive = null;
+    }, 10000);
+
+  } catch (error) {
+    console.error('Error archiving agent:', error);
+    showErrorMessage(error.message || 'Failed to archive agent. Please try again.');
+  }
+}
+
+/**
+ * Unarchive (restore) an agent - used for undo
+ */
+async function unarchiveAgent(agentId, agentName) {
+  try {
+    // Make API call
+    const response = await fetch(`/api/user/agents/${agentId}/archive`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': window.csrfToken
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || 'Failed to restore agent');
+    }
+
+    // Force refresh agent list
+    await pollAgentList(true);
+
+    // Show success message
+    showSuccessToast(`${agentName} restored successfully`);
+
+  } catch (error) {
+    console.error('Error unarchiving agent:', error);
+    showErrorMessage(error.message || 'Failed to restore agent. Please try again.');
+  }
+}
+
+/**
+ * Remove agent from UI with animation
+ */
+function removeAgentFromUI(agentId) {
+  // Remove from agent seats (circular view)
+  const agentSeat = document.querySelector(`.agent-seat[data-agent-id="${agentId}"]`);
+  if (agentSeat) {
+    agentSeat.style.transition = 'opacity 0.3s, transform 0.3s';
+    agentSeat.style.opacity = '0';
+    agentSeat.style.transform = 'scale(0.8)';
+    setTimeout(() => {
+      agentSeat.remove();
+    }, 300);
+  }
+
+  // Remove from agent list panel
+  const listItem = document.querySelector(`.agent-list-item[data-agent-id="${agentId}"]`);
+  if (listItem) {
+    listItem.style.transition = 'opacity 0.3s, transform 0.3s';
+    listItem.style.opacity = '0';
+    listItem.style.transform = 'translateX(-20px)';
+    setTimeout(() => {
+      listItem.remove();
+    }, 300);
+  }
+
+  // Remove from mobile dock
+  const dockItem = document.querySelector(`.mobile-dock-item[data-agent-id="${agentId}"]`);
+  if (dockItem) {
+    dockItem.style.transition = 'opacity 0.3s';
+    dockItem.style.opacity = '0';
+    setTimeout(() => {
+      dockItem.remove();
+    }, 300);
+  }
+
+  // If this was the selected agent, clear the conversation
+  if (selectedAgentId === agentId) {
+    selectedAgentId = null;
+    selectedAgentName = '';
+
+    const agentPanelHeader = document.getElementById('agentPanelHeader');
+    const agentPanelPlaceholder = document.getElementById('agentPanelPlaceholder');
+    const conversationArea = document.getElementById('conversationArea');
+    const messageInputArea = document.getElementById('messageInputArea');
+
+    if (agentPanelHeader) agentPanelHeader.classList.add('hidden');
+    if (agentPanelPlaceholder) agentPanelPlaceholder?.classList.remove('hidden');
+    if (conversationArea) conversationArea.classList.add('hidden');
+    if (messageInputArea) messageInputArea.classList.add('hidden');
+
+    // Clean up state
+    lastMessageTimestamp = null;
+    lastMessageCursor = null;
+    stopMessagePolling();
+  }
+
+  // Update cache
+  currentAgentList = currentAgentList.filter(a => a.agentId !== agentId);
+  agentListCache.agents = currentAgentList;
+
+  // Remove from known agent IDs to prevent re-animation
+  knownAgentIds.delete(agentId);
+}
+
+/**
+ * Show archive success toast with undo button
+ */
+function showArchiveSuccessToast(agentName, messageCount) {
+  window.notifications.show(
+    `Agent "${agentName}" archived (${messageCount} messages saved)`,
+    'warning', // Use warning color (amber) for archive
+    'Archived',
+    10000, // 10 seconds
+    {
+      label: 'Undo',
+      onClick: async () => {
+        try {
+          const response = await fetch('/api/user/agents/unarchive', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': window.csrfToken
+            },
+            body: JSON.stringify({ agentName })
+          });
+
+          if (response.ok) {
+            window.showSuccess(`${agentName} restored successfully`);
+            // Refresh lists
+            pollAgentList(true);
+          } else {
+            const data = await response.json();
+            window.showError(data.error?.message || 'Failed to restore agent');
+          }
+        } catch (err) {
+          console.error('Error restoring agent:', err);
+          window.showError('Failed to restore agent');
+        }
+      }
+    }
+  );
+}
+
+/**
+ * Show success toast notification
+ */
+function showSuccessToast(message) {
+  window.showSuccess(message);
+}
+
+/**
+ * Setup restoration of the last opened agent on page load
+ * Waits for the agent list to load, then attempts to restore the previously viewed agent
+ */
+function setupLastAgentRestoration() {
+  // Only attempt restoration once per session
+  if (lastAgentRestorationAttempted) {
+    return;
+  }
+  lastAgentRestorationAttempted = true;
+
+  // Get the last agent ID from localStorage
+  const lastAgentId = localStorage.getItem(LAST_AGENT_STORAGE_KEY);
+
+  if (!lastAgentId) {
+    // No last agent saved, nothing to restore
+    return;
+  }
+
+  // Poll for agent list to be available (up to 10 attempts with 500ms delay = 5 seconds max)
+  let pollAttempts = 0;
+  const maxPollAttempts = 10;
+
+  const restoreInterval = setInterval(() => {
+    pollAttempts++;
+
+    // Check if we have agents available
+    if (currentAgentList && currentAgentList.length > 0) {
+      clearInterval(restoreInterval);
+
+      // Check if the last agent still exists
+      const lastAgent = currentAgentList.find(a => a.agentId === lastAgentId);
+
+      if (lastAgent) {
+        // Auto-select the last agent
+        selectAgent(lastAgentId, lastAgent.agentName, {
+          agentType: lastAgent.agentType || 'standard'
+        });
+      }
+      // If agent was deleted, just skip restoration (user will see empty state)
+      return;
+    }
+
+    // Stop polling after max attempts
+    if (pollAttempts >= maxPollAttempts) {
+      clearInterval(restoreInterval);
+    }
+  }, 500);
+}
+

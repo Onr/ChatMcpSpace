@@ -1065,7 +1065,7 @@ run_agent() {
         if ! gum confirm --affirmative "Reconfigure" --negative "Use existing" "Reconfigure allowed permissions?"; then
             print_info "Using existing permissions"
             # Just start the runner with existing config
-            print_section "🚀 Starting Agent..."
+            print_section ">> Starting Agent..."
             exec "$agent_dir/agent-runner.sh"
         fi
     fi
@@ -1286,7 +1286,7 @@ The agent will load new config at each loop iteration."
         return 0
     fi
     
-    print_section "🚀 Starting Agent..."
+    print_section ">> Starting Agent..."
     echo ""
     exec "$agent_dir/agent-runner.sh"
 }
@@ -2284,20 +2284,36 @@ def decrypt_binary(ciphertext: bytes, iv: bytes, auth_tag: bytes,
 
 def _get_content_type(file_path: str) -> str:
     """Detect content type from file extension or magic bytes."""
-    # First try mimetypes
+    # First try mimetypes module
     mime_type, _ = mimetypes.guess_type(file_path)
-    if mime_type and mime_type.startswith("image/"):
+    if mime_type:
         return mime_type
 
     # Fall back to extension-based detection
     ext = Path(file_path).suffix.lower()
     content_types = {
+        # Images
         ".png": "image/png",
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".gif": "image/gif",
         ".webp": "image/webp",
         ".svg": "image/svg+xml",
+        # Documents
+        ".pdf": "application/pdf",
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".csv": "text/csv",
+        # Archives
+        ".zip": "application/zip",
+        ".gz": "application/gzip",
+        ".tar": "application/x-tar",
+        # Code/Data
+        ".json": "application/json",
+        ".xml": "application/xml",
+        ".html": "text/html",
+        ".css": "text/css",
+        ".js": "text/javascript",
     }
     return content_types.get(ext, "application/octet-stream")
 
@@ -2319,19 +2335,20 @@ def _compute_sha256(data: bytes) -> str:
 
 
 # ============================================================================
-# Image Upload and Download Functions
+# File Upload and Download Functions
 # ============================================================================
 
-def upload_image(image_path: str, agent_name: str = None,
-                 password: str = None, salt: str = None) -> dict:
+def upload_file(file_path: str, agent_name: str = None,
+                password: str = None, salt: str = None) -> dict:
     """
-    Upload an encrypted image attachment to the server.
+    Upload an encrypted file attachment to the server.
 
-    The image is encrypted client-side using AES-GCM before upload.
+    The file is encrypted client-side using AES-GCM before upload.
     The server only stores encrypted ciphertext and cannot read the content.
+    Supports images, PDFs, text files, archives, and other file types.
 
     Args:
-        image_path: Path to the image file to upload
+        file_path: Path to the file to upload
         agent_name: Name of the agent uploading (defaults to Config.agent_name)
         password: User password for encryption (defaults to Config.user_password)
         salt: Base64 encoded salt (defaults to Config.encryption_salt)
@@ -2339,16 +2356,16 @@ def upload_image(image_path: str, agent_name: str = None,
     Returns:
         dict with keys on success:
             - attachmentId: str - UUID of the uploaded attachment
-            - contentType: str - MIME type of the image
+            - contentType: str - MIME type of the file
             - sizeBytes: int - Size of encrypted file
-            - width: int|None - Image width in pixels
-            - height: int|None - Image height in pixels
+            - width: int|None - Image width in pixels (if image)
+            - height: int|None - Image height in pixels (if image)
             - encrypted: bool - Always True
             - encryption: dict - Contains alg, ivBase64, tagBase64
         Or dict with 'error' key on failure.
 
     Example:
-        >>> result = upload_image("/path/to/screenshot.png")
+        >>> result = upload_file("/path/to/document.pdf")
         >>> if "attachmentId" in result:
         ...     print(f"Uploaded: {result['attachmentId']}")
         ... else:
@@ -2359,23 +2376,23 @@ def upload_image(image_path: str, agent_name: str = None,
     salt = salt or Config.encryption_salt
 
     # Validate file exists
-    file_path = Path(image_path)
-    if not file_path.exists():
-        return {"error": f"File not found: {image_path}"}
-    if not file_path.is_file():
-        return {"error": f"Not a file: {image_path}"}
+    path = Path(file_path)
+    if not path.exists():
+        return {"error": f"File not found: {file_path}"}
+    if not path.is_file():
+        return {"error": f"Not a file: {file_path}"}
 
     try:
         # Read file contents
-        with open(file_path, "rb") as f:
+        with open(path, "rb") as f:
             plaintext_data = f.read()
 
-        # Get image metadata
-        content_type = _get_content_type(str(file_path))
-        width, height = _get_image_dimensions(str(file_path))
+        # Get file metadata
+        content_type = _get_content_type(str(path))
+        width, height = _get_image_dimensions(str(path))  # Only works for images
         sha256_hash = _compute_sha256(plaintext_data)
 
-        # Encrypt the image data
+        # Encrypt the file data
         encrypted = encrypt_binary(plaintext_data, password, salt)
 
         # Prepare multipart form data
@@ -2391,7 +2408,7 @@ def upload_image(image_path: str, agent_name: str = None,
             "sha256": (None, sha256_hash),
         }
 
-        # Add optional dimensions
+        # Add optional dimensions (only relevant for images)
         if width is not None:
             form_data["width"] = (None, str(width))
         if height is not None:
@@ -2399,7 +2416,7 @@ def upload_image(image_path: str, agent_name: str = None,
 
         # Add the encrypted file
         files = {
-            "file": (file_path.name, encrypted["ciphertext"], "application/octet-stream")
+            "file": (path.name, encrypted["ciphertext"], "application/octet-stream")
         }
 
         headers = {"X-API-Key": Config.api_key}
@@ -2425,6 +2442,13 @@ def upload_image(image_path: str, agent_name: str = None,
         return {"error": f"Network error: {str(e)}"}
     except Exception as e:
         return {"error": f"Upload failed: {str(e)}"}
+
+
+# Alias for backwards compatibility - upload_image is just upload_file
+def upload_image(image_path: str, agent_name: str = None,
+                 password: str = None, salt: str = None) -> dict:
+    """Upload an image file. This is an alias for upload_file()."""
+    return upload_file(image_path, agent_name, password, salt)
 
 
 def download_attachment(attachment_id: str, save_path: str,
@@ -4125,7 +4149,7 @@ run_agent() {
             log INFO "Running: claude \${claude_args[*]} (prompt from stdin)"
 
             # Send notification to user about what command is being executed
-            send_message "[>] Received message, about to run: $cmd_preview" "0"
+            send_message "�� Received message, about to run: $cmd_preview" "0"
 
             # Capture stdout as fallback in case agent doesn't write to response file
             local stdout_capture="$STATE_DIR/.agent_stdout.txt"
@@ -4195,22 +4219,15 @@ run_agent() {
             
             # Add output format
             gemini_args+=("-o" "text")
-            
-            # NOTE: Gemini's --sandbox flag causes silent failures (exit code 1) in many
-            # environments where container/sandbox infrastructure isn't properly configured.
-            # To fix the "Agent session completed but did not send a response" error,
-            # we disable sandbox flags entirely. The --approval-mode flag provides
-            # sufficient security control for automated agent operation.
-            # 
-            # Original sandbox handling (disabled due to compatibility issues):
-            # case "$SANDBOX_MODE" in
-            #     none)
-            #         gemini_args+=("--no-sandbox")
-            #         ;;
-            #     workspace-write|read-only)
-            #         gemini_args+=("--sandbox")
-            #         ;;
-            # esac
+            # Handle sandbox mode - Gemini uses boolean --sandbox/--no-sandbox flags
+            case "$SANDBOX_MODE" in
+                none)
+                    gemini_args+=("--no-sandbox")
+                    ;;
+                workspace-write|read-only)
+                    gemini_args+=("--sandbox")
+                    ;;
+            esac
             
             # Handle approval mode
             # Note: For automated agent operation, we need at least auto_edit
@@ -4242,7 +4259,7 @@ run_agent() {
             log INFO "Running: gemini \${gemini_args[*]} (prompt from stdin)"
 
             # Send notification to user about what command is being executed
-            send_message "[>] Received message, about to run: $cmd_preview" "0"
+            send_message "�� Received message, about to run: $cmd_preview" "0"
 
             # Capture stdout as fallback in case agent doesn't write to response file
             local stdout_capture="$STATE_DIR/.agent_stdout.txt"
@@ -4353,7 +4370,7 @@ run_agent() {
             log INFO "Running: codex \${codex_args[*]}"
             
             # Send notification to user about what command is being executed
-            send_message "[>] Received message, about to run: $cmd_preview" "0"
+            send_message "�� Received message, about to run: $cmd_preview" "0"
             
             cat "$prompt_file" | codex "\${codex_args[@]}" 2>&1 || true
             rm -f "$prompt_file"
@@ -4434,7 +4451,7 @@ run_agent() {
             log INFO "Running: codex \${codex_args[*]:0:5}... (prompt from stdin)"
             
             # Send notification to user about what command is being executed
-            send_message "[>] Received message, about to run: $cmd_preview" "0"
+            send_message "�� Received message, about to run: $cmd_preview" "0"
             
             cat "$prompt_file" | codex "\${codex_args[@]}" 2>&1 || true
             rm -f "$prompt_file"

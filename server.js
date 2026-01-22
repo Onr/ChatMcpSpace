@@ -18,6 +18,7 @@ const fs = require('fs');
 const { testConnection } = require('./src/db/connection');
 const { ensureEncryptionColumns } = require('./src/db/migrations/encryptionColumns');
 const { ensureLastSeenAtColumn } = require('./src/db/migrations/lastSeenAt');
+const { runAllMigrations, ensureArchiveTables } = require('./src/db/runMigrations');
 const { globalErrorHandler, notFoundHandler } = require('./src/middleware/errorMiddleware');
 const RedisStore = require('connect-redis').default || require('connect-redis');
 const { sessionRedisClient } = require('./src/utils/redisClient');
@@ -287,6 +288,14 @@ async function startServer() {
       process.exit(1);
     }
 
+    console.log('\n=== Running Database Migrations ===\n');
+
+    // Run all SQL migrations from the migrations directory
+    const migrationsSuccess = await runAllMigrations();
+    if (!migrationsSuccess) {
+      console.warn('⚠ Some migrations encountered issues. The application may not work correctly.');
+    }
+
     console.log('Ensuring encrypted column migration has been applied...');
     const encryptionSchemaUpdated = await ensureEncryptionColumns();
     if (encryptionSchemaUpdated) {
@@ -301,6 +310,14 @@ async function startServer() {
       console.log('Database schema updated: last_seen_at column added.');
     } else {
       console.log('Database schema already includes last_seen_at column.');
+    }
+
+    console.log('Verifying archive tables...');
+    const archiveTablesExist = await ensureArchiveTables();
+    if (archiveTablesExist) {
+      console.log('✓ Archive tables verified and ready.');
+    } else {
+      console.log('Archive tables will be created by migrations.');
     }
 
     const tlsConfig = loadTlsConfig();

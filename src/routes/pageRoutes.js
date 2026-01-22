@@ -1245,4 +1245,45 @@ router.post('/dashboard/stop', protectRoute, validateCsrfToken, async (req, res)
   }
 });
 
+/**
+ * GET /archive
+ * Render archive page with archived agents
+ * Requires authentication
+ */
+router.get('/archive', protectRoute, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    // Fetch archived agents with pagination
+    const archiveService = require('../services/archiveService');
+    const result = await archiveService.getArchivedAgents(userId, { limit: limit + 1, offset });
+
+    // Check if there are more results
+    const hasMore = result.archivedAgents.length > limit;
+    if (hasMore) {
+      result.archivedAgents = result.archivedAgents.slice(0, limit);
+    }
+
+    const totalPages = Math.ceil(result.total / limit);
+
+    res.render('archive', {
+      user: req.user,
+      archivedAgents: result.archivedAgents,
+      currentPage: page,
+      totalPages: totalPages,
+      totalCount: result.total
+    });
+
+  } catch (error) {
+    console.error('Archive page error:', error);
+    res.status(500).render('error', {
+      statusCode: 500,
+      error: 'Failed to load archive'
+    });
+  }
+});
+
 module.exports = router;

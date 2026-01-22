@@ -1,13 +1,14 @@
 const express = require('express');
 const request = require('supertest');
 
-const { createTestDatabase, applyRuntimeUserColumns, seedUser } = require('../utils/pgMemTestUtils');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
 async function createIntegrationContext() {
   jest.resetModules();
 
   const { pool, query } = createTestDatabase();
   await applyRuntimeUserColumns(query);
+  await applyArchiveSchema(query);
   const { userId } = await seedUser(query);
 
   jest.doMock('../../src/db/connection', () => ({
@@ -40,9 +41,10 @@ async function createIntegrationContext() {
   });
 
   jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
-    agentApiRateLimiter: (_req, _res, next) => next(),
-    agentPollingRateLimiter: (_req, _res, next) => next(),
     userPollingRateLimiter: (_req, _res, next) => next(),
+    agentPollingRateLimiter: (_req, _res, next) => next(),
+    agentApiRateLimiter: (_req, _res, next) => next(),
+    feedbackRateLimiter: (_req, _res, next) => next(),
   }));
 
   jest.doMock('../../src/services/ttsService', () => ({

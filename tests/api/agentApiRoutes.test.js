@@ -2,13 +2,14 @@ const express = require('express');
 const request = require('supertest');
 const { v4: uuidv4 } = require('uuid');
 
-const { createTestDatabase, applyRuntimeUserColumns, seedUser } = require('../utils/pgMemTestUtils');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
 async function createAgentApiTestContext() {
   jest.resetModules();
 
   const { pool, query } = createTestDatabase();
   await applyRuntimeUserColumns(query);
+  await applyArchiveSchema(query);
   const { userId } = await seedUser(query);
 
   jest.doMock('../../src/db/connection', () => ({
@@ -29,10 +30,11 @@ async function createAgentApiTestContext() {
     },
   }));
 
-  jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
-    agentApiRateLimiter: (_req, _res, next) => next(),
-    agentPollingRateLimiter: (_req, _res, next) => next(),
-  }));
+      jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
+        agentPollingRateLimiter: (_req, _res, next) => next(),
+        agentApiRateLimiter: (_req, _res, next) => next(),
+        feedbackRateLimiter: (_req, _res, next) => next(),
+      }));
 
   const agentApiRoutes = require('../../src/routes/agentApiRoutes');
   const app = express();
@@ -81,6 +83,54 @@ describe('Agent API routes', () => {
 
     const unreadAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [unreadId]);
     expect(unreadAfter.rows[0].read_at).toBeTruthy();
+
+    await pool.end();
+  });
+
+  it('POST /api/agent/messages excludes hidden_from_agent messages from newMessages', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'HiddenTestAgent',
+      1,
+    ]);
+
+    // Create a visible unread message
+    const visibleId = uuidv4();
+    await query(
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at, hidden_from_agent) VALUES ($1, $2, $3, FALSE, NULL, FALSE)',
+      [visibleId, agentId, 'visible message']
+    );
+
+    // Create a hidden unread message
+    const hiddenId = uuidv4();
+    await query(
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at, hidden_from_agent) VALUES ($1, $2, $3, FALSE, NULL, TRUE)',
+      [hiddenId, agentId, 'hidden message']
+    );
+
+    const res = await request(app)
+      .post('/api/agent/messages')
+      .send({ agentName: 'HiddenTestAgent', content: 'hello from agent' })
+      .expect(201);
+
+    // Should only return the visible message, not the hidden one
+    expect(res.body.newMessages).toHaveLength(1);
+    expect(res.body.newMessages[0]).toMatchObject({
+      messageId: visibleId,
+      content: 'visible message',
+    });
+
+    // Visible message should be marked as read
+    const visibleAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [visibleId]);
+    expect(visibleAfter.rows[0].read_at).toBeTruthy();
+
+    // Hidden message should NOT be marked as read (agent never saw it)
+    const hiddenAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [hiddenId]);
+    expect(hiddenAfter.rows[0].read_at).toBeNull();
 
     await pool.end();
   });

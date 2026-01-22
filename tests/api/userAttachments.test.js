@@ -3,7 +3,7 @@ const request = require('supertest');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 
-const { createTestDatabase, applyRuntimeUserColumns, seedUser } = require('../utils/pgMemTestUtils');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
 /**
  * Apply the image attachments schema for testing
@@ -18,10 +18,6 @@ async function applyImageAttachmentsSchema(query) {
       content_type VARCHAR(100),
       file_name VARCHAR(255),
       size_bytes BIGINT,
-      sha256 VARCHAR(64),
-      storage_provider VARCHAR(10),
-      storage_key VARCHAR(512),
-      encrypted BOOLEAN,
       width INTEGER,
       height INTEGER,
       iv_base64 VARCHAR(32),
@@ -41,6 +37,7 @@ async function createAttachmentTestContext() {
 
   const { pool, query } = createTestDatabase();
   await applyRuntimeUserColumns(query);
+  await applyArchiveSchema(query);
   await applyImageAttachmentsSchema(query);
   const { userId, apiKey } = await seedUser(query);
 
@@ -67,6 +64,7 @@ async function createAttachmentTestContext() {
   // Mock rate limiter
   jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
     userPollingRateLimiter: (_req, _res, next) => next(),
+    feedbackRateLimiter: (_req, _res, next) => next(),
   }));
 
   // Mock TTS service
@@ -137,6 +135,7 @@ describe('User Attachment Controller', () => {
 
       jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
         userPollingRateLimiter: (_req, _res, next) => next(),
+        feedbackRateLimiter: (_req, _res, next) => next(),
       }));
 
       jest.doMock('../../src/services/ttsService', () => ({
@@ -293,8 +292,8 @@ describe('User Attachment Controller', () => {
         .field('agentId', agentId)
         .field('ivBase64', 'dGVzdGl2MTIzNDU2')
         .field('authTagBase64', 'dGVzdGF1dGh0YWcxMjM0NTY3OA==')
-        .field('contentType', 'application/pdf')
-        .attach('file', Buffer.from('fake-encrypted-data'), 'test.pdf')
+        .field('contentType', 'video/mp4')
+        .attach('file', Buffer.from('fake-encrypted-data'), 'test.mp4')
         .expect(400);
 
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -355,20 +354,20 @@ describe('User Attachment Controller', () => {
         .attach('file', Buffer.from('fake-encrypted-data'), 'test.png')
         .expect(201);
 
-      expect(res.body.attachmentId).toBeDefined();
-      expect(res.body.contentType).toBe('image/png');
-      expect(res.body.sizeBytes).toBe(Buffer.from('fake-encrypted-data').length);
-      expect(res.body.width).toBe(512);
-      expect(res.body.height).toBe(512);
-      expect(res.body.encrypted).toBe(true);
-      expect(res.body.encryption).toEqual({
+      expect(res.body.attachment.attachmentId).toBeDefined();
+      expect(res.body.attachment.contentType).toBe('image/png');
+      expect(res.body.attachment.sizeBytes).toBe(Buffer.from('fake-encrypted-data').length);
+      expect(res.body.attachment.width).toBe(512);
+      expect(res.body.attachment.height).toBe(512);
+      expect(res.body.attachment.encrypted).toBe(true);
+      expect(res.body.attachment.encryption).toEqual({
         alg: 'AES-GCM',
         ivBase64: 'dGVzdGl2MTIzNDU2',
         tagBase64: 'dGVzdGF1dGh0YWcxMjM0NTY3OA==',
       });
 
       // Verify database record
-      const dbResult = await query('SELECT * FROM attachments WHERE attachment_id = $1', [res.body.attachmentId]);
+      const dbResult = await query('SELECT * FROM attachments WHERE attachment_id = $1', [res.body.attachment.attachmentId]);
       expect(dbResult.rows.length).toBe(1);
       expect(dbResult.rows[0].content_type).toBe('image/png');
       expect(dbResult.rows[0].encrypted).toBe(true);
@@ -400,10 +399,10 @@ describe('User Attachment Controller', () => {
         .attach('file', Buffer.from('fake-encrypted-data'), 'test.jpg')
         .expect(201);
 
-      expect(res.body.attachmentId).toBeDefined();
+      expect(res.body.attachment.attachmentId).toBeDefined();
 
       // Verify sha256 is stored
-      const dbResult = await query('SELECT sha256 FROM attachments WHERE attachment_id = $1', [res.body.attachmentId]);
+      const dbResult = await query('SELECT sha256 FROM attachments WHERE attachment_id = $1', [res.body.attachment.attachmentId]);
       expect(dbResult.rows[0].sha256).toBe(sha256);
 
       await pool.end();
@@ -463,6 +462,7 @@ describe('User Attachment Controller', () => {
 
       jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
         userPollingRateLimiter: (_req, _res, next) => next(),
+        feedbackRateLimiter: (_req, _res, next) => next(),
       }));
 
       jest.doMock('../../src/services/ttsService', () => ({
