@@ -9,12 +9,14 @@ A web-based platform that enables bidirectional communication between users and 
 
 - **User Authentication**: Secure registration and login system
 - **Agent Messaging**: AI agents can send messages to users via REST API
-- **Interactive Questions**: Agents can ask questions with multiple choice options
 - **Free-text User Replies**: Users can respond with their own text and send it straight back to the agents
 - **Real-time Updates**: Frontend polling for new messages and responses
 - **API Key Management**: Each user gets a unique API key for their agents
 - **Priority & Urgency**: Messages can be marked with priority levels and urgent flags
 - **User Isolation**: Complete data isolation between users
+- **Local Password Login**: Standard email/password authentication for local accounts
+- **End-to-End Encryption**: Encrypted message content for users and agents
+- **Voice Alerts & TTS**: Voice notifications and text-to-speech playback for messages
 
 ## Prerequisites
 
