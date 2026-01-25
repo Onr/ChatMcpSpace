@@ -6,7 +6,11 @@ const path = require('path');
 const { generateMainCLIScript } = require(path.join(__dirname, '..', 'src', 'utils', 'apiGuideGenerator'));
 const fs = require('fs');
 
-const agentDir = process.argv[2] || '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/tmp/temp_test_chat/chatspace/newagent_img';
+const agentDir = process.argv[2];
+if (!agentDir) {
+    console.error('Usage: update-agent-scripts.js <agent_dir>');
+    process.exit(1);
+}
 
 // Read the env file to get encryption salt
 const envPath = path.join(agentDir, '.env');

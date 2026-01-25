@@ -1,8 +1,15 @@
 
 import os
+import sys
 from PIL import Image
 
-image_path = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final.png'
+DEFAULT_IMAGE_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "public",
+    "images",
+    "space_agent_final.png",
+)
+image_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IMAGE_PATH
 
 try:
     img = Image.open(image_path)

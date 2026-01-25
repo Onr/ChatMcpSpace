@@ -1109,6 +1109,7 @@ router.put('/dashboard/config', protectRoute, validateCsrfToken, async (req, res
   try {
     const userId = req.user.userId;
     const { agentName, model_provider, model, approval_mode, sandbox_mode } = req.body;
+    const normalizedSandboxMode = sandbox_mode === 'danger-full-access' ? 'none' : sandbox_mode;
 
     if (!agentName) {
       return res.status(400).json({ error: { message: 'agentName is required' } });
@@ -1181,7 +1182,7 @@ router.put('/dashboard/config', protectRoute, validateCsrfToken, async (req, res
     if (model_provider) config.model_provider = model_provider;
     if (model) config.model = model;
     if (approval_mode) config.approval_mode = approval_mode;
-    if (sandbox_mode !== undefined) config.sandbox_mode = sandbox_mode;
+    if (normalizedSandboxMode !== undefined) config.sandbox_mode = normalizedSandboxMode;
     config.updated_at = new Date().toISOString();
 
     // Write config

@@ -38,6 +38,7 @@ kiro/
 # Testing and coverage
 coverage
 *.lcov
+tests/test-results/
 
 # Build artifacts
 dist/

@@ -1,12 +1,25 @@
 
+import os
 import sys
 from PIL import Image
 import math
 
 # Config
 THRESHOLD = 10  # Stricter threshold to preserve white robot parts
-INPUT_PATH = '/home/onrm/.gemini/antigravity/brain/0e4b9a2f-c9f2-4718-bde9-cae0090e3546/space_agent_fixed_1768216638705.png'
-OUTPUT_PATH = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final_v2.png'
+DEFAULT_INPUT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "public",
+    "images",
+    "space_agent_fixed.png",
+)
+DEFAULT_OUTPUT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "public",
+    "images",
+    "space_agent_final_v2.png",
+)
+INPUT_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_INPUT_PATH
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUTPUT_PATH
 
 def color_dist(c1, c2):
     r = c1[0] - c2[0]

@@ -70,6 +70,27 @@ const ORBIT_CONFIG = {
   }
 };
 
+function getResolvedSelectedAgentName() {
+  if (selectedAgentName && selectedAgentName.trim()) return selectedAgentName;
+  if (!selectedAgentId) return '';
+
+  // Try to derive from DOM (most reliable)
+  const nameEl = document.getElementById('selectedAgentName');
+  const domName = nameEl?.textContent?.trim();
+  if (domName) {
+    selectedAgentName = domName;
+    return selectedAgentName;
+  }
+
+  // Fallback to cached agent list
+  const cached = (agentListCache?.agents || []).find(a => a.agentId === selectedAgentId);
+  const cachedName = cached?.name || cached?.agentName || cached?.agent_name || '';
+  if (cachedName) {
+    selectedAgentName = cachedName;
+  }
+  return selectedAgentName;
+}
+
 // Size limits for spheres (in pixels)
 const SPHERE_SIZE_LIMITS = {
   min: 28,  // Minimum readable size
@@ -1320,7 +1341,8 @@ function setupAgentControls() {
   // Stop button handler
   if (stopBtn) {
     stopBtn.addEventListener('click', async () => {
-      if (!selectedAgentName) return;
+      const agentName = getResolvedSelectedAgentName();
+      if (!agentName) return;
 
       stopBtn.disabled = true;
       stopBtn.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
@@ -1332,7 +1354,7 @@ function setupAgentControls() {
             'Content-Type': 'application/json',
             'X-CSRF-Token': window.csrfToken
           },
-          body: JSON.stringify({ agentName: selectedAgentName })
+          body: JSON.stringify({ agentName })
         });
 
         if (response.ok) {
@@ -1357,7 +1379,7 @@ function setupAgentControls() {
       configDropdown.classList.toggle('hidden');
 
       // Load current config when opening
-      if (!configDropdown.classList.contains('hidden') && selectedAgentName) {
+      if (!configDropdown.classList.contains('hidden') && getResolvedSelectedAgentName()) {
         await loadAgentConfig();
       }
     });
@@ -1373,7 +1395,8 @@ function setupAgentControls() {
   // Save config handler
   if (saveConfigBtn) {
     saveConfigBtn.addEventListener('click', async () => {
-      if (!selectedAgentName) return;
+      const agentName = getResolvedSelectedAgentName();
+      if (!agentName) return;
 
       saveConfigBtn.disabled = true;
       saveConfigBtn.textContent = 'Saving...';
@@ -1384,14 +1407,15 @@ function setupAgentControls() {
 
         // Build config based on provider
         let configData = {
-          agentName: selectedAgentName,
+          agentName,
           model_provider: provider,
           model: model
         };
 
         // Add provider-specific settings
         if (provider === 'codex' || provider === 'default' || provider === 'ollama' || provider === 'openrouter') {
-          const sandbox = document.getElementById('configCodexSandbox')?.value || 'workspace-write';
+          let sandbox = document.getElementById('configCodexSandbox')?.value || 'workspace-write';
+          if (sandbox === 'danger-full-access') sandbox = 'none';
           const bypass = document.getElementById('configCodexBypass')?.checked || false;
           configData.sandbox_mode = sandbox;
           if (bypass) {
@@ -1443,19 +1467,21 @@ function setupAgentControls() {
  * Load agent config and update status display
  */
 async function loadAgentConfig() {
-  if (!selectedAgentName) return;
+  const agentName = getResolvedSelectedAgentName();
+  if (!agentName) return;
 
   const configProvider = document.getElementById('configProvider');
   const statusProvider = document.getElementById('configStatusProvider');
   const statusMode = document.getElementById('configStatusMode');
 
   try {
-    const response = await fetch(`/dashboard/config?agentName=${encodeURIComponent(selectedAgentName)}`);
+    const response = await fetch(`/dashboard/config?agentName=${encodeURIComponent(agentName)}`);
     if (response.ok) {
       const data = await response.json();
       const config = data.config || {};
       const allowedPermissions = data.allowedPermissions || {};
       const allowedProviders = Object.keys(allowedPermissions);
+      const normalizedSandboxMode = config.sandbox_mode === 'danger-full-access' ? 'none' : config.sandbox_mode;
 
       // Filter provider dropdown based on allowed permissions
       if (configProvider && allowedProviders.length > 0) {
@@ -1505,13 +1531,13 @@ async function loadAgentConfig() {
         let modeStr = config.approval_mode || 'default';
 
         if (config.model_provider === 'codex' || !config.model_provider) {
-          if (config.sandbox_mode === 'none') modeStr = 'FULL ACCESS';
-          else modeStr = config.sandbox_mode || 'workspace-write';
+          if (normalizedSandboxMode === 'none') modeStr = 'FULL ACCESS';
+          else modeStr = normalizedSandboxMode || 'workspace-write';
         } else if (config.model_provider === 'gemini') {
           if (config.approval_mode === 'full-auto') modeStr = 'YOLO';
-          else modeStr = config.sandbox_mode === 'none' ? 'No Sandbox' : 'Sandboxed';
+          else modeStr = normalizedSandboxMode === 'none' ? 'No Sandbox' : 'Sandboxed';
         } else if (config.model_provider === 'claude') {
-          if (config.sandbox_mode === 'none') modeStr = 'Bypass Permissions';
+          if (normalizedSandboxMode === 'none') modeStr = 'Bypass Permissions';
           else modeStr = config.approval_mode || 'default';
         }
 
@@ -1521,13 +1547,13 @@ async function loadAgentConfig() {
       // Set provider-specific values
       if (config.model_provider === 'codex' || config.model_provider === 'default') {
         const sandboxEl = document.getElementById('configCodexSandbox');
-        if (sandboxEl && config.sandbox_mode) {
-          sandboxEl.value = config.sandbox_mode === 'none' ? 'danger-full-access' : config.sandbox_mode;
+        if (sandboxEl && normalizedSandboxMode) {
+          sandboxEl.value = normalizedSandboxMode === 'none' ? 'danger-full-access' : normalizedSandboxMode;
         }
       } else if (config.model_provider === 'gemini') {
         const geminiMode = document.getElementById('configGeminiMode');
         const geminiYolo = document.getElementById('configGeminiYolo');
-        if (geminiMode) geminiMode.value = config.sandbox_mode === 'none' ? 'no-sandbox' : 'sandbox';
+        if (geminiMode) geminiMode.value = normalizedSandboxMode === 'none' ? 'no-sandbox' : 'sandbox';
         if (geminiYolo) geminiYolo.checked = config.approval_mode === 'full-auto';
       } else if (config.model_provider === 'claude') {
         const claudeMode = document.getElementById('configClaudeMode');
@@ -6692,4 +6718,3 @@ function setupLastAgentRestoration() {
     }
   }, 500);
 }
-

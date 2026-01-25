@@ -1,9 +1,23 @@
 
+import os
+import sys
 import cv2
 import numpy as np
 
-INPUT_PATH = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final.png'
-OUTPUT_PATH = '/home/onrm/projects/agentsMCPspace/AgentsMCPspace/public/images/space_agent_final_v4.png'
+DEFAULT_INPUT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "public",
+    "images",
+    "space_agent_final.png",
+)
+DEFAULT_OUTPUT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "public",
+    "images",
+    "space_agent_final_v4.png",
+)
+INPUT_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_INPUT_PATH
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_OUTPUT_PATH
 
 print(f"Reading {INPUT_PATH}...")
 img = cv2.imread(INPUT_PATH, cv2.IMREAD_UNCHANGED)

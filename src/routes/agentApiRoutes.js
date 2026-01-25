@@ -1060,6 +1060,7 @@ router.put('/config', async (req, res) => {
   try {
     const userId = req.user.userId;
     const { agentName, model_provider, model, approval_mode, sandbox_mode } = req.body;
+    const normalizedSandboxMode = sandbox_mode === 'danger-full-access' ? 'none' : sandbox_mode;
     // NOTE: project_path is intentionally NOT settable from frontend for security
     // It can only be configured via CLI at agent creation time
 
@@ -1133,8 +1134,8 @@ router.put('/config', async (req, res) => {
       if (requestedProvider === 'codex' || requestedProvider === 'default' || requestedProvider === 'ollama' || requestedProvider === 'openrouter') {
         // Validate sandbox mode
         const allowedSandboxes = providerPerms['--sandbox'] || [];
-        if (allowedSandboxes.length > 0 && sandbox_mode) {
-          const sandboxValue = sandbox_mode === 'none' ? 'danger-full-access' : sandbox_mode;
+        if (allowedSandboxes.length > 0 && normalizedSandboxMode) {
+          const sandboxValue = normalizedSandboxMode === 'none' ? 'danger-full-access' : normalizedSandboxMode;
           if (!allowedSandboxes.includes(sandboxValue)) {
             return res.status(400).json({
               error: {
@@ -1147,7 +1148,7 @@ router.put('/config', async (req, res) => {
         }
 
         // Validate bypass mode
-        if (approval_mode === 'full-auto' && sandbox_mode === 'none') {
+        if (approval_mode === 'full-auto' && normalizedSandboxMode === 'none') {
           const bypassAllowed = providerPerms['--dangerously-bypass-approvals-and-sandbox'] === true;
           if (!bypassAllowed) {
             return res.status(400).json({
@@ -1174,7 +1175,7 @@ router.put('/config', async (req, res) => {
         }
 
         // Validate skip permissions
-        if (sandbox_mode === 'none') {
+        if (normalizedSandboxMode === 'none') {
           const skipAllowed = providerPerms['--dangerously-skip-permissions'] === true;
           if (!skipAllowed) {
             return res.status(400).json({
@@ -1187,7 +1188,7 @@ router.put('/config', async (req, res) => {
         }
       } else if (requestedProvider === 'gemini') {
         // Validate sandbox/no-sandbox
-        if (sandbox_mode === 'none') {
+        if (normalizedSandboxMode === 'none') {
           const noSandboxAllowed = providerPerms['--no-sandbox'] === true;
           if (!noSandboxAllowed) {
             return res.status(400).json({
@@ -1228,7 +1229,7 @@ router.put('/config', async (req, res) => {
     if (model_provider) config.model_provider = model_provider;
     if (model) config.model = model;
     if (approval_mode) config.approval_mode = approval_mode;
-    if (sandbox_mode) config.sandbox_mode = sandbox_mode;
+    if (normalizedSandboxMode) config.sandbox_mode = normalizedSandboxMode;
     config.updated_at = new Date().toISOString();
 
     // Write updated config
