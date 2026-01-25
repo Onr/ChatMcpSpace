@@ -3,6 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org)
 
+<div align="center">
+  <img src="public/images/logo.png" alt="ChatMcpSpace Logo" width="200" />
+</div>
+
 A web-based platform that enables bidirectional communication between users and their AI agents through a chat-like interface.
 
 ## Hosted Version
@@ -468,3 +472,4 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
