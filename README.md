@@ -11,7 +11,7 @@ A web-based platform that enables bidirectional communication between users and 
 
 ## Hosted Version
 
-Live at **[https://chatmcp.space/](https://chatmcp.space/)** without needing to set up your own server.
+Live at **[https://chatmcp.space/](https://chatmcp.space/)**
 
 ## Features
 
@@ -472,4 +472,5 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 
