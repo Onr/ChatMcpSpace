@@ -82,9 +82,21 @@ server_status.txt
 
 # IDE and editor files
 .claude/
+.agent/
+.agents/
+.cline/
+.codex/
+.cursor/
+.gemini/
+.goose/
+.opencode/
+.windsurf/
 
 # Documentation (work in progress)
 TODO_TESTS.md
+
+# Remotion promo video project
+remotion-promo/
 
 # Local agent instruction/script files
 AGENTS.md

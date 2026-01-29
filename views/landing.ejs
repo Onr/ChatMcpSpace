@@ -117,8 +117,7 @@
           <div
             class="w-12 h-12 flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400 mb-2 border border-emerald-500/20">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
           <h3 class="text-lg font-medium text-slate-200">Drive results, not just chats</h3>
@@ -173,7 +172,8 @@
         </div>
       </div>
       <div class="mt-10 text-center">
-        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/5 border border-emerald-500/20">
+        <div
+          class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/5 border border-emerald-500/20">
           <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -340,214 +340,271 @@
   <!-- Getting Started Slides Section -->
   <section class="border-t border-white/5 bg-[#0f172a] relative z-20">
     <div class="px-6 text-center max-w-5xl mx-auto py-16">
-        <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Get started in seconds.</h2>
-        <p class="text-lg text-slate-400">From zero to your first agent in three simple steps.</p>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Get started in seconds.</h2>
+      <p class="text-lg text-slate-400">From zero to your first agent in three simple steps.</p>
     </div>
 
     <!-- Slide 1: End Result Preview -->
     <div class="min-h-[80vh] flex items-center justify-center py-16 px-6">
-        <div class="max-w-4xl w-full">
-            <div class="flex items-center gap-4 mb-8">
-                <div class="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-emerald-400 font-bold text-xl">✓</div>
-                <div>
-                    <h3 class="text-2xl font-bold text-white">This is what you'll get</h3>
-                    <p class="text-slate-400">Your personal AI agent council, ready to collaborate with you.</p>
-                </div>
-            </div>
-            <div class="relative aspect-[16/10] w-full rounded-2xl overflow-hidden border border-emerald-500/30 shadow-[0_0_50px_-12px_rgba(16,185,129,0.3)] bg-slate-950">
-                <!-- Mini Dashboard Preview -->
-                <div class="absolute inset-0 flex flex-col p-4 bg-[#0f172a]">
-                    <!-- Header -->
-                    <nav class="flex items-center justify-between mb-4 border-b border-white/5 pb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-full bg-slate-900 border border-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold">
-                               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                            </div>
-                            <span class="font-bold text-emerald-500 tracking-wider text-sm uppercase">Agent Control Center</span>
-                        </div>
-                        <div class="flex items-center gap-2 text-[10px] text-slate-400">
-                            <span class="px-2 py-1 rounded bg-white/5 border border-white/10 uppercase">Signed in</span>
-                        </div>
-                    </nav>
-                    <div class="grid gap-4 grid-cols-[35fr,65fr] flex-1 overflow-hidden">
-                        <!-- Left Panel - Simplified -->
-                        <div class="flex flex-col bg-slate-900/50 rounded-xl border border-white/5 overflow-hidden">
-                            <div class="p-3 border-b border-white/5">
-                                <span class="font-semibold text-white text-sm">Council Chamber</span>
-                            </div>
-                            <div class="flex-1 relative p-4 flex items-center justify-center">
-                                <div class="w-48 h-48 rounded-full border border-white/5 relative">
-                                    <div class="absolute inset-0 rounded-full border border-dashed border-white/10 m-6"></div>
-                                    <!-- Center You -->
-                                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full border border-emerald-500/30 bg-slate-800 flex items-center justify-center z-10 overflow-hidden shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                                        <div class="w-full h-full opacity-80" style="background: radial-gradient(circle at 30% 30%, #34d399, #065f46);"></div>
-                                        <span class="absolute text-[7px] text-white font-bold">YOU</span>
-                                    </div>
-                                    <!-- Agent dots -->
-                                    <div class="absolute top-0 left-1/2 -translate-x-1/2 -mt-2 w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 border border-white/20 shadow-lg"></div>
-                                    <div class="absolute bottom-8 right-6 w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-600 border border-white/20 shadow-lg"></div>
-                                    <div class="absolute top-8 left-4 w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 border border-white/20 shadow-lg"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Right Panel - Chat -->
-                        <div class="flex flex-col bg-slate-900/50 rounded-xl border border-white/5 overflow-hidden">
-                            <div class="p-3 border-b border-white/5 flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 border border-white/20 shadow-lg"></div>
-                                <div>
-                                    <h3 class="text-xs font-semibold text-white">System Architect</h3>
-                                    <span class="text-[9px] text-slate-400">Active now</span>
-                                </div>
-                            </div>
-                            <div class="flex-1 p-4 space-y-3 overflow-hidden">
-                                <div class="flex gap-2">
-                                    <div class="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex-shrink-0 mt-1"></div>
-                                    <div class="bg-slate-800/50 rounded-lg p-2 text-[10px] text-slate-300 max-w-[80%]">
-                                        Ready to assist! I've analyzed your project structure and have some optimization suggestions...
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <!-- Glowing badge -->
-                <div class="absolute top-4 right-4 z-10 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 text-xs font-medium backdrop-blur">
-                    ✨ Your Dashboard
-                </div>
-            </div>
+      <div class="max-w-4xl w-full">
+        <div class="flex items-center gap-4 mb-8">
+          <div
+            class="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-emerald-400 font-bold text-xl">
+            ✓</div>
+          <div>
+            <h3 class="text-2xl font-bold text-white">This is what you'll get</h3>
+            <p class="text-slate-400">Your personal AI agent council, ready to collaborate with you.</p>
+          </div>
         </div>
+        <div
+          class="relative aspect-[16/10] w-full rounded-2xl overflow-hidden border border-emerald-500/30 shadow-[0_0_50px_-12px_rgba(16,185,129,0.3)] bg-slate-950">
+          <!-- Mini Dashboard Preview -->
+          <div class="absolute inset-0 flex flex-col p-4 bg-[#0f172a]">
+            <!-- Header -->
+            <nav class="flex items-center justify-between mb-4 border-b border-white/5 pb-4">
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-8 h-8 rounded-full bg-slate-900 border border-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </div>
+                <span class="font-bold text-emerald-500 tracking-wider text-sm uppercase">Agent Control Center</span>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] text-slate-400">
+                <span class="px-2 py-1 rounded bg-white/5 border border-white/10 uppercase">Signed in</span>
+              </div>
+            </nav>
+            <div class="grid gap-4 grid-cols-[35fr,65fr] flex-1 overflow-hidden">
+              <!-- Left Panel - Simplified -->
+              <div class="flex flex-col bg-slate-900/50 rounded-xl border border-white/5 overflow-hidden">
+                <div class="p-3 border-b border-white/5">
+                  <span class="font-semibold text-white text-sm">Council Chamber</span>
+                </div>
+                <div class="flex-1 relative p-4 flex items-center justify-center">
+                  <div class="w-48 h-48 rounded-full border border-white/5 relative">
+                    <div class="absolute inset-0 rounded-full border border-dashed border-white/10 m-6"></div>
+                    <!-- Center You -->
+                    <div
+                      class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full border border-emerald-500/30 bg-slate-800 flex items-center justify-center z-10 overflow-hidden shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                      <div class="w-full h-full opacity-80"
+                        style="background: radial-gradient(circle at 30% 30%, #34d399, #065f46);"></div>
+                      <span class="absolute text-[7px] text-white font-bold">YOU</span>
+                    </div>
+                    <!-- Agent dots -->
+                    <div
+                      class="absolute top-0 left-1/2 -translate-x-1/2 -mt-2 w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 border border-white/20 shadow-lg">
+                    </div>
+                    <div
+                      class="absolute bottom-8 right-6 w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-red-600 border border-white/20 shadow-lg">
+                    </div>
+                    <div
+                      class="absolute top-8 left-4 w-8 h-8 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 border border-white/20 shadow-lg">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Right Panel - Chat -->
+              <div class="flex flex-col bg-slate-900/50 rounded-xl border border-white/5 overflow-hidden">
+                <div class="p-3 border-b border-white/5 flex items-center gap-3">
+                  <div
+                    class="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 border border-white/20 shadow-lg">
+                  </div>
+                  <div>
+                    <h3 class="text-xs font-semibold text-white">System Architect</h3>
+                    <span class="text-[9px] text-slate-400">Active now</span>
+                  </div>
+                </div>
+                <div class="flex-1 p-4 space-y-3 overflow-hidden">
+                  <div class="flex gap-2">
+                    <div class="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex-shrink-0 mt-1">
+                    </div>
+                    <div class="bg-slate-800/50 rounded-lg p-2 text-[10px] text-slate-300 max-w-[80%]">
+                      Ready to assist! I've analyzed your project structure and have some optimization suggestions...
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Glowing badge -->
+          <div
+            class="absolute top-4 right-4 z-10 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 text-xs font-medium backdrop-blur">
+            ✨ Your Dashboard
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Slide 2: Copy the Script -->
     <div class="min-h-[70vh] flex items-center justify-center py-16 px-6 border-t border-white/5">
-        <div class="max-w-4xl w-full">
-            <div class="flex items-center gap-4 mb-8">
-                <div class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">1</div>
-                <div>
-                    <h3 class="text-2xl font-bold text-white">Copy the setup script</h3>
-                    <p class="text-slate-400">Click the button in your dashboard to copy the agent script.</p>
-                </div>
-            </div>
-            <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950 p-8">
-                <!-- Simulated UI showing the copy button -->
-                <div class="bg-slate-900/80 rounded-xl border border-white/10 p-6 max-w-lg mx-auto">
-                    <div class="flex items-center gap-3 mb-4">
-                        <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                        </svg>
-                        <span class="text-white font-semibold">Setup Script</span>
-                    </div>
-                    <div class="bg-slate-950 rounded-lg border border-white/10 p-4 font-mono text-sm">
-                        <div class="flex items-center justify-between">
-                            <code class="text-emerald-400 text-xs overflow-hidden whitespace-nowrap">curl -sL https://chatmcp.space/s/abc123 | bash</code>
-                            <button class="ml-4 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-500/20">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
-                                Copy
-                            </button>
-                        </div>
-                    </div>
-                    <p class="text-slate-500 text-xs mt-3 text-center">This script is unique to your account</p>
-                </div>
-                <!-- Animated cursor click effect -->
-                <div class="absolute bottom-12 right-1/3 pointer-events-none">
-                    <div class="w-8 h-8 rounded-full bg-white/20 animate-ping"></div>
-                    <svg class="w-6 h-6 text-white absolute top-1 left-1 drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M13.64 21.97C13.14 22.21 12.54 22 12.31 21.5L10.13 16.76L7.62 18.78C7.45 18.92 7.24 19 7.02 19C6.55 19 6.16 18.61 6.16 18.14V5.51C6.16 5.18 6.34 4.88 6.64 4.73C6.94 4.58 7.3 4.61 7.56 4.81L18.56 13.71C18.79 13.89 18.91 14.17 18.89 14.46C18.87 14.75 18.71 15.01 18.46 15.16L14.84 17.35L16.94 21.89C17.08 22.2 17.06 22.56 16.88 22.85C16.7 23.14 16.39 23.32 16.05 23.32L14.05 23.32C13.72 23.32 13.42 23.14 13.25 22.85L13.64 21.97Z"/>
-                    </svg>
-                </div>
-            </div>
+      <div class="max-w-4xl w-full">
+        <div class="flex items-center gap-4 mb-8">
+          <div
+            class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">
+            1</div>
+          <div>
+            <h3 class="text-2xl font-bold text-white">Copy the setup script</h3>
+            <p class="text-slate-400">Click the button in your dashboard to copy the agent script.</p>
+          </div>
         </div>
+        <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950 p-8">
+          <!-- Simulated UI showing the copy button -->
+          <div class="bg-slate-900/80 rounded-xl border border-white/10 p-6 max-w-lg mx-auto">
+            <div class="flex items-center gap-3 mb-4">
+              <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              <span class="text-white font-semibold">Setup Script</span>
+            </div>
+            <div class="bg-slate-950 rounded-lg border border-white/10 p-4 font-mono text-sm">
+              <div class="flex items-center justify-between">
+                <code
+                  class="text-emerald-400 text-xs overflow-hidden whitespace-nowrap">curl -sL https://chatmcp.space/s/abc123 | bash</code>
+                <button
+                  class="ml-4 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-500/20">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+            </div>
+            <p class="text-slate-500 text-xs mt-3 text-center">This script is unique to your account</p>
+          </div>
+          <!-- Animated cursor click effect -->
+          <div class="absolute bottom-12 right-1/3 pointer-events-none">
+            <div class="w-8 h-8 rounded-full bg-white/20 animate-ping"></div>
+            <svg class="w-6 h-6 text-white absolute top-1 left-1 drop-shadow-lg" fill="currentColor"
+              viewBox="0 0 24 24">
+              <path
+                d="M13.64 21.97C13.14 22.21 12.54 22 12.31 21.5L10.13 16.76L7.62 18.78C7.45 18.92 7.24 19 7.02 19C6.55 19 6.16 18.61 6.16 18.14V5.51C6.16 5.18 6.34 4.88 6.64 4.73C6.94 4.58 7.3 4.61 7.56 4.81L18.56 13.71C18.79 13.89 18.91 14.17 18.89 14.46C18.87 14.75 18.71 15.01 18.46 15.16L14.84 17.35L16.94 21.89C17.08 22.2 17.06 22.56 16.88 22.85C16.7 23.14 16.39 23.32 16.05 23.32L14.05 23.32C13.72 23.32 13.42 23.14 13.25 22.85L13.64 21.97Z" />
+            </svg>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Slide 3: Paste in Terminal -->
     <div class="min-h-[70vh] flex items-center justify-center py-16 px-6 border-t border-white/5">
-        <div class="max-w-4xl w-full">
-            <div class="flex items-center gap-4 mb-8">
-                <div class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">2</div>
-                <div>
-                    <h3 class="text-2xl font-bold text-white">Paste in your terminal</h3>
-                    <p class="text-slate-400">Open any terminal and paste the script. It sets everything up automatically.</p>
-                </div>
-            </div>
-            <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950">
-                <!-- Terminal Window -->
-                <div class="bg-slate-900 border-b border-white/10 px-4 py-3 flex items-center gap-2">
-                    <div class="flex gap-1.5">
-                        <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-                        <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                        <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
-                    </div>
-                    <span class="text-slate-400 text-sm ml-4 font-mono">bash — 80x24</span>
-                </div>
-                <div class="p-6 font-mono text-sm leading-relaxed bg-[#0d1117]">
-                    <div class="text-slate-500">user@laptop:~$</div>
-                    <div class="flex items-center gap-2 mt-1">
-                        <span class="text-emerald-400">curl -sL https://chatmcp.space/s/abc123 | bash</span>
-                        <span class="w-2 h-5 bg-emerald-400 animate-pulse"></span>
-                    </div>
-                    <div class="mt-4 text-slate-400">
-                        <div>⠋ Downloading agent configuration...</div>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-6 flex items-center justify-center gap-2 text-slate-500 text-sm">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Works on Linux, macOS, and WSL
-            </div>
+      <div class="max-w-4xl w-full">
+        <div class="flex items-center gap-4 mb-8">
+          <div
+            class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">
+            2</div>
+          <div>
+            <h3 class="text-2xl font-bold text-white">Paste in your terminal</h3>
+            <p class="text-slate-400">Open any terminal and paste the script. It sets everything up automatically.</p>
+          </div>
         </div>
+        <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950">
+          <!-- Terminal Window -->
+          <div class="bg-slate-900 border-b border-white/10 px-4 py-3 flex items-center gap-2">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+            </div>
+            <span class="text-slate-400 text-sm ml-4 font-mono">bash — 80x24</span>
+          </div>
+          <div class="p-6 font-mono text-sm leading-relaxed bg-[#0d1117]">
+            <div class="text-slate-500">user@laptop:~$</div>
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-emerald-400">curl -sL https://chatmcp.space/s/abc123 | bash</span>
+              <span class="w-2 h-5 bg-emerald-400 animate-pulse"></span>
+            </div>
+            <div class="mt-4 text-slate-400">
+              <div>⠋ Downloading agent configuration...</div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-6 flex items-center justify-center gap-2 text-slate-500 text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Works on Linux, macOS, and WSL
+        </div>
+      </div>
     </div>
 
     <!-- Slide 4: Run agent-cli.sh -->
     <div class="min-h-[70vh] flex items-center justify-center py-16 px-6 border-t border-white/5">
-        <div class="max-w-4xl w-full">
-            <div class="flex items-center gap-4 mb-8">
-                <div class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">3</div>
-                <div>
-                    <h3 class="text-2xl font-bold text-white">Run agent-cli.sh</h3>
-                    <p class="text-slate-400">Launch the CLI and watch your agents come to life!</p>
-                </div>
-            </div>
-            <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950">
-                <!-- Terminal Window -->
-                <div class="bg-slate-900 border-b border-white/10 px-4 py-3 flex items-center gap-2">
-                    <div class="flex gap-1.5">
-                        <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-                        <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                        <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
-                    </div>
-                    <span class="text-slate-400 text-sm ml-4 font-mono">bash — 80x24</span>
-                </div>
-                <div class="p-6 font-mono text-sm leading-relaxed bg-[#0d1117]">
-                    <div class="text-slate-500">❯ <span class="text-emerald-400">bash agent-cli.sh</span></div>
-                    <div class="mt-4 text-cyan-400">
-                        <div>╔═══════════════════════════════╗</div>
-                        <div>║&nbsp;&nbsp;🤖 Agent Messaging Platform&nbsp;&nbsp;║</div>
-                        <div>║&nbsp;&nbsp;Manage your AI agents&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;║</div>
-                        <div>║&nbsp;&nbsp;Version: 1.1.1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;║</div>
-                        <div>╚═══════════════════════════════╝</div>
-                    </div>
-                    <div class="mt-3 text-white">Found 2 existing agent(s)</div>
-                    <div class="mt-3 text-slate-400">What would you like to do?</div>
-                    <div class="mt-2 space-y-1">
-                        <div class="text-emerald-400">➤ 🆕 Create New Agent</div>
-                        <div class="text-white pl-4">▶️&nbsp; Continue Existing Agent</div>
-                        <div class="text-white pl-4">📊 View Agent Status</div>
-                        <div class="text-white pl-4">⚙️&nbsp; Manage Autostart</div>
-                        <div class="text-white pl-4">❌ Exit</div>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-8 text-center">
-                <p class="text-emerald-400 text-lg font-medium mb-4">🎉 That's it! You're ready to chat with your agents.</p>
-                <a href="#auth-section" class="inline-block px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg font-bold transition-colors shadow-lg shadow-emerald-500/20">
-                    Get Started Free
-                </a>
-            </div>
+      <div class="max-w-4xl w-full">
+        <div class="flex items-center gap-4 mb-8">
+          <div
+            class="w-12 h-12 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-white font-bold text-xl">
+            3</div>
+          <div>
+            <h3 class="text-2xl font-bold text-white">Run agent-cli.sh</h3>
+            <p class="text-slate-400">Launch the CLI and watch your agents come to life!</p>
+          </div>
         </div>
+        <div class="relative rounded-2xl overflow-hidden border border-white/10 shadow-xl bg-slate-950">
+          <!-- Terminal Window -->
+          <div class="bg-slate-900 border-b border-white/10 px-4 py-3 flex items-center gap-2">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+              <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+            </div>
+            <span class="text-slate-400 text-sm ml-4 font-mono">bash — 80x24</span>
+          </div>
+          <div class="p-6 font-mono text-sm leading-relaxed bg-[#0d1117]">
+            <div class="text-slate-500">❯ <span class="text-emerald-400">bash agent-cli.sh</span></div>
+            <div class="mt-4 text-cyan-400">
+              <div>╔═══════════════════════════════╗</div>
+              <div>║&nbsp;&nbsp;🤖 Agent Messaging Platform&nbsp;&nbsp;║</div>
+              <div>║&nbsp;&nbsp;Manage your AI agents&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;║</div>
+              <div>║&nbsp;&nbsp;Version:
+                1.1.1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;║</div>
+              <div>╚═══════════════════════════════╝</div>
+            </div>
+            <div class="mt-3 text-white">Found 2 existing agent(s)</div>
+            <div class="mt-3 text-slate-400">What would you like to do?</div>
+            <div class="mt-2 space-y-1">
+              <div class="text-emerald-400">➤ 🆕 Create New Agent</div>
+              <div class="text-white pl-4">▶️&nbsp; Continue Existing Agent</div>
+              <div class="text-white pl-4">📊 View Agent Status</div>
+              <div class="text-white pl-4">⚙️&nbsp; Manage Autostart</div>
+              <div class="text-white pl-4">❌ Exit</div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-8 text-center">
+          <p class="text-emerald-400 text-lg font-medium mb-4">🎉 That's it! You're ready to chat with your agents.</p>
+          <a href="#auth-section"
+            class="inline-block px-8 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg font-bold transition-colors shadow-lg shadow-emerald-500/20">
+            Get Started Free
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Video -->
+  <section class="py-10 px-6 border-t border-white/5 bg-slate-900/30 backdrop-blur-sm relative z-20">
+    <div class="max-w-4xl mx-auto">
+      <div
+        class="relative w-full aspect-[16/9] rounded-2xl overflow-hidden border border-emerald-500/20 shadow-[0_0_50px_-12px_rgba(16,185,129,0.25)] bg-black">
+        <iframe class="absolute inset-0 w-full h-full"
+          src="https://www.youtube.com/embed/kKiaVne1VV4?si=ISUGp-aYWXTm3joP" title="YouTube video player"
+          frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mascot -->
+  <section class="py-10 px-6 border-t border-white/5 bg-slate-950/40 backdrop-blur-sm">
+    <div class="max-w-4xl mx-auto flex justify-center">
+      <img src="/images/space_agent_final_v5.png" alt="Space agent mascot"
+        class="w-full max-w-md sm:max-w-lg drop-shadow-[0_20px_40px_rgba(16,185,129,0.25)]" loading="lazy"
+        decoding="async" />
     </div>
   </section>
 

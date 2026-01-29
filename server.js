@@ -71,6 +71,8 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'", ...allowedOrigins],
       mediaSrc: ["'self'"],
+      frameSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
+      childSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
       objectSrc: ["'none'"],
       workerSrc: ["'self'", "blob:"],
       frameAncestors: ["'self'"],
