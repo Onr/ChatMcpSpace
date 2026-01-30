@@ -60,25 +60,39 @@ const allowedOrigins = [
   'https://staging.chatmcp.space'
 ].filter(Boolean);
 
+// Build CSP directives - only upgrade insecure requests when HTTPS is enabled
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com"],
+  scriptSrcAttr: ["'unsafe-inline'"],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  fontSrc: ["'self'", "https://fonts.gstatic.com", "https://r2cdn.perplexity.ai"],
+  imgSrc: ["'self'", 'data:', 'blob:'],
+  connectSrc: ["'self'", ...allowedOrigins],
+  mediaSrc: ["'self'"],
+  frameSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
+  childSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
+  objectSrc: ["'none'"],
+  workerSrc: ["'self'", "blob:"],
+  frameAncestors: ["'self'"],
+};
+
+// Only upgrade insecure requests when HTTPS is enabled (not for HTTP dev mode)
+if (HTTPS_ENABLED) {
+  cspDirectives.upgradeInsecureRequests = [];
+} else if (IS_PROD) {
+  // Security warning: production should use HTTPS
+  console.warn('⚠️  WARNING: Running in production mode without HTTPS. This is a security risk!');
+  console.warn('   Set HTTPS_ENABLED=true and configure SSL certificates for production.');
+}
+
 app.use(helmet({
   contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com"],
-      scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://r2cdn.perplexity.ai"],
-      imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'", ...allowedOrigins],
-      mediaSrc: ["'self'"],
-      frameSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
-      childSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
-      objectSrc: ["'none'"],
-      workerSrc: ["'self'", "blob:"],
-      frameAncestors: ["'self'"],
-      upgradeInsecureRequests: [],
-    }
+    directives: cspDirectives
   },
+  // Disable HSTS when not using HTTPS to prevent browsers from forcing HTTPS
+  // on HTTP-only dev servers (especially when accessed via IP instead of localhost)
+  strictTransportSecurity: HTTPS_ENABLED ? undefined : false,
 }));
 
 // Explicit CORS allowlist for API routes (same-origin only)

@@ -1365,6 +1365,64 @@ router.delete('/messages/:messageId', async (req, res) => {
 });
 
 /**
+ * PUT /api/user/agents/:agentId/messages/hidden
+ * Hide all messages for an agent from the agent context
+ * 
+ * Path parameters:
+ * - agentId: string - UUID of the agent
+ * 
+ * Response: 200 OK
+ * - success: boolean - Update status
+ * - updatedCount: number - Total messages hidden
+ */
+router.put('/agents/:agentId/messages/hidden', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { agentId } = req.params;
+    // Default to true (hide) if not specified
+    const hidden = req.body.hidden !== false;
+
+    if (!isValidUUID(agentId)) {
+      return validationError(res, 'Invalid agent ID format');
+    }
+
+    // Validate user owns the agent
+    const agentResult = await query(
+      'SELECT agent_id FROM agents WHERE agent_id = $1 AND user_id = $2',
+      [agentId, userId]
+    );
+
+    if (agentResult.rows.length === 0) {
+      logUnauthorizedAccess(req, 'agent', agentId, 'User does not own this agent');
+      return forbiddenError(res, 'Agent not found or you do not have access to it');
+    }
+
+    // Update agent messages
+    const agentMsgUpdate = await query(
+      'UPDATE messages SET hidden_from_agent = $2 WHERE agent_id = $1 AND hidden_from_agent != $2',
+      [agentId, hidden]
+    );
+
+    // Update user messages
+    const userMsgUpdate = await query(
+      'UPDATE user_messages SET hidden_from_agent = $2 WHERE agent_id = $1 AND hidden_from_agent != $2',
+      [agentId, hidden]
+    );
+
+    const totalUpdated = (agentMsgUpdate.rowCount || 0) + (userMsgUpdate.rowCount || 0);
+
+    res.status(200).json({
+      success: true,
+      updatedCount: totalUpdated,
+      hidden: hidden
+    });
+
+  } catch (error) {
+    return handleDatabaseError(res, error, 'updating message visibility');
+  }
+});
+
+/**
  * DELETE /api/user/agents/:agentId/messages
  * Delete all messages for an agent (keep the agent)
  * 

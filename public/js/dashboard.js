@@ -227,6 +227,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Setup archive buttons
   setupArchiveButtons();
 
+  // Setup confirmation modals (delete, clear, hide)
+  setupConfirmationModals();
+
   // Setup TTS keyboard shortcuts
   setupMessageTtsShortcuts();
 
@@ -5339,7 +5342,7 @@ function setupVoiceControl() {
  * Setup copy buttons for agent setup and instructions
  */
 function setupCopyButtons() {
-  const copyInstructionBtn = document.getElementById('copyInstructionBtn');
+  const hideAllMessagesBtn = document.getElementById('hideAllMessagesBtn');
   const agentHeaderInfo = document.getElementById('agentHeaderInfo');
   const contextMenu = document.getElementById('agentContextMenu');
   const floatingMenu = document.getElementById('floatingAgentMenu');
@@ -5374,13 +5377,13 @@ function setupCopyButtons() {
   }
 
   // Setup floating menu buttons
-  const floatingCopyInstructionBtn = document.getElementById('floatingCopyInstructionBtn');
+  const floatingHideAllMessagesBtn = document.getElementById('floatingHideAllMessagesBtn');
   const floatingDeleteAgentBtn = document.getElementById('floatingDeleteAgentBtn');
 
-  if (floatingCopyInstructionBtn) {
-    floatingCopyInstructionBtn.addEventListener('click', (e) => {
+  if (floatingHideAllMessagesBtn) {
+    floatingHideAllMessagesBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      copyAgentInstructions();
+      await hideAllMessages();
       hideFloatingAgentMenu();
     });
   }
@@ -5403,32 +5406,11 @@ function setupCopyButtons() {
     });
   }
 
-  if (copyInstructionBtn) {
-    copyInstructionBtn.addEventListener('click', (e) => {
+  if (hideAllMessagesBtn) {
+    hideAllMessagesBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      copyAgentInstructions();
-    });
-  }
-
-  // Clear Conversation button (in agent header context menu)
-  const clearConversationBtn = document.getElementById('clearConversationBtn');
-  if (clearConversationBtn) {
-    clearConversationBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await clearConversation();
-      if (contextMenu) {
-        contextMenu.classList.add('hidden');
-      }
-    });
-  }
-
-  // Delete agent button
-  const deleteAgentBtn = document.getElementById('deleteAgentBtn');
-  if (deleteAgentBtn) {
-    deleteAgentBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await deleteAgent();
-      // Close menu after deletion attempt
+      await hideAllMessages();
+      const contextMenu = document.getElementById('agentContextMenu');
       if (contextMenu) {
         contextMenu.classList.add('hidden');
       }
@@ -5437,65 +5419,35 @@ function setupCopyButtons() {
 }
 
 /**
- * Copy agent setup or instruction to clipboard
+ * Show delete confirmation modal
  */
-async function copyAgentInstructions() {
-  const agentNameEl = document.getElementById('selectedAgentName');
-  if (!agentNameEl) return;
+function showDeleteConfirmationModal(agentId, agentName) {
+  const modal = document.getElementById('deleteConfirmationModal');
+  const modalLabel = document.getElementById('deleteModalAgentNameLabel');
 
-  const agentName = agentNameEl.textContent;
-  if (!agentName) return;
+  if (!modal) return;
 
-  const btn = document.getElementById('copyInstructionBtn');
-  if (!btn) return;
+  // Set agent info in dataset and label
+  modal.dataset.agentId = agentId;
+  modal.dataset.agentName = agentName;
 
-  const originalHtml = btn.innerHTML;
+  if (modalLabel) {
+    modalLabel.innerHTML = `Delete "<strong>${agentName}</strong>"?`;
+  }
 
-  try {
-    btn.disabled = true;
-    // Keep width to prevent layout shift if possible, or just change text
-    btn.innerHTML = '<span class="animate-pulse">Fetching...</span>';
+  // Show modal
+  modal.classList.remove('hidden');
+}
 
-    const response = await fetch('/settings/generate-guide', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': window.csrfToken
-      },
-      body: JSON.stringify({
-        agentName: agentName,
-        variant: 'default'
-      })
-    });
-
-    if (!response.ok) throw new Error('Failed to generate guide');
-
-    const data = await response.json();
-
-    if (data.guide) {
-      await navigator.clipboard.writeText(data.guide);
-
-      // Show success state
-      btn.innerHTML = `
-        <svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        Copied!
-      `;
-      btn.classList.remove('text-slate-300', 'border-slate-700');
-      btn.classList.add('text-emerald-400', 'border-emerald-500/50');
-
-      setTimeout(() => {
-        btn.innerHTML = originalHtml;
-        btn.disabled = false;
-        btn.classList.add('text-slate-300', 'border-slate-700');
-        btn.classList.remove('text-emerald-400', 'border-emerald-500/50');
-      }, 2000);
-    }
-
-  } catch (error) {
-    console.error('Error copying agent data:', error);
-    btn.innerHTML = originalHtml;
-    btn.disabled = false;
-    showErrorMessage('Failed to copy. Please try again.');
+/**
+ * Hide delete confirmation modal
+ */
+function hideDeleteConfirmationModal() {
+  const modal = document.getElementById('deleteConfirmationModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    delete modal.dataset.agentId;
+    delete modal.dataset.agentName;
   }
 }
 
@@ -5511,19 +5463,16 @@ async function deleteAgent() {
   const agentNameEl = document.getElementById('selectedAgentName');
   const agentName = agentNameEl ? agentNameEl.textContent : 'this agent';
 
-  // Show confirmation dialog
-  const confirmed = confirm(
-    `Are you sure you want to delete "${agentName}"?\n\n` +
-    `This will permanently remove the agent and ALL associated messages. ` +
-    `This action cannot be undone.`
-  );
+  // Show confirmation modal instead of browser confirm
+  showDeleteConfirmationModal(selectedAgentId, agentName);
+}
 
-  if (!confirmed) {
-    return;
-  }
-
+/**
+ * Execute the actual agent deletion
+ */
+async function executeDeleteAgent(agentId, agentName) {
   try {
-    const response = await fetch(`/api/user/agents/${selectedAgentId}`, {
+    const response = await fetch(`/api/user/agents/${agentId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -5537,7 +5486,6 @@ async function deleteAgent() {
     }
 
     // Success - clear selected agent and refresh UI
-    const agentIdToDelete = selectedAgentId;
     selectedAgentId = null;
     lastMessageTimestamp = null;
     lastMessageCursor = null;
@@ -5557,18 +5505,44 @@ async function deleteAgent() {
     await pollAgentList(true);
 
     // Show success message
-    const toast = document.createElement('div');
-    toast.className = 'fixed top-4 right-4 bg-emerald-500/90 text-white px-4 py-3 rounded-xl shadow-2xl z-50 border border-emerald-400/50 backdrop-blur';
-    toast.textContent = `Agent "${agentName}" has been deleted successfully`;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      toast.remove();
-    }, 3000);
+    showSuccessToast(`Agent "${agentName}" has been deleted successfully`);
 
   } catch (error) {
     console.error('Error deleting agent:', error);
     showErrorMessage(error.message || 'Failed to delete agent. Please try again.');
+  }
+}
+
+/**
+ * Show clear conversation confirmation modal
+ */
+function showClearConversationModal(agentId, agentName) {
+  const modal = document.getElementById('clearConversationModal');
+  const modalLabel = document.getElementById('clearModalAgentNameLabel');
+
+  if (!modal) return;
+
+  // Set agent info in dataset and label
+  modal.dataset.agentId = agentId;
+  modal.dataset.agentName = agentName;
+
+  if (modalLabel) {
+    modalLabel.innerHTML = `Clear conversation with "<strong>${agentName}</strong>"?`;
+  }
+
+  // Show modal
+  modal.classList.remove('hidden');
+}
+
+/**
+ * Hide clear conversation confirmation modal
+ */
+function hideClearConversationModal() {
+  const modal = document.getElementById('clearConversationModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    delete modal.dataset.agentId;
+    delete modal.dataset.agentName;
   }
 }
 
@@ -5584,19 +5558,16 @@ async function clearConversation() {
   const agentNameEl = document.getElementById('selectedAgentName');
   const agentName = agentNameEl ? agentNameEl.textContent : 'this agent';
 
-  // Show confirmation dialog
-  const confirmed = confirm(
-    `Are you sure you want to clear the conversation with "${agentName}"?\n\n` +
-    `This will permanently remove ALL messages but keep the agent. ` +
-    `This action cannot be undone.`
-  );
+  // Show confirmation modal instead of browser confirm
+  showClearConversationModal(selectedAgentId, agentName);
+}
 
-  if (!confirmed) {
-    return;
-  }
-
+/**
+ * Execute the actual conversation clearing
+ */
+async function executeClearConversation(agentId) {
   try {
-    const response = await fetch(`/api/user/agents/${selectedAgentId}/messages`, {
+    const response = await fetch(`/api/user/agents/${agentId}/messages`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -5626,14 +5597,7 @@ async function clearConversation() {
     seenMessageIds.clear();
 
     // Show success message
-    const toast = document.createElement('div');
-    toast.className = 'fixed top-4 right-4 bg-emerald-500/90 text-white px-4 py-3 rounded-xl shadow-2xl z-50 border border-emerald-400/50 backdrop-blur';
-    toast.textContent = `Conversation cleared (${data.deletedCount} messages removed)`;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      toast.remove();
-    }, 3000);
+    showSuccessToast(`Conversation cleared (${data.deletedCount} messages removed)`);
 
   } catch (error) {
     console.error('Error clearing conversation:', error);
@@ -6717,4 +6681,272 @@ function setupLastAgentRestoration() {
       clearInterval(restoreInterval);
     }
   }, 500);
+}
+
+
+/**
+ * Show hide/show messages confirmation modal
+ */
+function showHideMessagesModal(agentId, agentName, targetHiddenState) {
+  const modal = document.getElementById('hideMessagesModal');
+  const modalLabel = document.getElementById('hideModalAgentNameLabel');
+  const modalTitle = document.getElementById('hideMessagesModalTitle');
+  const modalSubtitle = document.getElementById('hideMessagesModalSubtitle');
+  const modalText = document.getElementById('hideMessagesModalText');
+  const modalIcon = document.getElementById('hideMessagesModalIcon');
+  const confirmBtn = document.getElementById('hideConfirmBtn');
+
+  if (!modal) return;
+
+  // Set agent info in dataset
+  modal.dataset.agentId = agentId;
+  modal.dataset.agentName = agentName;
+  modal.dataset.targetHiddenState = targetHiddenState ? 'true' : 'false';
+
+  // Update modal content based on action
+  if (targetHiddenState) {
+    // Hiding messages
+    if (modalLabel) modalLabel.innerHTML = `Hide all messages from "<strong>${agentName}</strong>"?`;
+    if (modalTitle) modalTitle.textContent = 'Hide Messages';
+    if (modalSubtitle) modalSubtitle.textContent = 'Start fresh conversation';
+    if (modalText) modalText.textContent = 'The agent will start a fresh conversation. Previous messages will be hidden from the agent\'s context but can be restored later.';
+    if (confirmBtn) confirmBtn.textContent = 'Hide Messages';
+    if (modalIcon) {
+      modalIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />`;
+    }
+  } else {
+    // Showing messages
+    if (modalLabel) modalLabel.innerHTML = `Show all messages for "<strong>${agentName}</strong>"?`;
+    if (modalTitle) modalTitle.textContent = 'Show Messages';
+    if (modalSubtitle) modalSubtitle.textContent = 'Restore conversation history';
+    if (modalText) modalText.textContent = 'The agent will see the full conversation history. All previously hidden messages will be restored to the agent\'s context.';
+    if (confirmBtn) confirmBtn.textContent = 'Show Messages';
+    if (modalIcon) {
+      modalIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />`;
+    }
+  }
+
+  // Show modal
+  modal.classList.remove('hidden');
+}
+
+/**
+ * Hide the hide/show messages confirmation modal
+ */
+function hideHideMessagesModal() {
+  const modal = document.getElementById('hideMessagesModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    delete modal.dataset.agentId;
+    delete modal.dataset.agentName;
+    delete modal.dataset.targetHiddenState;
+  }
+}
+
+/**
+ * Hide all messages for the current agent
+ */
+async function hideAllMessages() {
+  if (!selectedAgentId) {
+    showErrorMessage('No agent selected');
+    return;
+  }
+
+  const btn = document.getElementById('hideAllMessagesBtn');
+  // Determine current state: if dataset.hiddenState is 'true', we are currently hidden, so we want to SHOW (hidden=false)
+  // Default is 'false' (not hidden), so we want to HIDE (hidden=true)
+  const isCurrentlyHidden = btn && btn.dataset.hiddenState === 'true';
+  const targetHiddenState = !isCurrentlyHidden;
+
+  const agentNameEl = document.getElementById('selectedAgentName');
+  const agentName = agentNameEl ? agentNameEl.textContent : 'this agent';
+
+  // Show confirmation modal instead of browser confirm
+  showHideMessagesModal(selectedAgentId, agentName, targetHiddenState);
+}
+
+/**
+ * Execute the actual hide/show messages operation
+ */
+async function executeHideMessages(agentId, targetHiddenState) {
+  const btn = document.getElementById('hideAllMessagesBtn');
+
+  try {
+    const response = await fetch(`/api/user/agents/${agentId}/messages/hidden`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': window.csrfToken
+      },
+      body: JSON.stringify({ hidden: targetHiddenState })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || 'Failed to update messages');
+    }
+
+    const data = await response.json();
+
+    // Show success message
+    const count = data.updatedCount || 0;
+    showSuccessToast(targetHiddenState
+      ? `Hidden ${count} messages from agent context`
+      : `Restored ${count} messages to agent context`
+    );
+
+    // Update button state
+    if (btn) {
+      btn.dataset.hiddenState = targetHiddenState ? 'true' : 'false';
+      // Update text/icon to reflect NEXT action
+      // If we just HID everything (true), next action is SHOW (Unhide)
+      if (targetHiddenState) {
+          btn.innerHTML = `
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            Show All Messages
+          `;
+      } else {
+          btn.innerHTML = `
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+            </svg>
+            Hide All Messages
+          `;
+      }
+    }
+
+    // Reload messages to update UI state
+    conversationCache.delete(selectedAgentId);
+    await loadMessages(selectedAgentId);
+
+  } catch (error) {
+    console.error('Error updating messages:', error);
+    showErrorMessage(error.message || 'Failed to update messages. Please try again.');
+  }
+}
+
+/**
+ * Setup confirmation modals (delete, clear, hide)
+ */
+function setupConfirmationModals() {
+  // Delete confirmation modal
+  const deleteModal = document.getElementById('deleteConfirmationModal');
+  const deleteCancelBtn = document.getElementById('deleteCancelBtn');
+  const deleteConfirmBtn = document.getElementById('deleteConfirmBtn');
+
+  if (deleteCancelBtn) {
+    deleteCancelBtn.addEventListener('click', () => {
+      hideDeleteConfirmationModal();
+    });
+  }
+
+  if (deleteConfirmBtn) {
+    deleteConfirmBtn.addEventListener('click', async () => {
+      const agentId = deleteModal?.dataset?.agentId;
+      const agentName = deleteModal?.dataset?.agentName || selectedAgentName;
+
+      if (!agentId) {
+        showErrorMessage('Invalid agent selection');
+        return;
+      }
+
+      hideDeleteConfirmationModal();
+      await executeDeleteAgent(agentId, agentName);
+    });
+  }
+
+  if (deleteModal) {
+    deleteModal.addEventListener('click', (e) => {
+      if (e.target === deleteModal) {
+        hideDeleteConfirmationModal();
+      }
+    });
+  }
+
+  // Clear conversation modal
+  const clearModal = document.getElementById('clearConversationModal');
+  const clearCancelBtn = document.getElementById('clearCancelBtn');
+  const clearConfirmBtn = document.getElementById('clearConfirmBtn');
+
+  if (clearCancelBtn) {
+    clearCancelBtn.addEventListener('click', () => {
+      hideClearConversationModal();
+    });
+  }
+
+  if (clearConfirmBtn) {
+    clearConfirmBtn.addEventListener('click', async () => {
+      const agentId = clearModal?.dataset?.agentId;
+
+      if (!agentId) {
+        showErrorMessage('Invalid agent selection');
+        return;
+      }
+
+      hideClearConversationModal();
+      await executeClearConversation(agentId);
+    });
+  }
+
+  if (clearModal) {
+    clearModal.addEventListener('click', (e) => {
+      if (e.target === clearModal) {
+        hideClearConversationModal();
+      }
+    });
+  }
+
+  // Hide messages modal
+  const hideModal = document.getElementById('hideMessagesModal');
+  const hideCancelBtn = document.getElementById('hideCancelBtn');
+  const hideConfirmBtn = document.getElementById('hideConfirmBtn');
+
+  if (hideCancelBtn) {
+    hideCancelBtn.addEventListener('click', () => {
+      hideHideMessagesModal();
+    });
+  }
+
+  if (hideConfirmBtn) {
+    hideConfirmBtn.addEventListener('click', async () => {
+      const agentId = hideModal?.dataset?.agentId;
+      const targetHiddenState = hideModal?.dataset?.targetHiddenState === 'true';
+
+      if (!agentId) {
+        showErrorMessage('Invalid agent selection');
+        return;
+      }
+
+      hideHideMessagesModal();
+      await executeHideMessages(agentId, targetHiddenState);
+    });
+  }
+
+  if (hideModal) {
+    hideModal.addEventListener('click', (e) => {
+      if (e.target === hideModal) {
+        hideHideMessagesModal();
+      }
+    });
+  }
+
+  // Close all modals on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (deleteModal && !deleteModal.classList.contains('hidden')) {
+        hideDeleteConfirmationModal();
+      }
+      if (clearModal && !clearModal.classList.contains('hidden')) {
+        hideClearConversationModal();
+      }
+      if (hideModal && !hideModal.classList.contains('hidden')) {
+        hideHideMessagesModal();
+      }
+    }
+  });
 }

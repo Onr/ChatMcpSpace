@@ -74,5 +74,8 @@ else
   exit 1
 fi
 
+# Security: Disable dev mode test user if not in dev mode
+"$SCRIPTS_DIR/_disable_dev_user.sh"
+
 echo "[start-app] Launching npm start (foreground). Press Ctrl+C to stop."
 npm start

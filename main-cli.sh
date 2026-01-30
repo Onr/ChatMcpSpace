@@ -135,6 +135,21 @@ action_start_production() {
     "$SCRIPTS_DIR/start_production.sh"
 }
 
+action_start_dev_mode() {
+  gum style --foreground "9" --bold "⚠️  SECURITY WARNING ⚠️"
+  gum style --foreground "9" "This mode creates a default user with INSECURE credentials!"
+  gum style --foreground "9" "  Email:    123@gmail.com"
+  gum style --foreground "9" "  Password: 12345678"
+  echo ""
+  gum style --foreground "214" "This is for LOCAL DEVELOPMENT/TESTING ONLY."
+  gum style --foreground "214" "DO NOT use in production or expose to the internet!"
+  echo ""
+  command_preview \
+    "Start server (dev mode)" \
+    "Create default test user and start server for local testing without authentication setup." \
+    "$SCRIPTS_DIR/start_dev_mode.sh"
+}
+
 action_setup_nginx() {
   gum style --foreground 212 "Configure Nginx reverse proxy on port 80 (requires sudo)."
   gum style --foreground 244 "This will install nginx if missing, write /etc/nginx/sites-available/agent-messaging-platform.conf, and reload nginx."
@@ -327,6 +342,7 @@ show_menu_and_get_selection() {
     "nginx|Setup Nginx reverse proxy|Install/configure Nginx to proxy :80 to app port"
     "db|Run database setup|Provision PostgreSQL and apply schema"
     "start_fg|Start server (foreground)|Ensure env/deps then run npm start interactively"
+    "start_fg_for_devlop|Start server (dev mode)|⚠️ INSECURE: Create test user 123@gmail.com for local testing"
     "start_prod|Start server (production)|Prep env/deps, verify DB, start with NODE_ENV=production"
     "start|Start server|Run npm start in the background"
     "status|Server status|Check PID and log file location"
@@ -379,6 +395,7 @@ while true; do
     bootstrap) action_bootstrap_all ;;
     start) action_start_server ;;
     start_fg) action_start_app_foreground ;;
+    start_fg_for_devlop) action_start_dev_mode ;;
     tests) action_run_tests_suite ;;
     cli_tests) action_test_cli_providers ;;
     stop) action_stop_server ;;

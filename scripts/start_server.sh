@@ -11,6 +11,10 @@ if is_server_running; then
   exit 0
 fi
 
+# Security: Disable dev mode test user if not in dev mode
+SCRIPTS_DIR="$(dirname "${BASH_SOURCE[0]}")"
+"$SCRIPTS_DIR/_disable_dev_user.sh"
+
 echo "[start-server] Launching server (logs -> $LOG_FILE)"
 nohup npm start >>"$LOG_FILE" 2>&1 &
 pid=$!

@@ -51,6 +51,10 @@ else
   exit 1
 fi
 
+# SECURITY: Disable dev mode test user if it exists
+echo "[start-production] Checking for dev mode test user..."
+"$SCRIPTS_DIR/_disable_dev_user.sh"
+
 # Helper to read an env value from .env (simple parser)
 get_env_value() {
   local key="$1"

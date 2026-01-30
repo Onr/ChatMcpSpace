@@ -1,13 +1,13 @@
 <!-- Global Floating Context Menu for Agents -->
 <div id="floatingAgentMenu"
     class="hidden fixed w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-[100] overflow-hidden">
-    <button id="floatingCopyInstructionBtn"
+    <button id="floatingHideAllMessagesBtn"
         class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
         <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
         </svg>
-        Copy Instruction
+        Hide All Messages
     </button>
     <button id="floatingClearConversationBtn"
         class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
@@ -472,14 +472,14 @@
                         <!-- Context Menu (Floating) -->
                         <div id="agentContextMenu"
                             class="hidden absolute top-full left-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                            <button id="copyInstructionBtn"
+                            <button id="hideAllMessagesBtn"
                                 class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
                                 <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                                 </svg>
-                                Copy Instruction
+                                Hide All Messages
                             </button>
                             <button id="clearConversationBtn"
                                 class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
@@ -861,6 +861,141 @@
             <button id="archiveConfirmBtn" type="button"
                 class="px-6 py-2.5 rounded-full bg-amber-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-amber-500/30 hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 Archive Agent
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Agent Confirmation Modal -->
+<div id="deleteConfirmationModal"
+    class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-red-500/10 to-rose-500/10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Delete Agent</h3>
+                    <p class="text-xs text-slate-400">Permanently remove agent</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="px-6 py-5">
+            <div class="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p class="text-xs text-red-300 leading-relaxed">
+                    <span class="font-semibold" id="deleteModalAgentNameLabel">Delete this agent?</span>
+                    <br />
+                    This will permanently remove the agent and ALL associated messages. This action cannot be undone.
+                </p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="deleteCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="deleteConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-red-500 text-white font-semibold text-sm tracking-wide shadow-lg shadow-red-500/30 hover:bg-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Delete Agent
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Clear Conversation Confirmation Modal -->
+<div id="clearConversationModal"
+    class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-orange-500/10 to-yellow-500/10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white">Clear Conversation</h3>
+                    <p class="text-xs text-slate-400">Remove all messages</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="px-6 py-5">
+            <div class="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                <p class="text-xs text-orange-300 leading-relaxed">
+                    <span class="font-semibold" id="clearModalAgentNameLabel">Clear conversation?</span>
+                    <br />
+                    This will permanently remove ALL messages but keep the agent. This action cannot be undone.
+                </p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="clearCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="clearConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-orange-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-orange-500/30 hover:bg-orange-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Clear Conversation
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Hide All Messages Confirmation Modal -->
+<div id="hideMessagesModal"
+    class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-cyan-500/10 to-blue-500/10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" id="hideMessagesModalIcon">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold text-white" id="hideMessagesModalTitle">Hide Messages</h3>
+                    <p class="text-xs text-slate-400" id="hideMessagesModalSubtitle">Start fresh conversation</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="px-6 py-5">
+            <div class="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                <p class="text-xs text-cyan-300 leading-relaxed" id="hideMessagesModalDescription">
+                    <span class="font-semibold" id="hideModalAgentNameLabel">Hide all messages?</span>
+                    <br />
+                    <span id="hideMessagesModalText">The agent will start a fresh conversation. Previous messages will be hidden from the agent's context but can be restored later.</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="hideCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="hideConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-cyan-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-cyan-500/30 hover:bg-cyan-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Hide Messages
             </button>
         </div>
     </div>
