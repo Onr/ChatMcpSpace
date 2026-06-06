@@ -922,26 +922,33 @@ router.get('/messages/latest', async (req, res) => {
 
 /**
  * Find agent chatspace directory by searching multiple locations
- * Searches in cwd/chatspace, $HOME/chatspace, and tmp subdirectories
+ * Searches in cwd/.chatspace, cwd/chatspace, $HOME/.chatspace, $HOME/chatspace, and tmp subdirectories
  * @param {string} agentFolder - The sanitized agent folder name
  * @returns {string|null} Path to agent directory or null if not found
  */
 function findAgentChatspaceDir(agentFolder) {
   const fs = require('fs');
   const path = require('path');
+  const cwd = process.cwd();
+  const home = process.env.HOME || '';
 
   const searchPaths = [
-    path.join(process.cwd(), 'chatspace', agentFolder),
-    path.join(process.env.HOME || '', 'chatspace', agentFolder),
+    path.join(cwd, '.chatspace', agentFolder),
+    path.join(cwd, 'chatspace', agentFolder),
+    path.join(home, '.chatspace', agentFolder),
+    path.join(home, 'chatspace', agentFolder),
   ];
 
   // Also check tmp subdirectories (for development/testing)
-  const tmpDir = path.join(process.cwd(), 'tmp');
+  const tmpDir = path.join(cwd, 'tmp');
   if (fs.existsSync(tmpDir)) {
     try {
       const tmpSubdirs = fs.readdirSync(tmpDir, { withFileTypes: true })
         .filter(d => d.isDirectory())
-        .map(d => path.join(tmpDir, d.name, 'chatspace', agentFolder));
+        .flatMap(d => ([
+          path.join(tmpDir, d.name, '.chatspace', agentFolder),
+          path.join(tmpDir, d.name, 'chatspace', agentFolder)
+        ]));
       searchPaths.push(...tmpSubdirs);
     } catch (e) {
       // Ignore errors reading tmp dir
@@ -1286,20 +1293,7 @@ router.post('/stop', async (req, res) => {
     const agentFolder = agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
     const fs = require('fs');
     const path = require('path');
-
-    // Find agent directory
-    const possiblePaths = [
-      path.join(process.cwd(), 'chatspace', agentFolder),
-      path.join(process.env.HOME || '', 'chatspace', agentFolder)
-    ];
-
-    let agentDir = null;
-    for (const dir of possiblePaths) {
-      if (fs.existsSync(dir)) {
-        agentDir = dir;
-        break;
-      }
-    }
+    const agentDir = findAgentChatspaceDir(agentFolder);
 
     if (!agentDir) {
       return res.status(404).json({

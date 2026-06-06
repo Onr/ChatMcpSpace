@@ -1,6 +1,9 @@
 const express = require('express');
 const request = require('supertest');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
 
@@ -293,5 +296,48 @@ describe('Agent API routes', () => {
     expect(textRead.rows[0].read_at).toBeTruthy();
 
     await pool.end();
+  });
+
+  it('POST /api/agent/stop resolves agents stored under .chatspace', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+
+    const agentName = 'StopByDotChatspace';
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      agentName,
+      1,
+    ]);
+
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'chatmcp-stop-'));
+    const folderName = agentName.toLowerCase();
+    const agentDir = path.join(tmpRoot, '.chatspace', folderName);
+    fs.mkdirSync(path.join(agentDir, 'agent_state'), { recursive: true });
+
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpRoot);
+    const homeBackup = process.env.HOME;
+    process.env.HOME = path.join(tmpRoot, 'home');
+
+    try {
+      const res = await request(app)
+        .post('/api/agent/stop')
+        .send({ agentName })
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        agentId,
+        agentName,
+      });
+
+      const stopFlagPath = path.join(agentDir, 'agent_state', '.stop_requested');
+      expect(fs.existsSync(stopFlagPath)).toBe(true);
+      expect(fs.readFileSync(stopFlagPath, 'utf8').trim()).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      cwdSpy.mockRestore();
+      process.env.HOME = homeBackup;
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      await pool.end();
+    }
   });
 });

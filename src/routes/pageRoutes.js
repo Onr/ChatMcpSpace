@@ -17,6 +17,28 @@ const { isValidEmail, validatePasswordStrength } = require('../utils/validation'
 const { generateApiGuide, generateDirectSetupScript, generateMainCLIScript } = require('../utils/apiGuideGenerator');
 const { generateEncryptionSalt } = require('../utils/encryptionHelper');
 
+function findAgentWorkspaceDir(agentFolder) {
+  const fs = require('fs');
+  const path = require('path');
+  const homeDir = process.env.HOME || '';
+  const cwd = process.cwd();
+
+  const searchPaths = [
+    path.join(cwd, '.chatspace', agentFolder),
+    path.join(cwd, 'chatspace', agentFolder),
+    path.join(homeDir, '.chatspace', agentFolder),
+    path.join(homeDir, 'chatspace', agentFolder)
+  ];
+
+  for (const candidate of searchPaths) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 /**
  * GET /setup
  * Universal bootstrap installer (no authentication required)
@@ -1059,18 +1081,7 @@ router.get('/dashboard/config', protectRoute, async (req, res) => {
     let allowedPermissions = {};
 
     // Try to find the agent's chatspace directory
-    const possiblePaths = [
-      path.join(process.cwd(), 'chatspace', agentFolder),
-      path.join(process.env.HOME || '', 'chatspace', agentFolder)
-    ];
-
-    let agentDir = null;
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        agentDir = p;
-        break;
-      }
-    }
+    const agentDir = findAgentWorkspaceDir(agentFolder);
 
     if (agentDir) {
       // Load config
@@ -1120,22 +1131,11 @@ router.put('/dashboard/config', protectRoute, validateCsrfToken, async (req, res
     const fs = require('fs');
     const path = require('path');
 
-    const possiblePaths = [
-      path.join(process.cwd(), 'chatspace', agentFolder),
-      path.join(process.env.HOME || '', 'chatspace', agentFolder)
-    ];
+    let agentDir = findAgentWorkspaceDir(agentFolder);
 
-    let agentDir = null;
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        agentDir = p;
-        break;
-      }
-    }
-
-    // If directory doesn't exist, create it in the cwd/chatspace location
+    // If directory doesn't exist, create it in the cwd/.chatspace location
     if (!agentDir) {
-      agentDir = path.join(process.cwd(), 'chatspace', agentFolder);
+      agentDir = path.join(process.cwd(), '.chatspace', agentFolder);
       fs.mkdirSync(path.join(agentDir, 'agent_state'), { recursive: true });
       console.log(`Created agent directory: ${agentDir}`);
     }
@@ -1212,18 +1212,7 @@ router.post('/dashboard/stop', protectRoute, validateCsrfToken, async (req, res)
     const fs = require('fs');
     const path = require('path');
 
-    const possiblePaths = [
-      path.join(process.cwd(), 'chatspace', agentFolder),
-      path.join(process.env.HOME || '', 'chatspace', agentFolder)
-    ];
-
-    let agentDir = null;
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        agentDir = p;
-        break;
-      }
-    }
+    const agentDir = findAgentWorkspaceDir(agentFolder);
 
     if (!agentDir) {
       return res.status(404).json({
