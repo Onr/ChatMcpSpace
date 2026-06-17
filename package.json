@@ -40,7 +40,7 @@
     "express-session": "^1.17.3",
     "google-tts-api": "^0.0.6",
     "helmet": "^7.2.0",
-    "multer": "^2.0.2",
+    "multer": "^2.1.1",
     "nodemailer": "^7.0.10",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
