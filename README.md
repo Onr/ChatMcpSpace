@@ -125,10 +125,14 @@ EMAIL_FROM=noreply@yourdomain.com
 EMAIL_FROM_NAME=Agent Messaging Platform
 VERIFICATION_TOKEN_EXPIRY_HOURS=24
 
-# Google OAuth (optional)
+# Google OAuth (optional; sign-in buttons are hidden when unset)
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+
+# Local mode (optional) - register/login with just an email + password, no
+# verification email. Ignored when NODE_ENV=production. See "Running It Locally".
+LOCAL_MODE=false
 
 # TLS/HTTPS (optional)
 HTTPS_ENABLED=false
@@ -161,6 +165,38 @@ npm start
 ```
 
 The server will start on `http://localhost:3000` (or the port specified in your .env file).
+
+## Running It Locally (No Email Setup Required)
+
+By default, signing up sends a verification code by email, which means you need
+working SMTP credentials before you can log in. If you just want to run the
+project on your own machine, turn on **local mode** instead:
+
+```bash
+./scripts/start_app.sh --local
+```
+
+Or set it in your `.env` and start the server however you like:
+
+```bash
+LOCAL_MODE=true
+```
+
+With local mode on:
+
+- Register at `/register` with any email address and a password.
+- You are signed in immediately - no verification email, no SMTP configuration.
+- Google sign-in buttons are hidden automatically when `GOOGLE_CLIENT_ID` /
+  `GOOGLE_CLIENT_SECRET` are unset, so there is no dead button to click.
+- Accounts created before you enabled the flag can also sign in.
+
+Everything else about authentication is unchanged: a password is still required,
+passwords are still hashed with bcrypt, and CSRF protection and login rate
+limiting still apply.
+
+> **Do not enable this on a public server.** Anyone who can reach it could create
+> an account. As a safeguard the flag is ignored when `NODE_ENV=production`, and
+> the server logs a warning at startup if it is set there.
 
 ## Enabling HTTPS / TLS
 
@@ -196,6 +232,7 @@ The server can terminate TLS directly when certificates are available.
 
 1. **Register**: Visit `/register` to create a new account
 2. **Verify Email**: Check your email and enter the verification code
+   (skipped entirely when running with `LOCAL_MODE=true`)
 3. **Login**: Visit `/login` to access your dashboard
 4. **Dashboard**: View and respond to messages from your AI agents
 5. **Settings**: Get your API key and CLI setup instructions at `/settings`

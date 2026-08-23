@@ -7,6 +7,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { query } = require('../db/connection');
 const { generateEncryptionSalt } = require('../utils/encryptionHelper');
+const { isLocalAuthMode } = require('../utils/localMode');
 
 const SALT_ROUNDS = 12;
 
@@ -73,12 +74,24 @@ async function registerUser(email, password) {
     // Generate script token for short URL access
     const scriptToken = generateScriptToken();
     
+    const columns = ['email', 'password_hash', 'api_key', 'encryption_salt', 'script_token'];
+    const values = [email, passwordHash, apiKey, encryptionSalt, scriptToken];
+
+    // In local mode there is no SMTP round-trip, so the account is stored as
+    // already verified and can sign in immediately.
+    if (isLocalAuthMode()) {
+      columns.push('email_verified', 'email_verified_at');
+      values.push(true, new Date());
+    }
+
+    const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
+
     // Insert new user into database
     const result = await query(
-      `INSERT INTO users (email, password_hash, api_key, encryption_salt, script_token)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (${columns.join(', ')})
+       VALUES (${placeholders})
        RETURNING user_id, email, api_key, encryption_salt, script_token, created_at`,
-      [email, passwordHash, apiKey, encryptionSalt, scriptToken]
+      values
     );
     
     if (result.rows.length === 0) {
@@ -144,8 +157,9 @@ async function validateCredentials(email, password) {
       return null; // Invalid password
     }
 
-    // Check if email is verified
-    if (!user.email_verified) {
+    // Check if email is verified (skipped in local mode, which also unblocks
+    // accounts created before the flag was turned on)
+    if (!user.email_verified && !isLocalAuthMode()) {
       console.error('Login failed for user');
       return {
         emailNotVerified: true,

@@ -118,6 +118,7 @@
         </a>
       </div>
 
+      <% if (locals.googleAuthEnabled) { %>
       <a href="/auth/google"
         class="sm:hidden inline-flex w-full max-w-sm items-center justify-center gap-3 rounded-full border border-white/10 bg-slate-800/60 px-6 py-3 text-sm font-medium text-white shadow-lg transition-all hover:bg-slate-700/60">
         <svg class="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
@@ -132,6 +133,7 @@
         </svg>
         Continue with Google
       </a>
+      <% } %>
     </div>
   </section>
 
@@ -280,6 +282,7 @@
           <form id="loginForm" class="space-y-4" action="/login" method="POST">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
 
+            <% if (locals.googleAuthEnabled) { %>
             <!-- Google Sign-In -->
             <a href="/auth/google"
               class="w-full py-3.5 rounded-lg text-sm font-medium bg-slate-800/50 hover:bg-slate-700/50 text-white border border-white/10 transition-all shadow-lg flex items-center justify-center gap-3">
@@ -305,6 +308,7 @@
                 <span class="px-2 bg-slate-900/60 text-slate-400">or sign in with email</span>
               </div>
             </div>
+            <% } %>
 
             <input id="loginEmail" name="email" type="email" required
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
@@ -363,6 +367,7 @@
               Create Account
             </button>
 
+            <% if (locals.googleAuthEnabled) { %>
             <!-- Divider -->
             <div class="relative my-4">
               <div class="absolute inset-0 flex items-center">
@@ -388,6 +393,7 @@
               </svg>
               Sign up with Google
             </a>
+            <% } %>
 
             <div class="text-center pt-2">
               <button type="button" onclick="showLoginForm()"

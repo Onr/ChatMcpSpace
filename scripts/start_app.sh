@@ -7,16 +7,63 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 cd "$ROOT_DIR"
 ensure_supported_node 16
 
+# --local runs the server in local mode: register and sign in with just an email
+# and a password, no verification email and no Google OAuth needed.
+LOCAL_MODE_REQUESTED=false
+for arg in "$@"; do
+  case "$arg" in
+    --local|--local-mode)
+      LOCAL_MODE_REQUESTED=true
+      ;;
+    -h|--help)
+      echo "Usage: ${BASH_SOURCE[0]##*/} [--local]"
+      echo "  --local   Start in local mode (self-registration without a verification email)."
+      exit 0
+      ;;
+    *)
+      echo "[start-app] Unknown option: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
 echo "[start-app] Checking environment configuration..."
 if [ ! -f ".env" ]; then
   if [ -f ".env.example" ]; then
     cp .env.example .env
     echo "[start-app] Created .env from template."
+    # The template ships a placeholder secret; give this install its own so
+    # sessions are not signed with a value that is public on GitHub.
+    if grep -q '^SESSION_SECRET=your_session_secret_key_here$' .env; then
+      generated_secret="$(node -e 'console.log(require("crypto").randomBytes(48).toString("hex"))')"
+      tmp_env="$(mktemp)"
+      SESSION_SECRET_VALUE="$generated_secret" node -e '
+        const fs = require("fs");
+        const env = fs.readFileSync(".env", "utf8");
+        fs.writeFileSync(process.argv[1], env.replace(
+          /^SESSION_SECRET=your_session_secret_key_here$/m,
+          "SESSION_SECRET=" + process.env.SESSION_SECRET_VALUE
+        ));
+      ' "$tmp_env"
+      mv "$tmp_env" .env
+      echo "[start-app] Generated a random SESSION_SECRET for this install."
+    fi
   else
     echo "[start-app] WARNING: .env.example missing; create .env manually." >&2
   fi
 else
   echo "[start-app] .env already exists."
+fi
+
+if [ "$LOCAL_MODE_REQUESTED" = "true" ]; then
+  export LOCAL_MODE=true
+  echo ""
+  echo "[start-app] LOCAL MODE enabled."
+  echo "[start-app]   Open the site, click Get Started, and register with any"
+  echo "[start-app]   email + password. You are signed in immediately -- no"
+  echo "[start-app]   verification email and no Google account required."
+  echo "[start-app]   Do NOT use this on an internet-facing server."
+  echo ""
 fi
 
 echo "[start-app] Ensuring Node.js dependencies..."

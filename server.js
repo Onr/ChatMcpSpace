@@ -28,6 +28,7 @@ const { sessionRedisClient } = require('./src/utils/redisClient');
 const { requestLogger } = require('./src/middleware/loggingMiddleware');
 const { csrfProtection, validateCsrfToken } = require('./src/middleware/csrfMiddleware');
 const { safeJsonForScript } = require('./src/utils/safeJsonHelper');
+const { isLocalAuthMode, isLocalModeRequested, isGoogleAuthConfigured } = require('./src/utils/localMode');
 
 // Check for Google Cloud Service Account Key
 const serviceAccountPath = path.join(__dirname, 'keys', 'service-account.json');
@@ -205,6 +206,10 @@ app.use((req, res, next) => {
   res.locals.currentPath = req.path;
   // Helper for embedding JSON in inline <script> tags safely (see audit T11).
   res.locals.safeJsonForScript = safeJsonForScript;
+  // Google sign-in buttons only work when OAuth credentials are configured;
+  // a local install without them should not render a dead button.
+  res.locals.googleAuthEnabled = isGoogleAuthConfigured();
+  res.locals.localAuthMode = isLocalAuthMode();
   if (req.session && req.session.userId) {
     res.locals.user = {
       userId: req.session.userId,
@@ -325,6 +330,22 @@ function logStartup({ port, scheme, tlsEnabled }) {
   console.log(`Server running on port ${port}`);
   console.log(`URL: ${baseUrl}`);
   console.log(`TLS: ${tlsEnabled ? 'enabled (HTTPS)' : 'disabled (HTTP only)'}`);
+
+  if (isLocalAuthMode()) {
+    console.log('='.repeat(60));
+    console.log('LOCAL MODE is ON (LOCAL_MODE=true)');
+    console.log('  - Register with any email + password; no verification email.');
+    console.log('  - New accounts are signed in immediately.');
+    console.log('  ! Anyone who can reach this server can create an account.');
+    console.log('  ! Do not use this on a public or internet-facing deployment.');
+    if (!/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl)) {
+      console.warn(`  ! BASE_URL is ${baseUrl}, which does not look local.`);
+    }
+  } else if (isLocalModeRequested()) {
+    console.warn('='.repeat(60));
+    console.warn('LOCAL MODE was requested but is IGNORED under NODE_ENV=production.');
+  }
+
   console.log('='.repeat(60));
   console.log('Available routes:');
   console.log('  - GET  /register          - User registration page');

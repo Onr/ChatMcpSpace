@@ -30,6 +30,7 @@ const { query } = require('../db/connection');
 const { isValidEmail, validatePasswordStrength } = require('../utils/validation');
 const { generateApiGuide, generateDirectSetupScript, generateMainCLIScript } = require('../utils/apiGuideGenerator');
 const { generateEncryptionSalt } = require('../utils/encryptionHelper');
+const { isLocalAuthMode } = require('../utils/localMode');
 const { getProviderModelCatalog } = require('../utils/modelCatalog');
 const { readPidFromFile, terminateProcessWithEscalation } = require('../utils/agentStopUtils');
 const {
@@ -1145,6 +1146,13 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
 
     // Register user
     const user = await registerUser(email, password);
+
+    // Local mode: there is no verification email to wait on, so log the new
+    // user in straight away.
+    if (isLocalAuthMode()) {
+      await createSession(req, user);
+      return res.redirect('/dashboard');
+    }
 
     // Send verification email
     const emailResult = await sendVerificationEmail(user.userId, email, {

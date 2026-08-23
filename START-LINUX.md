@@ -22,9 +22,27 @@ chmod +x scripts/start_app.sh
 ```
 
 This will:
-- Create .env file if needed
+- Create .env file if needed (with a freshly generated SESSION_SECRET)
 - Install Node.js dependencies
 - Start the application on http://localhost:3000
+
+### Step 3: Create Your Account
+
+Out of the box, registering sends a verification code by email, so you need SMTP
+credentials in `.env` before you can log in. To skip that on a personal machine,
+start in **local mode**:
+
+```bash
+./scripts/start_app.sh --local
+```
+
+Then open http://localhost:3000, click **Get Started**, and register with any
+email address and a password. You are logged in right away - no verification
+email and no Google account needed. (Equivalent to setting `LOCAL_MODE=true` in
+`.env`.)
+
+Local mode is for machines you control. It is ignored when `NODE_ENV=production`,
+and you should not enable it on a server that is reachable from the internet.
 
 ---
 

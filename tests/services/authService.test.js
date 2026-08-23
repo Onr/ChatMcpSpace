@@ -228,4 +228,102 @@ describe('Auth Service', () => {
       await expect(authService.regenerateApiKey('user-id')).rejects.toThrow('User not found');
     });
   });
+
+  describe('local mode (LOCAL_MODE=true)', () => {
+    const email = 'local@example.com';
+    const password = 'password123';
+
+    beforeEach(() => {
+      process.env.LOCAL_MODE = 'true';
+      process.env.NODE_ENV = 'development';
+    });
+
+    afterEach(() => {
+      delete process.env.LOCAL_MODE;
+      delete process.env.NODE_ENV;
+    });
+
+    it('creates the account already verified so it can sign in immediately', async () => {
+      query.mockResolvedValue({
+        rows: [{
+          user_id: 'user-id',
+          email,
+          api_key: 'mock-uuid',
+          encryption_salt: 'mock-salt',
+          created_at: new Date()
+        }]
+      });
+
+      await authService.registerUser(email, password);
+
+      const [sql, values] = query.mock.calls[0];
+      expect(sql).toContain('email_verified');
+      expect(sql).toContain('email_verified_at');
+      // Placeholders must still line up with the widened value list.
+      expect(sql).toContain('$7');
+      expect(values).toHaveLength(7);
+      expect(values[5]).toBe(true);
+      expect(values[6]).toBeInstanceOf(Date);
+    });
+
+    it('lets an account that predates the flag sign in without verifying', async () => {
+      query.mockResolvedValue({
+        rows: [{
+          user_id: 'user-id',
+          email,
+          password_hash: 'hashed-password',
+          api_key: 'api-key',
+          encryption_salt: 'salt',
+          email_verified: false
+        }]
+      });
+      bcrypt.compare.mockResolvedValue(true);
+
+      const result = await authService.validateCredentials(email, password);
+
+      expect(result).toEqual({
+        userId: 'user-id',
+        email,
+        apiKey: 'api-key',
+        encryptionSalt: 'salt'
+      });
+    });
+
+    it('still rejects a wrong password', async () => {
+      query.mockResolvedValue({
+        rows: [{
+          user_id: 'user-id',
+          email,
+          password_hash: 'hashed-password',
+          api_key: 'api-key',
+          encryption_salt: 'salt',
+          email_verified: false
+        }]
+      });
+      bcrypt.compare.mockResolvedValue(false);
+
+      await expect(authService.validateCredentials(email, password)).resolves.toBeNull();
+    });
+
+    it('is ignored under NODE_ENV=production', async () => {
+      process.env.NODE_ENV = 'production';
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      query.mockResolvedValue({
+        rows: [{
+          user_id: 'user-id',
+          email,
+          api_key: 'mock-uuid',
+          encryption_salt: 'mock-salt',
+          created_at: new Date()
+        }]
+      });
+
+      await authService.registerUser(email, password);
+
+      const [sql, values] = query.mock.calls[0];
+      expect(sql).not.toContain('email_verified');
+      expect(values).toHaveLength(5);
+    });
+  });
 });

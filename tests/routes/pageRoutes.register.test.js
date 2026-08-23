@@ -10,6 +10,7 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
     email: 'new@example.com',
   });
   const sendVerificationEmail = jest.fn().mockResolvedValue(sendVerificationEmailResult);
+  const createSession = jest.fn().mockResolvedValue(undefined);
 
   jest.doMock('passport', () => ({
     authenticate: () => (_req, _res, next) => next(),
@@ -17,7 +18,7 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
   jest.doMock('../../src/services/authService', () => ({
     registerUser,
     validateCredentials: jest.fn(),
-    createSession: jest.fn(),
+    createSession,
     destroySession: jest.fn(),
     regenerateApiKey: jest.fn(),
   }));
@@ -98,7 +99,7 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
   });
   app.use(pageRoutes);
 
-  return { app, session, registerUser, sendVerificationEmail };
+  return { app, session, registerUser, sendVerificationEmail, createSession };
 }
 
 describe('pageRoutes registration email flow', () => {
@@ -159,5 +160,83 @@ describe('pageRoutes registration email flow', () => {
       sendError: 'SMTP timeout',
     });
     expect(session.verificationSendError).toBeUndefined();
+  });
+});
+
+describe('pageRoutes registration in local mode', () => {
+  beforeEach(() => {
+    process.env.LOCAL_MODE = 'true';
+    process.env.NODE_ENV = 'development';
+  });
+
+  afterEach(() => {
+    delete process.env.LOCAL_MODE;
+    delete process.env.NODE_ENV;
+    jest.resetModules();
+    jest.clearAllMocks();
+  });
+
+  const registration = {
+    email: 'new@example.com',
+    password: 'Password123!',
+    confirmPassword: 'Password123!',
+  };
+
+  it('signs the new user straight in and skips the verification email', async () => {
+    const { app, createSession, sendVerificationEmail } = buildApp();
+
+    const res = await request(app)
+      .post('/register')
+      .type('form')
+      .send(registration)
+      .expect(302);
+
+    expect(res.headers.location).toBe('/dashboard');
+    expect(sendVerificationEmail).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userId: 'user-123' })
+    );
+  });
+
+  it('does not leave a pending verification email on the session', async () => {
+    const { app, session } = buildApp();
+
+    await request(app).post('/register').type('form').send(registration).expect(302);
+
+    expect(session.pendingVerificationEmail).toBeUndefined();
+  });
+
+  it('still requires an email and a password', async () => {
+    const { app, registerUser } = buildApp();
+
+    const res = await request(app)
+      .post('/register')
+      .type('form')
+      .send({ email: '', password: '' })
+      .expect(200);
+
+    expect(res.body).toMatchObject({ view: 'register' });
+    expect(res.body.error).toMatch(/required/i);
+    expect(registerUser).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the verification flow under NODE_ENV=production', async () => {
+    process.env.NODE_ENV = 'production';
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { app, createSession, sendVerificationEmail } = buildApp();
+
+    const res = await request(app)
+      .post('/register')
+      .type('form')
+      .send(registration)
+      .expect(302);
+
+    expect(res.headers.location).toBe('/verify-email-sent');
+    expect(sendVerificationEmail).toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+
+    console.error.mockRestore();
   });
 });
