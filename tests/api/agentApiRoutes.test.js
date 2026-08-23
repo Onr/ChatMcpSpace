@@ -36,6 +36,7 @@ async function createAgentApiTestContext() {
       jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
         agentPollingRateLimiter: (_req, _res, next) => next(),
         agentApiRateLimiter: (_req, _res, next) => next(),
+        agentMessageIngressRateLimiter: (_req, _res, next) => next(),
         feedbackRateLimiter: (_req, _res, next) => next(),
       }));
 
@@ -53,7 +54,7 @@ describe('Agent API routes', () => {
     jest.clearAllMocks();
   });
 
-  it('POST /api/agent/messages stores message and returns unread user messages', async () => {
+  it('POST /api/agent/messages stores message without marking unread user messages as read', async () => {
     const { app, query, pool, userId } = await createAgentApiTestContext();
 
     const agentId = uuidv4();
@@ -77,63 +78,66 @@ describe('Agent API routes', () => {
 
     expect(res.body.status).toBe('sent');
     expect(res.body.messageId).toMatch(/^[a-f0-9-]{36}$/);
-    expect(res.body.newMessages).toHaveLength(1);
-    expect(res.body.newMessages[0]).toMatchObject({
-      messageId: unreadId,
-      content: 'hello from user',
-      encrypted: false,
-    });
+    // newMessages should be empty — unread messages are only consumed via GET /agent/responses
+    expect(res.body.newMessages).toHaveLength(0);
 
+    // Unread user message must remain unread (not silently consumed)
     const unreadAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [unreadId]);
-    expect(unreadAfter.rows[0].read_at).toBeTruthy();
+    expect(unreadAfter.rows[0].read_at).toBeNull();
 
     await pool.end();
   });
 
-  it('POST /api/agent/messages excludes hidden_from_agent messages from newMessages', async () => {
+  it('second user message remains available after agent responds to first (regression)', async () => {
+    // Reproduces the bug: user sends msg1 -> agent reads it via GET /responses ->
+    // user sends msg2 while agent works -> agent posts response via POST /messages ->
+    // msg2 must still be available on next GET /responses poll.
     const { app, query, pool, userId } = await createAgentApiTestContext();
 
     const agentId = uuidv4();
     await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
-      agentId,
-      userId,
-      'HiddenTestAgent',
-      1,
+      agentId, userId, 'RegressionBot', 1,
     ]);
 
-    // Create a visible unread message
-    const visibleId = uuidv4();
+    // Step 1: User sends message 1
+    const msg1Id = uuidv4();
     await query(
-      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at, hidden_from_agent) VALUES ($1, $2, $3, FALSE, NULL, FALSE)',
-      [visibleId, agentId, 'visible message']
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at) VALUES ($1, $2, $3, FALSE, NULL)',
+      [msg1Id, agentId, 'first task']
     );
 
-    // Create a hidden unread message
-    const hiddenId = uuidv4();
+    // Step 2: Agent polls via GET /responses — picks up msg1
+    const poll1 = await request(app)
+      .get('/api/agent/responses?agentName=RegressionBot')
+      .expect(200);
+    expect(poll1.body.responses.some(r => r.content === 'first task')).toBe(true);
+
+    // msg1 should now be marked as read
+    const msg1After = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [msg1Id]);
+    expect(msg1After.rows[0].read_at).toBeTruthy();
+
+    // Step 3: While agent works on msg1, user sends message 2
+    const msg2Id = uuidv4();
     await query(
-      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at, hidden_from_agent) VALUES ($1, $2, $3, FALSE, NULL, TRUE)',
-      [hiddenId, agentId, 'hidden message']
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at) VALUES ($1, $2, $3, FALSE, NULL)',
+      [msg2Id, agentId, 'second task']
     );
 
-    const res = await request(app)
+    // Step 4: Agent finishes and posts its response via POST /messages
+    await request(app)
       .post('/api/agent/messages')
-      .send({ agentName: 'HiddenTestAgent', content: 'hello from agent' })
+      .send({ agentName: 'RegressionBot', content: 'done with first task' })
       .expect(201);
 
-    // Should only return the visible message, not the hidden one
-    expect(res.body.newMessages).toHaveLength(1);
-    expect(res.body.newMessages[0]).toMatchObject({
-      messageId: visibleId,
-      content: 'visible message',
-    });
+    // Step 5: msg2 must still be unread
+    const msg2After = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [msg2Id]);
+    expect(msg2After.rows[0].read_at).toBeNull();
 
-    // Visible message should be marked as read
-    const visibleAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [visibleId]);
-    expect(visibleAfter.rows[0].read_at).toBeTruthy();
-
-    // Hidden message should NOT be marked as read (agent never saw it)
-    const hiddenAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [hiddenId]);
-    expect(hiddenAfter.rows[0].read_at).toBeNull();
+    // Step 6: Next poll picks up msg2
+    const poll2 = await request(app)
+      .get('/api/agent/responses?agentName=RegressionBot')
+      .expect(200);
+    expect(poll2.body.responses.some(r => r.content === 'second task')).toBe(true);
 
     await pool.end();
   });
@@ -153,6 +157,83 @@ describe('Agent API routes', () => {
       ok.body.messageId,
     ]);
     expect(messageRow.rows[0]).toMatchObject({ priority: 2, urgent: true, encrypted: true });
+
+    await pool.end();
+  });
+
+  it('POST /api/agent/messages rejects rich_html placeholder stubs', async () => {
+    const { app, pool } = await createAgentApiTestContext();
+
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'PlaceholderBot',
+        content: JSON.stringify({
+          type: 'rich_html',
+          title: 'REPLACE_WITH_TITLE',
+          html: 'REPLACE_WITH_HTML',
+        }),
+      })
+      .expect(400)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(res.body.error.message).toMatch(/REPLACE_WITH_\*/);
+      });
+
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'PlaceholderBot',
+        content: JSON.stringify({
+          type: 'rich_html',
+          title: '__REPLACE_WITH_TITLE__',
+          html: '<div>__REPLACE_WITH_HTML__</div>',
+        }),
+      })
+      .expect(400);
+
+    // Old agent-runner.sh Option B verbatim stub — "Your Title" / "Your HTML here"
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'PlaceholderBot',
+        content: JSON.stringify({
+          type: 'rich_html',
+          title: 'Your Title',
+          html: '<div>Your HTML here</div>',
+        }),
+      })
+      .expect(400)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(res.body.error.message).toMatch(/verbatim template stub/);
+      });
+
+    // Old Option A stub — "My Report" title used verbatim
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'PlaceholderBot',
+        content: JSON.stringify({
+          type: 'rich_html',
+          title: 'My Report',
+          html: '<h1>Hello</h1>',
+        }),
+      })
+      .expect(400);
+
+    // Real content must pass through
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'PlaceholderBot',
+        content: JSON.stringify({
+          type: 'rich_html',
+          title: 'Agent Health Dashboard',
+          html: '<div><h2>Status: OK</h2><p>All systems operational</p></div>',
+        }),
+      })
+      .expect(201);
 
     await pool.end();
   });
@@ -296,6 +377,128 @@ describe('Agent API routes', () => {
     expect(textRead.rows[0].read_at).toBeTruthy();
 
     await pool.end();
+  });
+
+  it('GET /api/agent/responses records valid agentCliVersion reports', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+
+    const agentId = uuidv4();
+    const userMessageId = uuidv4();
+
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'VersionReporter',
+      1,
+    ]);
+    await query(
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at) VALUES ($1, $2, $3, FALSE, NULL)',
+      [userMessageId, agentId, 'hello']
+    );
+
+    await request(app)
+      .get('/api/agent/responses')
+      .query({ agentName: 'VersionReporter', agentCliVersion: '1.2.3' })
+      .expect(200);
+
+    const first = await query(
+      'SELECT reported_cli_version, reported_cli_version_at FROM agents WHERE agent_id = $1',
+      [agentId]
+    );
+    expect(first.rows[0].reported_cli_version).toBe('1.2.3');
+    expect(first.rows[0].reported_cli_version_at).toBeTruthy();
+
+    await query(
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at) VALUES ($1, $2, $3, FALSE, NULL)',
+      [uuidv4(), agentId, 'hello again']
+    );
+
+    await request(app)
+      .get('/api/agent/responses')
+      .query({ agentName: 'VersionReporter', agentCliVersion: 'not-a-version' })
+      .expect(200);
+
+    const second = await query('SELECT reported_cli_version FROM agents WHERE agent_id = $1', [agentId]);
+    expect(second.rows[0].reported_cli_version).toBe('1.2.3');
+
+    await pool.end();
+  });
+
+  it('GET /api/agent/responses returns self-update prompt metadata for queued updates', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+
+    const agentId = uuidv4();
+    const userMessageId = uuidv4();
+    const queuedPayload = 'ivBase64:tagBase64:ciphertextBase64';
+    const queuedContent = `__AGENT_UPDATE__:${queuedPayload}`;
+
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'UpdateAwareAgent',
+      1,
+    ]);
+    await query(
+      'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, read_at) VALUES ($1, $2, $3, TRUE, NULL)',
+      [userMessageId, agentId, queuedContent]
+    );
+
+    const res = await request(app).get('/api/agent/responses').query({ agentName: 'UpdateAwareAgent' }).expect(200);
+    expect(res.body.responses).toHaveLength(1);
+    expect(res.body.responses[0]).toMatchObject({
+      responseType: 'text',
+      from: 'system',
+      encrypted: false,
+      messageId: userMessageId,
+    });
+    expect(res.body.responses[0].content).toMatch(/update is available/i);
+    expect(res.body.responses[0].updateAction).toEqual({
+      type: 'queued_self_update',
+      encryptedPayload: queuedPayload,
+    });
+
+    const messageRow = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [userMessageId]);
+    expect(messageRow.rows[0].read_at).toBeTruthy();
+
+    await pool.end();
+  });
+
+  it('GET /api/agent/cli-script emits an additive X-Script-SHA256 header matching the body', async () => {
+    jest.resetModules();
+    const crypto = require('crypto');
+    const apiKey = uuidv4();
+    const encryptionSalt = 'a'.repeat(64);
+
+    jest.doMock('../../src/db/connection', () => ({
+      query: async () => ({ rows: [] }),
+      getClient: async () => ({ release: () => {} }),
+      pool: {},
+    }));
+    jest.doMock('../../src/utils/securityLogger', () => ({
+      logApiKeyUsage: jest.fn(),
+      logRateLimitViolation: jest.fn(),
+    }));
+    jest.doMock('../../src/middleware/authMiddleware', () => ({
+      // Inject a fully-authenticated user so the route skips the salt-provision DB path.
+      requireApiKey: (req, _res, next) => { req.user = { userId: uuidv4(), apiKey, encryptionSalt }; next(); },
+    }));
+    jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
+      agentPollingRateLimiter: (_req, _res, next) => next(),
+      agentApiRateLimiter: (_req, _res, next) => next(),
+      agentMessageIngressRateLimiter: (_req, _res, next) => next(),
+      feedbackRateLimiter: (_req, _res, next) => next(),
+    }));
+
+    const agentApiRoutes = require('../../src/routes/agentApiRoutes');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/agent', agentApiRoutes);
+
+    const res = await request(app).get('/api/agent/cli-script').expect(200);
+    expect(res.headers['content-type']).toMatch(/text\/plain/);
+    const expected = crypto.createHash('sha256').update(res.text, 'utf8').digest('hex');
+    // Old clients ignore this header; new bootstrap clients verify it before chmod +x.
+    expect(res.headers['x-script-sha256']).toBe(expected);
   });
 
   it('POST /api/agent/stop resolves agents stored under .chatspace', async () => {

@@ -8,10 +8,12 @@ require('dotenv').config();
 
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const expressLayouts = require('express-ejs-layouts');
 const helmet = require('helmet');
+const compression = require('compression');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -19,10 +21,13 @@ const { testConnection } = require('./src/db/connection');
 const { ensureEncryptionColumns } = require('./src/db/migrations/encryptionColumns');
 const { ensureLastSeenAtColumn } = require('./src/db/migrations/lastSeenAt');
 const { runAllMigrations, ensureArchiveTables } = require('./src/db/runMigrations');
+const { startScheduledMessageDelivery } = require('./src/services/scheduledMessageService');
 const { globalErrorHandler, notFoundHandler } = require('./src/middleware/errorMiddleware');
 const RedisStore = require('connect-redis').default || require('connect-redis');
 const { sessionRedisClient } = require('./src/utils/redisClient');
 const { requestLogger } = require('./src/middleware/loggingMiddleware');
+const { csrfProtection, validateCsrfToken } = require('./src/middleware/csrfMiddleware');
+const { safeJsonForScript } = require('./src/utils/safeJsonHelper');
 
 // Check for Google Cloud Service Account Key
 const serviceAccountPath = path.join(__dirname, 'keys', 'service-account.json');
@@ -60,18 +65,35 @@ const allowedOrigins = [
   'https://staging.chatmcp.space'
 ].filter(Boolean);
 
+// Per-request CSP nonce: every inline <script> in the views carries
+// nonce="<%= cspNonce %>" so script-src can drop 'unsafe-inline'.
+app.use((req, res, next) => {
+  res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+  next();
+});
+
 // Build CSP directives - only upgrade insecure requests when HTTPS is enabled
+// script-src: no 'unsafe-inline'/'unsafe-eval' — inline scripts must carry the
+// request nonce (verified headless: the Tailwind Play CDN compiles fine
+// without eval).
+// script-src-attr 'unsafe-inline' remains for legacy onclick= attributes in a
+// few views (landing, settings, layout, verify-email-sent); remove it after
+// those are converted to addEventListener.
 const cspDirectives = {
   defaultSrc: ["'self'"],
-  scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com"],
+  scriptSrc: [
+    "'self'",
+    (req, res) => `'nonce-${res.locals.cspNonce}'`,
+    "https://cdn.tailwindcss.com"
+  ],
   scriptSrcAttr: ["'unsafe-inline'"],
   styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
   fontSrc: ["'self'", "https://fonts.gstatic.com", "https://r2cdn.perplexity.ai"],
   imgSrc: ["'self'", 'data:', 'blob:'],
   connectSrc: ["'self'", ...allowedOrigins],
-  mediaSrc: ["'self'"],
-  frameSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
-  childSrc: ["'self'", "https://www.youtube.com", "https://youtube.com"],
+  mediaSrc: ["'self'", 'blob:'],
+  frameSrc: ["'self'", "https://www.youtube.com", "https://youtube.com", "https://www.youtube-nocookie.com"],
+  childSrc: ["'self'", "https://www.youtube.com", "https://youtube.com", "https://www.youtube-nocookie.com"],
   objectSrc: ["'none'"],
   workerSrc: ["'self'", "blob:"],
   frameAncestors: ["'self'"],
@@ -98,7 +120,7 @@ app.use(helmet({
 // Explicit CORS allowlist for API routes (same-origin only)
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // allow same-origin / curl
+    if (!origin) return callback(null, false); // block null-origin requests (same-origin requests bypass CORS entirely)
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   },
@@ -117,6 +139,10 @@ app.use('/api', (err, req, res, next) => {
   next(err);
 });
 
+// Compress responses (gzip/deflate). Respects the standard
+// `x-no-compression` request header for clients that need raw bodies.
+app.use(compression());
+
 // Configure Express middleware
 app.use(requestLogger);
 // Parse JSON request bodies with explicit size limits
@@ -125,13 +151,24 @@ app.use(express.json({ limit: '2mb' }));
 // Parse URL-encoded request bodies (for form submissions)
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// Serve static files from public directory
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files from public directory.
+// In production, cache for 1 day and rely on etag for revalidation. Critical
+// scripts (dashboard.js, multi-chat.js, rich-rendering.js) and the main
+// stylesheet bust the cache via ?v=Date.now() on every page load, so they
+// pick up new versions immediately.
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: IS_PROD ? '1d' : 0,
+  etag: true,
+  lastModified: true,
+}));
 
 // Configure session middleware
+if (!process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET environment variable is required');
+}
 const sessionOptions = {
   store: undefined,
-  secret: process.env.SESSION_SECRET || 'your-secret-key-change-this-in-production',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -166,6 +203,8 @@ app.use(passport.session());
 // Expose session user to all templates so layout can render navigation
 app.use((req, res, next) => {
   res.locals.currentPath = req.path;
+  // Helper for embedding JSON in inline <script> tags safely (see audit T11).
+  res.locals.safeJsonForScript = safeJsonForScript;
   if (req.session && req.session.userId) {
     res.locals.user = {
       userId: req.session.userId,
@@ -183,6 +222,12 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(expressLayouts);
 app.set('layout', 'layout');
 
+// Cache compiled EJS templates in production (recompiling every request
+// is wasteful when templates are immutable for the lifetime of the process).
+if (IS_PROD) {
+  app.enable('view cache');
+}
+
 // Mount route handlers
 // Page routes (HTML rendering)
 app.use('/', pageRoutes);
@@ -190,8 +235,9 @@ app.use('/', pageRoutes);
 // Agent API routes (RESTful API for AI agents)
 app.use('/api/agent', agentApiRoutes);
 
-// User API routes (AJAX endpoints for frontend)
-app.use('/api/user', userApiRoutes);
+// User API routes (AJAX endpoints for frontend). These use browser sessions,
+// so state-changing requests must carry the page CSRF token.
+app.use('/api/user', csrfProtection, validateCsrfToken, userApiRoutes);
 
 // Email API routes (verification and logs)
 app.use('/api/email', emailApiRoutes);
@@ -335,6 +381,8 @@ async function startServer() {
     } else {
       console.log('Archive tables will be created by migrations.');
     }
+
+    startScheduledMessageDelivery();
 
     const tlsConfig = loadTlsConfig();
     const useHttps = Boolean(tlsConfig);

@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MIGRATION_FILE="$PROJECT_ROOT/src/db/migrations/add_email_verification.sql"
+MIGRATION_FILE="$PROJECT_ROOT/src/db/migrations/029_add_email_verification.sql"
 
 # Load environment variables
 if [ -f "$PROJECT_ROOT/.env" ]; then

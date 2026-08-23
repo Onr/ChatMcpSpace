@@ -12,6 +12,31 @@ const ENCRYPTION_PARAMS = {
   pbkdf2Iterations: 100000,
   pbkdf2Hash: 'SHA-256'
 };
+const ENCRYPTION_STORAGE_KEY = 'encryptionKey';
+const LEGACY_ENCRYPTION_STORAGE_KEY = 'encryptionKey';
+const BASE64_CHUNK_SIZE = 0x8000;
+
+function uint8ArrayToBase64(bytes) {
+  if (!(bytes instanceof Uint8Array)) {
+    bytes = new Uint8Array(bytes || []);
+  }
+
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_SIZE) {
+    const chunk = bytes.subarray(offset, offset + BASE64_CHUNK_SIZE);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
 
 /**
  * Derive encryption key from password and salt using PBKDF2
@@ -128,9 +153,9 @@ async function encryptMessage(plaintext, key) {
     const authTag = encryptedArray.slice(-tagLength);
 
     // Convert to base64 and format
-    const ivBase64 = btoa(String.fromCharCode.apply(null, iv));
-    const authTagBase64 = btoa(String.fromCharCode.apply(null, authTag));
-    const ciphertextBase64 = btoa(String.fromCharCode.apply(null, ciphertext));
+    const ivBase64 = uint8ArrayToBase64(iv);
+    const authTagBase64 = uint8ArrayToBase64(authTag);
+    const ciphertextBase64 = uint8ArrayToBase64(ciphertext);
 
     return `${ivBase64}:${authTagBase64}:${ciphertextBase64}`;
   } catch (error) {
@@ -146,9 +171,9 @@ async function encryptMessage(plaintext, key) {
 async function storeEncryptionKey(key) {
   // Export key for storage
   const exported = await window.crypto.subtle.exportKey('raw', key);
-  const keyArray = Array.from(new Uint8Array(exported));
-  const keyBase64 = btoa(String.fromCharCode.apply(null, keyArray));
-  sessionStorage.setItem('encryptionKey', keyBase64);
+  const keyBase64 = uint8ArrayToBase64(new Uint8Array(exported));
+  localStorage.setItem(ENCRYPTION_STORAGE_KEY, keyBase64);
+  sessionStorage.setItem(LEGACY_ENCRYPTION_STORAGE_KEY, keyBase64);
 }
 
 /**
@@ -156,16 +181,15 @@ async function storeEncryptionKey(key) {
  * @returns {Promise<CryptoKey|null>} Stored encryption key or null
  */
 async function getStoredEncryptionKey() {
-  const keyBase64 = sessionStorage.getItem('encryptionKey');
+  const keyBase64 = localStorage.getItem(ENCRYPTION_STORAGE_KEY) || sessionStorage.getItem(LEGACY_ENCRYPTION_STORAGE_KEY);
   if (!keyBase64) {
     return null;
   }
 
   try {
-    const keyArray = Uint8Array.from(atob(keyBase64), c => c.charCodeAt(0));
     const key = await window.crypto.subtle.importKey(
       'raw',
-      keyArray,
+      base64ToUint8Array(keyBase64),
       {
         name: ENCRYPTION_PARAMS.algorithm,
         length: ENCRYPTION_PARAMS.keyLength
@@ -173,6 +197,7 @@ async function getStoredEncryptionKey() {
       false,
       ['encrypt', 'decrypt']
     );
+    sessionStorage.setItem(LEGACY_ENCRYPTION_STORAGE_KEY, keyBase64);
     return key;
   } catch (error) {
     console.error('Failed to retrieve stored key:', error);
@@ -184,7 +209,8 @@ async function getStoredEncryptionKey() {
  * Clear stored encryption key
  */
 function clearEncryptionKey() {
-  sessionStorage.removeItem('encryptionKey');
+  localStorage.removeItem(ENCRYPTION_STORAGE_KEY);
+  sessionStorage.removeItem(LEGACY_ENCRYPTION_STORAGE_KEY);
 }
 
 // ============================================================================
@@ -211,12 +237,7 @@ function arrayBufferToBase64(buffer) {
  * @returns {ArrayBuffer} The decoded ArrayBuffer
  */
 function base64ToArrayBuffer(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
+  return base64ToUint8Array(base64).buffer;
 }
 
 /**

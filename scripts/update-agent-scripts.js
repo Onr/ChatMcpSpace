@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Update agent scripts with latest code
+ * Uses the shared agentUpdater utility for consistent script generation.
  */
 const path = require('path');
-const { generateMainCLIScript } = require(path.join(__dirname, '..', 'src', 'utils', 'apiGuideGenerator'));
 const fs = require('fs');
+const { buildUpdateManifest, readAgentEncryptionInfo } = require(path.join(__dirname, '..', 'src', 'utils', 'agentUpdater'));
 
 const agentDir = process.argv[2];
 if (!agentDir) {
@@ -12,50 +13,38 @@ if (!agentDir) {
     process.exit(1);
 }
 
-// Read the env file to get encryption salt
-const envPath = path.join(agentDir, '.env');
-let salt = null;
-try {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    const saltMatch = envContent.match(/ENCRYPTION_SALT="?([^"\n]+)"?/);
-    salt = saltMatch ? saltMatch[1] : null;
-} catch (e) {
-    console.log('No .env file found, assuming no encryption');
-}
+const resolvedDir = path.resolve(agentDir);
 
-console.log('Regenerating agent scripts with encryption:', !!salt);
+// Read encryption info from the agent's .env
+const { hasEncryption } = readAgentEncryptionInfo(resolvedDir);
+console.log('Encryption enabled:', hasEncryption);
 
-// Generate the full CLI script to extract the message helper
-const script = generateMainCLIScript('dummy', 'http://localhost:3000', salt);
+// Build the update manifest using the shared utility
+const manifest = buildUpdateManifest(hasEncryption);
+console.log(`Generating v${manifest.version} scripts (${Object.keys(manifest.files).length} files)...`);
 
-// Extract message_helper.py from the script
-// Pattern: cat > "$agent_dir/message_helper.py" <<'PYEOF' ... PYEOF
-const pyMatch = script.match(/cat > "\$agent_dir\/message_helper\.py" <<'PYEOF'\n([\s\S]*?)\nPYEOF/);
-if (pyMatch) {
-    const pyContent = pyMatch[1];
-    console.log('Found message_helper.py content, length:', pyContent.length);
-    fs.writeFileSync(path.join(agentDir, 'message_helper.py'), pyContent);
-    console.log('Updated message_helper.py');
-} else {
-    console.log('Could not find message_helper.py in generated script');
-    // Debug: check what patterns exist
-    if (script.includes('PYEOF')) {
-        console.log('Script contains PYEOF marker');
-        const idx = script.indexOf('PYEOF');
-        console.log('Context:', script.substring(Math.max(0, idx - 100), idx + 10));
+// Backup current files
+const backupDir = path.join(resolvedDir, 'agent_state', 'backups', `v${manifest.version}-${Date.now()}`);
+fs.mkdirSync(backupDir, { recursive: true });
+for (const filename of Object.keys(manifest.files)) {
+    const src = path.join(resolvedDir, filename);
+    if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(backupDir, filename));
     }
 }
+console.log('Backed up current files to:', backupDir);
 
-// Extract agent-runner.sh
-// Pattern: cat > "$agent_dir/agent-runner.sh" <<'RUNNEREOF' ... RUNNEREOF
-const runnerMatch = script.match(/cat > "\$agent_dir\/agent-runner\.sh" <<'RUNNEREOF'\n([\s\S]*?)\nRUNNEREOF/);
-if (runnerMatch) {
-    const runnerContent = runnerMatch[1];
-    console.log('Found agent-runner.sh content, length:', runnerContent.length);
-    fs.writeFileSync(path.join(agentDir, 'agent-runner.sh'), runnerContent, { mode: 0o755 });
-    console.log('Updated agent-runner.sh');
-} else {
-    console.log('Could not find agent-runner.sh in generated script');
+// Write each updated file
+for (const [filename, content] of Object.entries(manifest.files)) {
+    const dest = path.join(resolvedDir, filename);
+    const mode = filename.endsWith('.sh') ? 0o755 : 0o644;
+    fs.writeFileSync(dest, content, { mode });
+    console.log(`Updated: ${filename} (${content.length} bytes)`);
 }
 
-console.log('\nDone! Restart the agent to use the updated scripts.');
+// Track version
+const versionFile = path.join(resolvedDir, 'agent_state', '.current-version');
+fs.mkdirSync(path.dirname(versionFile), { recursive: true });
+fs.writeFileSync(versionFile, manifest.version);
+
+console.log(`\nDone! Agent updated to v${manifest.version}. Restart the agent to use the new code.`);

@@ -6,7 +6,7 @@
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { logInfo, logError, logWarn } = require('../utils/logger');
+const { logDebug, logError, logWarn } = require('../utils/logger');
 
 // Create connection pool configuration
 const poolConfig = {
@@ -39,8 +39,8 @@ const pool = new Pool(poolConfig);
 
 // Handle pool errors
 pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  console.error('Idle client error in pool:', err.message);
+  // Don't crash the server for transient DB errors
 });
 
 /**
@@ -54,7 +54,16 @@ async function query(text, params) {
   try {
     const res = await pool.query(text, params);
     const duration = Date.now() - start;
-    logInfo('db.query', { durationMs: duration, rows: res.rowCount });
+    // Routine queries are high-volume. Keep them available for temporary
+    // diagnostics at LOG_LEVEL=debug, while warning on slow queries in normal
+    // production logs so performance regressions remain visible.
+    const slowQueryThresholdMs = Number.parseInt(process.env.SLOW_QUERY_LOG_THRESHOLD_MS || '500', 10);
+    const queryDetails = { durationMs: duration, rows: res.rowCount };
+    if (Number.isFinite(slowQueryThresholdMs) && duration >= slowQueryThresholdMs) {
+      logWarn('db.slow_query', { ...queryDetails, thresholdMs: slowQueryThresholdMs });
+    } else {
+      logDebug('db.query', queryDetails);
+    }
     return res;
   } catch (error) {
     const duration = Date.now() - start;

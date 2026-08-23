@@ -9,6 +9,7 @@
 
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { query } = require('../db/connection');
 
@@ -36,6 +37,15 @@ const TOKEN_CONFIG = {
 // Create reusable transporter
 let transporter = null;
 
+function loadInlineLogoAttachment() {
+  const logoPath = path.join(__dirname, '../../public/images/logo.png');
+  return {
+    filename: 'logo.png',
+    content: fs.readFileSync(logoPath),
+    cid: 'logo'
+  };
+}
+
 /**
  * Initialize email transporter
  * @returns {Object} Nodemailer transporter
@@ -56,6 +66,8 @@ function getTransporter() {
     port: EMAIL_CONFIG.port,
     secure: EMAIL_CONFIG.secure,
     auth: EMAIL_CONFIG.auth,
+    disableFileAccess: true,
+    disableUrlAccess: true,
     pool: true, // Use connection pooling
     maxConnections: 5,
     maxMessages: 100,
@@ -209,11 +221,7 @@ async function createVerificationCode(userId) {
  * @returns {Promise<Object>} Result with success status and user data
  */
 async function verifyEmailToken(token) {
-  console.log('verifyEmailToken called with token length:', token?.length);
-  console.log('Token first 20 chars:', token?.substring(0, 20));
-  
   const tokenHash = hashToken(token);
-  console.log('Computed token hash:', tokenHash);
 
   // Find valid token
   const result = await query(
@@ -226,21 +234,7 @@ async function verifyEmailToken(token) {
     [tokenHash]
   );
 
-  console.log('Token lookup result rows:', result.rows.length);
-
   if (result.rows.length === 0) {
-    // Debug: check if token exists at all
-    const debugResult = await query(
-      `SELECT evt.token_hash, evt.expires_at, evt.used_at 
-       FROM email_verification_tokens evt 
-       ORDER BY created_at DESC LIMIT 3`
-    );
-    console.log('Recent tokens in DB for debug:', debugResult.rows.map(r => ({
-      hash_start: r.token_hash?.substring(0, 20),
-      expires_at: r.expires_at,
-      used_at: r.used_at
-    })));
-    
     return { success: false, error: 'Invalid or expired verification token' };
   }
 
@@ -290,9 +284,9 @@ async function verifyEmailToken(token) {
  */
 async function verifyEmailCode(email, code) {
   // Trim code to handle copy-paste errors (defensive, even if controller handles it)
-  code = code?.trim();
+  code = code ? code.trim() : code;
 
-  console.log('verifyEmailCode called for email:', email, 'code length:', code?.length);
+  console.log('verifyEmailCode called for email:', email, 'code length:', code ? code.length : null);
   
   // Validate code format
   if (!code || !/^\d{6}$/.test(code)) {
@@ -645,11 +639,7 @@ async function sendVerificationEmail(userId, email, metadata = {}) {
         'X-Entity-Ref-ID': userId, // For tracking
         'X-Email-Type': 'verification'
       },
-      attachments: [{
-        filename: 'logo.png',
-        path: path.join(__dirname, '../../public/images/logo.png'),
-        cid: 'logo'
-      }]
+      attachments: [loadInlineLogoAttachment()]
     };
 
     // Log email as pending
@@ -679,7 +669,7 @@ async function sendVerificationEmail(userId, email, metadata = {}) {
     return { 
       success: true, 
       messageId: info.messageId,
-      logId: logEntry?.log_id 
+      logId: logEntry ? logEntry.log_id : null 
     };
 
   } catch (error) {

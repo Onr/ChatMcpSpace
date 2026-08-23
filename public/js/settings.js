@@ -3,6 +3,35 @@
  * Handles API key copying, CLI script copying, and API key regeneration
  */
 
+async function refreshCsrfToken() {
+  const res = await fetch('/csrf-token', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Failed to refresh CSRF token');
+  const data = await res.json();
+  window.csrfToken = data.csrfToken;
+  return data.csrfToken;
+}
+
+async function csrfFetch(url, options = {}) {
+  if (options.headers && ('X-CSRF-Token' in options.headers)) {
+    options.headers['X-CSRF-Token'] = window.csrfToken;
+  }
+  let res = await fetch(url, options);
+  if (res.status === 403) {
+    const clone = res.clone();
+    try {
+      const body = await clone.json();
+      if (body?.error?.code?.startsWith('CSRF_TOKEN')) {
+        await refreshCsrfToken();
+        if (options.headers) {
+          options.headers['X-CSRF-Token'] = window.csrfToken;
+        }
+        res = await fetch(url, options);
+      }
+    } catch (_) { /* not JSON, return original */ }
+  }
+  return res;
+}
+
 /**
  * Mask an API key for display
  */
@@ -161,7 +190,7 @@ async function copyAgentInstructions() {
   let instructionsText = '';
 
   try {
-    const response = await fetch('/settings/generate-guide', {
+    const response = await csrfFetch('/settings/generate-guide', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -339,17 +368,202 @@ function showErrorMessage(message) {
 window.showSuccessMessage = showSuccessMessage;
 window.showErrorMessage = showErrorMessage;
 
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const OPENCLAW_BOT_INSTRUCTIONS = `Try to connect to my council at chatmcp.space please set it up.
+Read the setup instructions at https://chatmcp.space/setup and run:
+curl -sL https://chatmcp.space/setup | bash
+Prompt me for API key and account password only when needed.
+If I do not have an account, guide me to https://chatmcp.space/register first.`;
+
+function copyOpenClawInstruction() {
+  navigator.clipboard.writeText(OPENCLAW_BOT_INSTRUCTIONS)
+    .then(() => showSuccessMessage('OpenClaw instructions copied to clipboard.'))
+    .catch((err) => {
+      console.error('Failed to copy OpenClaw instructions:', err);
+      showErrorMessage('Failed to copy OpenClaw instructions');
+    });
+}
+
+window.copyOpenClawInstruction = copyOpenClawInstruction;
+
+async function fetchOpenClawConnections() {
+  const listEl = document.getElementById('openClawConnectionsList');
+  if (!listEl) return;
+
+  try {
+    const response = await fetch('/api/user/external-bots', {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin'
+    });
+
+    if (response.status === 404) {
+      listEl.innerHTML = '<p class="text-slate-500">OpenClaw integration is currently disabled.</p>';
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch connections (${response.status})`);
+    }
+
+    const data = await response.json();
+    const connections = Array.isArray(data?.connections) ? data.connections : [];
+
+    if (connections.length === 0) {
+      listEl.innerHTML = '<p class="text-slate-500">No OpenClaw connections yet.</p>';
+      return;
+    }
+
+    listEl.innerHTML = connections.map((connection) => `
+      <div class="rounded-lg border border-slate-700 bg-slate-950/50 px-3 py-2">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-slate-200 font-medium truncate">${escapeHtml(connection.agent?.name || 'Unnamed')}</p>
+            <p class="text-slate-400">status: ${escapeHtml(connection.status || 'unknown')} · mode: ${escapeHtml(connection.agent?.interAgentMode || 'disabled')}</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button type="button" data-action="verify-openclaw" data-connection-id="${escapeHtml(connection.connectionId)}"
+              class="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:text-white text-[11px]">
+              Verify
+            </button>
+            <button type="button" data-action="rotate-openclaw" data-connection-id="${escapeHtml(connection.connectionId)}"
+              class="px-2 py-1 rounded border border-amber-700 text-amber-300 hover:text-amber-200 text-[11px]">
+              Rotate Token
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    console.error('Failed to fetch OpenClaw connections:', error);
+    listEl.innerHTML = '<p class="text-red-400">Failed to load OpenClaw connections.</p>';
+  }
+}
+
+async function initializeOpenClawIntegration() {
+  const refreshBtn = document.getElementById('refreshOpenClawConnectionsBtn');
+  const listEl = document.getElementById('openClawConnectionsList');
+
+  if (!listEl) {
+    return;
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => fetchOpenClawConnections());
+  }
+
+  listEl.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const action = target.getAttribute('data-action');
+    const connectionId = target.getAttribute('data-connection-id');
+    if (!action || !connectionId) return;
+
+    target.setAttribute('disabled', 'true');
+
+    try {
+      let response = null;
+      if (action === 'verify-openclaw') {
+        response = await csrfFetch(`/api/user/external-bots/${encodeURIComponent(connectionId)}/verify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          credentials: 'same-origin'
+        });
+      } else if (action === 'rotate-openclaw') {
+        response = await csrfFetch(`/api/user/external-bots/${encodeURIComponent(connectionId)}/rotate-credential`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          credentials: 'same-origin'
+        });
+      }
+
+      if (!response) return;
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `Request failed (${response.status})`);
+      }
+
+      if (action === 'rotate-openclaw' && data?.credential?.oneTimeAgentToken) {
+        await navigator.clipboard.writeText(data.credential.oneTimeAgentToken);
+      }
+
+      showSuccessMessage(
+        action === 'verify-openclaw'
+          ? 'Connection verified.'
+          : 'Token rotated successfully. New token copied to clipboard.'
+      );
+      await fetchOpenClawConnections();
+    } catch (error) {
+      console.error('OpenClaw action failed:', error);
+      showErrorMessage(error.message || 'OpenClaw action failed');
+    } finally {
+      target.removeAttribute('disabled');
+    }
+  });
+
+  await fetchOpenClawConnections();
+}
+
 /**
  * Lightweight new-agent monitor so settings page still gets voice alerts
  */
 const SETTINGS_AGENT_POLL_INTERVAL = 3000;
+const SETTINGS_AGENT_POLL_INTERVAL_MAX = 30000;
+const SETTINGS_AGENT_POLL_JITTER = 1000;
 let settingsAgentPollHandle = null;
+let settingsAgentPollNextDelayMs = SETTINGS_AGENT_POLL_INTERVAL;
+let settingsAgentPollInFlight = false;
 let settingsKnownAgentIds = new Set();
 let settingsVisibilityHandlerAttached = false;
 const settingsVoiceNotificationState = {
   audioUnlocked: false,
   autoplayBlockedNotified: false
 };
+
+function getSettingsRetryAfterMs(response) {
+  const retryAfter = response?.headers?.get('Retry-After');
+  if (!retryAfter) return null;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds * 1000;
+  }
+  const retryDate = Date.parse(retryAfter);
+  if (Number.isFinite(retryDate)) {
+    return Math.max(0, retryDate - Date.now());
+  }
+  return null;
+}
+
+function getSettingsServerPollDelayMs(response, payload, fallbackMs = SETTINGS_AGENT_POLL_INTERVAL) {
+  const retryAfterMs = getSettingsRetryAfterMs(response);
+  const headerMs = Number(response?.headers?.get('X-Poll-Interval-Ms'));
+  const bodyMs = Number(payload?.poll?.nextPollMs);
+  const jitterHeaderMs = Number(response?.headers?.get('X-Poll-Jitter-Ms'));
+  const jitterBodyMs = Number(payload?.poll?.jitterMs);
+  const baseMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+    ? retryAfterMs
+    : (Number.isFinite(headerMs) && headerMs > 0 ? headerMs : bodyMs);
+  const jitterMs = Number.isFinite(jitterHeaderMs) && jitterHeaderMs > 0
+    ? jitterHeaderMs
+    : (Number.isFinite(jitterBodyMs) && jitterBodyMs > 0 ? jitterBodyMs : SETTINGS_AGENT_POLL_JITTER);
+  const nextMs = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : fallbackMs;
+  const withJitter = nextMs + Math.floor(Math.random() * Math.max(1, jitterMs));
+  return Math.max(SETTINGS_AGENT_POLL_INTERVAL, Math.min(SETTINGS_AGENT_POLL_INTERVAL_MAX, withJitter));
+}
 
 function startSettingsNewAgentMonitor() {
   if (settingsAgentPollHandle) {
@@ -358,11 +572,13 @@ function startSettingsNewAgentMonitor() {
 
   // Prime known agents without triggering audio
   pollSettingsAgents(true);
-  settingsAgentPollHandle = setInterval(() => pollSettingsAgents(false), SETTINGS_AGENT_POLL_INTERVAL);
+  settingsAgentPollNextDelayMs = SETTINGS_AGENT_POLL_INTERVAL;
+  scheduleSettingsAgentPoll(false, SETTINGS_AGENT_POLL_INTERVAL);
 
   if (!settingsVisibilityHandlerAttached) {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
+        settingsAgentPollNextDelayMs = SETTINGS_AGENT_POLL_INTERVAL;
         pollSettingsAgents(false);
       }
     });
@@ -372,9 +588,26 @@ function startSettingsNewAgentMonitor() {
   window.addEventListener('beforeunload', stopSettingsNewAgentMonitor);
 }
 
+function scheduleSettingsAgentPoll(skipNotifications, delayMs) {
+  clearTimeout(settingsAgentPollHandle);
+  settingsAgentPollHandle = setTimeout(async () => {
+    if (settingsAgentPollInFlight) {
+      scheduleSettingsAgentPoll(skipNotifications, settingsAgentPollNextDelayMs);
+      return;
+    }
+    settingsAgentPollInFlight = true;
+    try {
+      await pollSettingsAgents(skipNotifications);
+    } finally {
+      settingsAgentPollInFlight = false;
+      scheduleSettingsAgentPoll(false, settingsAgentPollNextDelayMs);
+    }
+  }, Math.max(0, delayMs));
+}
+
 function stopSettingsNewAgentMonitor() {
   if (settingsAgentPollHandle) {
-    clearInterval(settingsAgentPollHandle);
+    clearTimeout(settingsAgentPollHandle);
     settingsAgentPollHandle = null;
   }
 }
@@ -389,11 +622,21 @@ async function pollSettingsAgents(skipNotifications) {
     });
 
     if (!response.ok) {
+      settingsAgentPollNextDelayMs = getSettingsServerPollDelayMs(
+        response,
+        null,
+        settingsAgentPollNextDelayMs * 2
+      );
       throw new Error(`Failed to fetch agents: ${response.status}`);
     }
 
     const data = await response.json();
     const agents = Array.isArray(data?.agents) ? data.agents : [];
+    settingsAgentPollNextDelayMs = getSettingsServerPollDelayMs(
+      response,
+      data,
+      agents.length > 0 ? SETTINGS_AGENT_POLL_INTERVAL : settingsAgentPollNextDelayMs
+    );
     const currentIds = new Set();
     const agentLookup = new Map();
 
@@ -531,7 +774,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Setup voice settings
   setupVoiceSettings();
+  setupTwoFactorAuth();
   setupEncryptionSettings();
+  initializeOpenClawIntegration();
   startSettingsNewAgentMonitor();
 });
 
@@ -692,7 +937,7 @@ async function updateAgentInstructions(agentName) {
 
   try {
     // Fetch agent instructions from the server
-    const response = await fetch('/settings/generate-guide', {
+    const response = await csrfFetch('/settings/generate-guide', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -732,7 +977,7 @@ async function updateDirectSetupScript(agentName) {
   const sanitizedAgentName = sanitizeAgentName(agentName) || window.apiGuideConfig.defaultAgentName || 'Your Agent Name';
 
   try {
-    const response = await fetch('/settings/generate-guide', {
+    const response = await csrfFetch('/settings/generate-guide', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -764,6 +1009,280 @@ function sanitizeAgentName(name) {
     return '';
   }
   return name.trim().slice(0, 255);
+}
+
+function setMfaEnabled(enabled) {
+  if (!window.mfaConfig) {
+    window.mfaConfig = {};
+  }
+  window.mfaConfig.enabled = enabled === true;
+
+  const statusBadge = document.getElementById('mfaStatusBadge');
+  const statusText = document.getElementById('mfaStatusText');
+  const startBtn = document.getElementById('startMfaSetupBtn');
+  const setupPanel = document.getElementById('mfaSetupPanel');
+  const disablePanel = document.getElementById('mfaDisablePanel');
+
+  if (statusBadge) {
+    statusBadge.textContent = enabled ? 'Enabled' : 'Disabled';
+    statusBadge.className = `inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${enabled
+      ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+      : 'bg-slate-700/70 text-slate-300 border border-slate-600'}`;
+  }
+
+  if (statusText) {
+    statusText.textContent = enabled
+      ? 'Enabled. You will be prompted for a 6-digit code after sign-in.'
+      : 'Disabled. Sign-in works exactly as it does today until you opt in.';
+  }
+
+  if (startBtn) {
+    startBtn.classList.toggle('hidden', enabled);
+  }
+
+  if (disablePanel) {
+    disablePanel.classList.toggle('hidden', !enabled);
+  }
+
+  if (setupPanel && enabled) {
+    setupPanel.classList.add('hidden');
+  }
+}
+
+function resetMfaSetupPanel() {
+  const secretInput = document.getElementById('mfaSecretInput');
+  const verifyInput = document.getElementById('mfaVerifyCodeInput');
+  const setupPanel = document.getElementById('mfaSetupPanel');
+  const recoveryCodesPanel = document.getElementById('mfaRecoveryCodesPanel');
+  const recoveryCodesInput = document.getElementById('mfaRecoveryCodesInput');
+
+  if (secretInput) {
+    secretInput.value = '';
+    delete secretInput.dataset.otpauthUrl;
+  }
+
+  if (verifyInput) {
+    verifyInput.value = '';
+  }
+
+  if (setupPanel) {
+    setupPanel.classList.add('hidden');
+  }
+
+  if (recoveryCodesInput) {
+    recoveryCodesInput.value = '';
+  }
+
+  if (recoveryCodesPanel) {
+    recoveryCodesPanel.classList.add('hidden');
+  }
+}
+
+function setupTwoFactorAuth() {
+  const startBtn = document.getElementById('startMfaSetupBtn');
+  const confirmBtn = document.getElementById('confirmMfaSetupBtn');
+  const cancelBtn = document.getElementById('cancelMfaSetupBtn');
+  const copyBtn = document.getElementById('copyMfaSecretBtn');
+  const copyRecoveryCodesBtn = document.getElementById('copyMfaRecoveryCodesBtn');
+  const dismissRecoveryCodesBtn = document.getElementById('dismissMfaRecoveryCodesBtn');
+  const disableBtn = document.getElementById('disableMfaBtn');
+  const setupPanel = document.getElementById('mfaSetupPanel');
+  const secretInput = document.getElementById('mfaSecretInput');
+  const verifyInput = document.getElementById('mfaVerifyCodeInput');
+  const disableInput = document.getElementById('mfaDisableCodeInput');
+  const recoveryCodesPanel = document.getElementById('mfaRecoveryCodesPanel');
+  const recoveryCodesInput = document.getElementById('mfaRecoveryCodesInput');
+
+  if (!startBtn && !disableBtn) {
+    return;
+  }
+
+  setMfaEnabled(window.mfaConfig?.enabled === true);
+
+  if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = 'Preparing...';
+
+      try {
+        const response = await csrfFetch('/settings/2fa/setup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          body: JSON.stringify({})
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to start two-factor setup');
+        }
+
+        if (secretInput) {
+          secretInput.value = data.secret || '';
+          secretInput.dataset.otpauthUrl = data.otpauthUrl || '';
+        }
+
+        if (verifyInput) {
+          verifyInput.value = '';
+          verifyInput.focus();
+        }
+
+        if (setupPanel) {
+          setupPanel.classList.remove('hidden');
+        }
+      } catch (error) {
+        console.error('2FA setup start error:', error);
+        showErrorMessage(error.message || 'Failed to start two-factor setup');
+      } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Set Up Authenticator App';
+      }
+    });
+  }
+
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      const value = secretInput?.value?.trim();
+      if (!value) {
+        showErrorMessage('No secret available to copy yet.');
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(value);
+        showSuccessMessage('Authenticator secret copied.');
+      } catch (error) {
+        console.error('Failed to copy authenticator secret:', error);
+        showErrorMessage('Failed to copy the secret.');
+      }
+    });
+  }
+
+  if (copyRecoveryCodesBtn) {
+    copyRecoveryCodesBtn.addEventListener('click', async () => {
+      const value = recoveryCodesInput?.value?.trim();
+      if (!value) {
+        showErrorMessage('No recovery codes are available to copy.');
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(value);
+        showSuccessMessage('Recovery codes copied. Store them somewhere private.');
+      } catch (error) {
+        console.error('Failed to copy recovery codes:', error);
+        showErrorMessage('Failed to copy the recovery codes.');
+      }
+    });
+  }
+
+  if (dismissRecoveryCodesBtn) {
+    dismissRecoveryCodesBtn.addEventListener('click', () => {
+      if (recoveryCodesPanel) {
+        recoveryCodesPanel.classList.add('hidden');
+      }
+      if (recoveryCodesInput) {
+        recoveryCodesInput.value = '';
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      resetMfaSetupPanel();
+    });
+  }
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      const code = verifyInput?.value?.trim();
+      if (!/^\d{6}$/.test(code || '')) {
+        showErrorMessage('Enter the 6-digit code from your authenticator app.');
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Enabling...';
+
+      try {
+        const response = await csrfFetch('/settings/2fa/enable', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          body: JSON.stringify({ code })
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to enable two-factor authentication');
+        }
+
+        setMfaEnabled(true);
+        resetMfaSetupPanel();
+        const recoveryCodes = Array.isArray(data.recoveryCodes) ? data.recoveryCodes.filter(Boolean) : [];
+        if (recoveryCodes.length && recoveryCodesInput && recoveryCodesPanel) {
+          recoveryCodesInput.value = recoveryCodes.join('\n');
+          recoveryCodesPanel.classList.remove('hidden');
+          recoveryCodesInput.focus({ preventScroll: true });
+        }
+        if (disableInput) {
+          disableInput.value = '';
+        }
+        showSuccessMessage(data.message || 'Two-factor authentication enabled.');
+      } catch (error) {
+        console.error('2FA enable error:', error);
+        showErrorMessage(error.message || 'Failed to enable two-factor authentication');
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Enable 2FA';
+      }
+    });
+  }
+
+  if (disableBtn) {
+    disableBtn.addEventListener('click', async () => {
+      const code = disableInput?.value?.trim();
+      if (!/^\d{6}$/.test(code || '')) {
+        showErrorMessage('Enter one current 6-digit code to disable 2FA.');
+        return;
+      }
+
+      disableBtn.disabled = true;
+      disableBtn.textContent = 'Disabling...';
+
+      try {
+        const response = await csrfFetch('/settings/2fa/disable', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': window.csrfToken
+          },
+          body: JSON.stringify({ code })
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Failed to disable two-factor authentication');
+        }
+
+        setMfaEnabled(false);
+        if (disableInput) {
+          disableInput.value = '';
+        }
+        showSuccessMessage(data.message || 'Two-factor authentication disabled.');
+      } catch (error) {
+        console.error('2FA disable error:', error);
+        showErrorMessage(error.message || 'Failed to disable two-factor authentication');
+      } finally {
+        disableBtn.disabled = false;
+        disableBtn.textContent = 'Disable';
+      }
+    });
+  }
 }
 
 /**
@@ -822,7 +1341,7 @@ async function confirmDeleteAccount() {
   }
 
   try {
-    const response = await fetch('/settings/delete-account', {
+    const response = await csrfFetch('/settings/delete-account', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

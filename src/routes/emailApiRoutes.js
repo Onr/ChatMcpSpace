@@ -21,7 +21,7 @@ const { query } = require('../db/connection');
  */
 router.post('/verify-token', async (req, res) => {
   try {
-    const token = req.body?.token || req.query?.token;
+    const token = (req.body && req.body.token) || (req.query && req.query.token);
 
     if (!token) {
       return res.status(400).json({
@@ -60,8 +60,8 @@ router.post('/verify-token', async (req, res) => {
  */
 router.post('/verify-code', async (req, res) => {
   try {
-    const email = req.body?.email;
-    const code = req.body?.code;
+    const email = req.body && req.body.email;
+    const code = req.body && req.body.code;
 
     if (!email || !code) {
       return res.status(400).json({
@@ -100,7 +100,7 @@ router.post('/verify-code', async (req, res) => {
  */
 router.post('/resend-verification', async (req, res) => {
   try {
-    const email = req.body?.email;
+    const email = req.body && req.body.email;
 
     if (!email) {
       return res.status(400).json({

@@ -20,12 +20,18 @@ if [ "$APP_PORT" -lt 1024 ]; then
   echo "[nginx-setup] PORT=$APP_PORT is privileged; using 3000 for the upstream app port."
   APP_PORT=3000
 fi
+MAX_UPLOAD_MB="${MAX_ATTACHMENT_SIZE_MB:-${MAX_IMAGE_SIZE_MB:-20}}"
 
 # Derive a reasonable server_name from BASE_URL if provided
 SERVER_NAME="${SERVER_NAME:-_}"
 if [ "$SERVER_NAME" = "_" ] && [ -n "${BASE_URL:-}" ]; then
   # Strip protocol and path to get host
   SERVER_NAME="$(echo "$BASE_URL" | sed -E 's~^[a-zA-Z]+://~~; s~/.*$~~')"
+fi
+
+# If a concrete domain is configured, include the www alias too.
+if [ "$SERVER_NAME" != "_" ] && [[ "$SERVER_NAME" != *" "* ]] && [[ "$SERVER_NAME" != www.* ]]; then
+  SERVER_NAME="${SERVER_NAME} www.${SERVER_NAME}"
 fi
 
 CONFIG_NAME="agent-messaging-platform.conf"
@@ -38,7 +44,7 @@ server {
     listen 80;
     server_name ${SERVER_NAME};
 
-    client_max_body_size 10m;
+    client_max_body_size ${MAX_UPLOAD_MB}m;
 
     location / {
         proxy_pass http://127.0.0.1:${APP_PORT};

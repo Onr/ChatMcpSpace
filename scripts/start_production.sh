@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 cd "$ROOT_DIR"
+ensure_supported_node 16
 
 echo "[start-production] Preparing production environment..."
 
@@ -53,7 +54,7 @@ fi
 
 # SECURITY: Disable dev mode test user if it exists
 echo "[start-production] Checking for dev mode test user..."
-"$SCRIPTS_DIR/_disable_dev_user.sh"
+bash "$SCRIPTS_DIR/_disable_dev_user.sh"
 
 # Helper to read an env value from .env (simple parser)
 get_env_value() {

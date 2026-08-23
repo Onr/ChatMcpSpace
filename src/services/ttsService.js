@@ -16,6 +16,9 @@ const TTS_ENABLED = process.env.TTS_ENABLED !== 'false';
 const writeFile = util.promisify(fs.writeFile);
 const exists = util.promisify(fs.exists);
 const mkdir = util.promisify(fs.mkdir);
+const readdir = util.promisify(fs.readdir);
+const stat = util.promisify(fs.stat);
+const unlink = util.promisify(fs.unlink);
 
 // Lazy initialization of Google Cloud TTS client
 let client = null;
@@ -45,12 +48,73 @@ function getClient() {
 }
 
 // Cache directory path
-const CACHE_DIR = path.join(__dirname, '../../public/audio/cache');
+const CACHE_DIR = process.env.TTS_CACHE_DIR || path.join(__dirname, '../../public/audio/cache');
+const MAX_CACHE_FILES = parseInt(process.env.TTS_CACHE_MAX_FILES || '250', 10);
+const MAX_CACHE_AGE_DAYS = parseInt(process.env.TTS_CACHE_MAX_AGE_DAYS || '30', 10);
+let cleanupPromise = null;
+
+async function cleanupTtsCache() {
+    const maxFiles = Number.isFinite(MAX_CACHE_FILES) && MAX_CACHE_FILES > 0 ? MAX_CACHE_FILES : 250;
+    const maxAgeMs = Number.isFinite(MAX_CACHE_AGE_DAYS) && MAX_CACHE_AGE_DAYS > 0
+        ? MAX_CACHE_AGE_DAYS * 24 * 60 * 60 * 1000
+        : 30 * 24 * 60 * 60 * 1000;
+
+    try {
+        const names = await readdir(CACHE_DIR);
+        const now = Date.now();
+        const files = [];
+
+        for (const name of names) {
+            if (!/\.(wav|mp3)$/i.test(name)) continue;
+            const filePath = path.join(CACHE_DIR, name);
+            const stats = await stat(filePath);
+            if (!stats.isFile()) continue;
+            files.push({ filePath, mtimeMs: stats.mtimeMs });
+        }
+
+        const expired = files.filter((file) => now - file.mtimeMs > maxAgeMs);
+        const active = files
+            .filter((file) => now - file.mtimeMs <= maxAgeMs)
+            .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        const overflow = active.slice(maxFiles);
+        const toDelete = [...expired, ...overflow];
+
+        await Promise.all(toDelete.map(async (file) => {
+            try {
+                await unlink(file.filePath);
+            } catch (error) {
+                if (error.code !== 'ENOENT') {
+                    throw error;
+                }
+            }
+        }));
+
+        if (toDelete.length > 0) {
+            console.log(`Cleaned ${toDelete.length} TTS cache file(s).`);
+        }
+        return toDelete.length;
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            console.warn('Failed to clean TTS cache:', error.message);
+        }
+        return 0;
+    }
+}
+
+function scheduleCacheCleanup() {
+    if (!cleanupPromise) {
+        cleanupPromise = cleanupTtsCache().finally(() => {
+            cleanupPromise = null;
+        });
+    }
+    return cleanupPromise;
+}
 
 // Ensure cache directory exists
 (async () => {
     try {
         await mkdir(CACHE_DIR, { recursive: true });
+        await scheduleCacheCleanup();
     } catch (err) {
         console.error('Failed to create TTS cache directory:', err);
     }
@@ -147,6 +211,7 @@ async function getAudioUrl(text) {
         // 4. Save to cache
         if (response && response.audioContent) {
             await writeFile(filePath, response.audioContent, 'binary');
+            scheduleCacheCleanup();
             console.log(`Saved TTS audio to cache: ${filename}`);
             return publicUrl;
         }
@@ -160,5 +225,6 @@ async function getAudioUrl(text) {
 }
 
 module.exports = {
-    getAudioUrl
+    getAudioUrl,
+    cleanupTtsCache
 };

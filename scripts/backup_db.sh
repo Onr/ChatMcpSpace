@@ -18,10 +18,30 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-# Load env (export all variables defined in .env)
-set -a
-source .env
-set +a
+# Load simple KEY=VALUE entries without evaluating .env as shell code. This keeps
+# backups working when ordinary values contain spaces and avoids executing a
+# malformed or untrusted value from the environment file.
+load_env_file() {
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -z "$line" ] && continue
+    [[ "$line" == \#* ]] && continue
+    if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      echo "[backup-db] Ignoring malformed .env line." >&2
+      continue
+    fi
+
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    if [[ "$value" =~ ^\"(.*)\"$ ]] || [[ "$value" =~ ^\'(.*)\'$ ]]; then
+      value="${BASH_REMATCH[1]}"
+    fi
+    export "$key=$value"
+  done < .env
+}
+
+load_env_file
 
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"

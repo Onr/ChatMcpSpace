@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 cd "$ROOT_DIR"
+ensure_supported_node 16
 
 echo "[start-app] Checking environment configuration..."
 if [ ! -f ".env" ]; then

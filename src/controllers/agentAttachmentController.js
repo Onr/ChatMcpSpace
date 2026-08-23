@@ -1,6 +1,6 @@
 /**
  * Agent Attachment Controller
- * Handles upload of encrypted image attachments from agents (API key auth)
+ * Handles upload of encrypted attachments from agents (API key auth)
  *
  * Security notes:
  * - The server only stores encrypted ciphertext bytes
@@ -26,7 +26,9 @@ const { initializeStorage } = require('../storage');
 // Import shared helpers from userAttachmentController
 const {
   MAX_IMAGE_BYTES,
-  ALLOWED_CONTENT_TYPES,
+  ENABLE_GENERAL_FILE_UPLOADS,
+  CONTENT_TYPE_PATTERN,
+  IMAGE_CONTENT_TYPES,
   isValidBase64,
   sanitizeFilename,
   cleanupOldestUserImages
@@ -35,13 +37,28 @@ const {
 
 /**
  * Configure multer for memory storage (we handle file storage ourselves)
- * Using memory storage since files are encrypted and need to go to our custom storage
+ * Using memory storage since files are encrypted and need to go to our custom storage.
+ *
+ * The fileFilter rejects disallowed MIME types up front so we don't buffer
+ * megabytes of bytes into memory only to throw them away in the controller.
+ * Note: this is defense-in-depth — the controller still re-validates the
+ * declared contentType field from the form body.
  */
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: MAX_IMAGE_BYTES,
     files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').trim().toLowerCase();
+    if (!CONTENT_TYPE_PATTERN.test(mime)) {
+      return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'invalid content-type'));
+    }
+    if (!ENABLE_GENERAL_FILE_UPLOADS && !IMAGE_CONTENT_TYPES.has(mime)) {
+      return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'only image uploads allowed'));
+    }
+    cb(null, true);
   }
 });
 
@@ -131,11 +148,12 @@ async function uploadAttachment(req, res) {
       }
 
       // Validate content type
-      if (!contentType) {
-        return validationError(res, 'Content type is required');
+      const normalizedContentType = String(contentType || '').trim() || 'application/octet-stream';
+      if (!CONTENT_TYPE_PATTERN.test(normalizedContentType)) {
+        return validationError(res, 'Invalid content type format');
       }
-      if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
-        return validationError(res, `Content type must be one of: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
+      if (!ENABLE_GENERAL_FILE_UPLOADS && !IMAGE_CONTENT_TYPES.has(normalizedContentType)) {
+        return validationError(res, 'Only image attachments are currently allowed');
       }
 
       // Verify agent exists and belongs to authenticated user (via agentName)
@@ -223,7 +241,7 @@ async function uploadAttachment(req, res) {
         RETURNING attachment_id, created_at`,
         [
           attachmentId,
-          contentType,
+          normalizedContentType,
           sanitizedFilename,
           req.file.buffer.length,
           validatedSha256,
@@ -269,8 +287,19 @@ async function uploadAttachment(req, res) {
     } catch (error) {
       logError('agent_attachment_upload_error', {
         error: error.message,
+        code: error.code,
+        detail: error.detail,
         stack: error.stack
       });
+
+      // Distinguish storage errors from database errors
+      if (error.message && (
+        error.message.startsWith('Storage failed:') ||
+        error.message.startsWith('Failed to initialize storage')
+      )) {
+        return internalError(res, error.message);
+      }
+
       return handleDatabaseError(res, error, 'uploading attachment');
     }
   });

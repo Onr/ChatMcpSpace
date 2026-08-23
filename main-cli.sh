@@ -107,6 +107,13 @@ action_fix_db() {
     "$SCRIPTS_DIR/fix_db_auth.sh"
 }
 
+action_fix_db_owner() {
+  command_preview \
+    "Fix database ownership" \
+    "Repair table/sequence ownership so migrations can alter schema." \
+    "$SCRIPTS_DIR/fix_db_ownership.sh"
+}
+
 action_restart_db() {
   command_preview \
     "Restart database" \
@@ -133,6 +140,16 @@ action_start_production() {
     "Start server (production)" \
     "Prep env/deps, verify DB, then start with NODE_ENV=production in the foreground." \
     "$SCRIPTS_DIR/start_production.sh"
+}
+
+action_start_production_supervised() {
+  gum style --foreground 212 "Supervised production (auto-restart + persistent)"
+  gum style --foreground 244 "Installs a systemd service that starts on boot and restarts on crashes."
+  gum style --foreground 244 "Limits restart storms to 5 crashes per 10 minutes; writes crash alerts to server_crash.log."
+  command_preview \
+    "Start server (production, supervised)" \
+    "Install/enable a persistent systemd service that auto-restarts on crashes and appends logs to server.log." \
+    "$SCRIPTS_DIR/start_production_supervised.sh"
 }
 
 action_start_dev_mode() {
@@ -172,6 +189,9 @@ action_launch_agent() {
   gum style --foreground 244 "The agent will run in one-shot mode, processing messages and exiting."
   
   if gum confirm --affirmative "Launch" --negative "Cancel" "Open the agent launcher?"; then
+    if [ -x "$ROOT_DIR/.chatspace/cli-test-agent/agent-launcher.sh" ]; then
+      exec "$ROOT_DIR/.chatspace/cli-test-agent/agent-launcher.sh"
+    fi
     exec "$ROOT_DIR/chatspace/cli-test-agent/agent-launcher.sh"
   else
     gum style --foreground 214 "Action cancelled"
@@ -194,6 +214,15 @@ action_setup_tls() {
     "Setup TLS (certbot)" \
     "Acquire/renew certs and write HTTPS_ settings into .env." \
     "$SCRIPTS_DIR/setup_tls_certbot.sh"
+}
+
+action_renew_tls() {
+  gum style --foreground 212 "Renew/reinstall TLS cert, enable auto-renew, and install hardening hook."
+  gum style --foreground 244 "Uses certbot+nginx, enables certbot.timer, installs nginx reload hook, and runs dry-run renewal."
+  command_preview \
+    "Renew TLS + harden certbot" \
+    "Repair expired certs and configure renewal automation for future rotations." \
+    "$SCRIPTS_DIR/renew_tls_certbot.sh"
 }
 
 action_check_https() {
@@ -337,13 +366,15 @@ show_menu_and_get_selection() {
     "redis|Start Redis (local)|Start redis-server locally and set .env defaults"
     "local_stack|Start DB + Redis (local)|Start PostgreSQL and Redis locally; patch .env defaults"
     "tls|Setup TLS (Let's Encrypt)|Use certbot standalone to fetch certs and update .env"
+    "tls_renew|Renew TLS + harden certbot|Repair/renew cert, enable timer, install reload hook, run dry-run checks"
     "https_check|Check HTTPS reachability|Verify a site responds over HTTPS"
     "setup|Initial setup|Configure .env, install dependencies, bootstrap DB"
     "nginx|Setup Nginx reverse proxy|Install/configure Nginx to proxy :80 to app port"
     "db|Run database setup|Provision PostgreSQL and apply schema"
     "start_fg|Start server (foreground)|Ensure env/deps then run npm start interactively"
-    "start_fg_for_devlop|Start server (dev mode)|⚠️ INSECURE: Create test user 123@gmail.com for local testing"
+    "start_dev|Start server (dev mode)|⚠️ INSECURE: Create test user 123@gmail.com for local testing"
     "start_prod|Start server (production)|Prep env/deps, verify DB, start with NODE_ENV=production"
+    "start_prod_supervised|Start server (production, supervised)|Auto-restart on crash + start on boot (systemd, max 5 retries)"
     "start|Start server|Run npm start in the background"
     "status|Server status|Check PID and log file location"
     "status_file|Server status file|Write a server_status.txt snapshot every 5 minutes"
@@ -351,6 +382,7 @@ show_menu_and_get_selection() {
     "view_log|View full log|Open server.log inside a pager"
     "stop|Stop server|Stop the running server process"
     "fix_db|Fix database auth|Diagnose and repair database connection issues"
+    "fix_owner|Fix DB ownership|Repair owner/permissions for migration ALTER statements"
     "restart_db|Restart DB service|Restart PostgreSQL without data loss"
     "backup|Backup database|Create compressed pg_dump in backups/"
     "backup_timer|Install backup timer|Install/enable daily systemd user timer"
@@ -383,11 +415,14 @@ while true; do
     setup) action_initial_setup ;;
     nginx) action_setup_nginx ;;
     tls) action_setup_tls ;;
+    tls_renew) action_renew_tls ;;
     https_check) action_check_https ;;
     local_stack) action_start_local_stack ;;
     db) action_run_db_setup ;;
     start_prod) action_start_production ;;
+    start_prod_supervised) action_start_production_supervised ;;
     fix_db) action_fix_db ;;
+    fix_owner) action_fix_db_owner ;;
     restart_db) action_restart_db ;;
     backup) "$SCRIPTS_DIR/backup_db.sh" ;;
     backup_timer) "$SCRIPTS_DIR/install_backup_timer.sh" ;;
@@ -395,7 +430,7 @@ while true; do
     bootstrap) action_bootstrap_all ;;
     start) action_start_server ;;
     start_fg) action_start_app_foreground ;;
-    start_fg_for_devlop) action_start_dev_mode ;;
+    start_dev) action_start_dev_mode ;;
     tests) action_run_tests_suite ;;
     cli_tests) action_test_cli_providers ;;
     stop) action_stop_server ;;

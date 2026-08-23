@@ -1,4 +1,5 @@
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+  <% const mfaEnabledSafe = typeof mfaEnabled !== 'undefined' && mfaEnabled === true; %>
   <div class="space-y-8">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 slide-in-left">
       <div>
@@ -261,7 +262,7 @@
                   <div class="collapsible-content overflow-hidden transition-all duration-300" style="max-height: 0;">
                     <div class="pt-2">
                       <pre
-                        class="bg-slate-950 text-slate-300 p-4 rounded-xl overflow-x-auto text-xs border border-slate-800 shadow-inner max-h-96 font-mono custom-scrollbar"><code id="mainCLIScript"><%- typeof directSetupScript !== 'undefined' ? directSetupScript : '' %></code></pre>
+                        class="bg-slate-950 text-slate-300 p-4 rounded-xl overflow-x-auto text-xs border border-slate-800 shadow-inner max-h-96 font-mono custom-scrollbar"><code id="mainCLIScript"><%= typeof directSetupScript !== 'undefined' ? directSetupScript : '' %></code></pre>
                     </div>
                   </div>
                 </div>
@@ -301,6 +302,147 @@
                 </button>
               </div>
 
+            </div>
+
+            <!-- Two-Factor Authentication -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.31s;">
+              <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 11c0-1.657 1.343-3 3-3h1a3 3 0 013 3v1m-7 9h7a2 2 0 002-2v-5a2 2 0 00-2-2H8a2 2 0 00-2 2v5a2 2 0 002 2h4zm-1-9V7a4 4 0 118 0v1" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-slate-100">Two-Factor Authentication</h2>
+                  <p class="text-xs text-slate-400">Optional TOTP verification for password and Google sign-in</p>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                <div id="mfaStatusCard" class="rounded-xl border border-slate-700/50 bg-slate-800/50 p-4">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 class="text-sm font-medium text-slate-200">Authenticator app</h3>
+                      <p id="mfaStatusText" class="text-xs text-slate-400 mt-1">
+                        <%= mfaEnabledSafe ? 'Enabled. You will be prompted for a 6-digit code after sign-in.' : 'Disabled. Sign-in works exactly as it does today until you opt in.' %>
+                      </p>
+                    </div>
+                    <span id="mfaStatusBadge"
+                      class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium <%= mfaEnabledSafe ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-slate-700/70 text-slate-300 border border-slate-600' %>">
+                      <%= mfaEnabledSafe ? 'Enabled' : 'Disabled' %>
+                    </span>
+                  </div>
+                </div>
+
+                <div id="mfaSetupPanel" class="hidden rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-4">
+                  <div>
+                    <h3 class="text-sm font-medium text-amber-200">Step 1: Add this secret to your authenticator app</h3>
+                    <p class="mt-1 text-xs text-slate-400">Manual entry works in Google Authenticator, 1Password, Authy, and similar apps.</p>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-2">Secret key</label>
+                    <div class="flex items-center gap-3">
+                      <input id="mfaSecretInput" type="text" readonly
+                        class="flex-1 bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-amber-200 tracking-[0.2em]">
+                      <button id="copyMfaSecretBtn" type="button"
+                        class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg text-sm font-medium">
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-2">Verification code</label>
+                    <input id="mfaVerifyCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                      class="w-full bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white tracking-[0.35em] text-center"
+                      placeholder="123456">
+                  </div>
+
+                  <div class="flex gap-3">
+                    <button id="confirmMfaSetupBtn" type="button"
+                      class="flex-1 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-sm font-semibold">
+                      Enable 2FA
+                    </button>
+                    <button id="cancelMfaSetupBtn" type="button"
+                      class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg text-sm font-medium">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+
+                <div id="mfaRecoveryCodesPanel" class="hidden rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-4" role="status" aria-live="polite">
+                  <div>
+                    <h3 class="text-sm font-medium text-emerald-200">Save your recovery codes</h3>
+                    <p class="mt-1 text-xs text-slate-300">Use one code to sign in if you lose your authenticator. Each code works once. Copy or save them somewhere private now—they will not be shown again.</p>
+                  </div>
+                  <textarea id="mfaRecoveryCodesInput" readonly rows="5"
+                    class="w-full resize-none bg-slate-950/70 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-emerald-100 tracking-wide leading-6"></textarea>
+                  <div class="flex gap-3">
+                    <button id="copyMfaRecoveryCodesBtn" type="button"
+                      class="flex-1 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold">
+                      Copy recovery codes
+                    </button>
+                    <button id="dismissMfaRecoveryCodesBtn" type="button"
+                      class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-lg text-sm font-medium">
+                      I've saved them
+                    </button>
+                  </div>
+                </div>
+
+                <div id="mfaDisablePanel" class="<%= mfaEnabledSafe ? '' : 'hidden' %> rounded-xl border border-red-500/15 bg-red-500/5 p-4 space-y-4">
+                  <div>
+                    <h3 class="text-sm font-medium text-red-200">Turn off two-factor authentication</h3>
+                    <p class="mt-1 text-xs text-slate-400">Enter one current authenticator code to confirm.</p>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <input id="mfaDisableCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                      class="flex-1 bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white tracking-[0.35em] text-center"
+                      placeholder="123456">
+                    <button id="disableMfaBtn" type="button"
+                      class="px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium">
+                      Disable
+                    </button>
+                  </div>
+                </div>
+
+                <button id="startMfaSetupBtn" type="button"
+                  class="<%= mfaEnabledSafe ? 'hidden' : '' %> w-full px-4 py-2.5 bg-amber-500/90 hover:bg-amber-400 text-slate-950 rounded-lg text-sm font-semibold transition-colors">
+                  Set Up Authenticator App
+                </button>
+              </div>
+            </div>
+
+            <!-- Local Chief of Staff -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.32s;">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-slate-100">Local Chief of Staff</h2>
+                  <p class="text-xs text-slate-400">A privileged agent that manages your team — runs on your machine</p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-400 mb-4">
+                Status: <span id="cosSettingsStatus" class="text-slate-400">Not installed</span>
+              </p>
+              <button id="cosSettingsInstallBtn" type="button"
+                class="w-full px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium border border-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900">
+                Install Local Chief of Staff
+              </button>
+              <p class="mt-3 text-[11px] text-slate-500">
+                Runs locally on your machine via a tmux session. Any agents it
+                spawns are created as folders on that same machine. It can message
+                remote agents over the platform, but it cannot spawn agents on
+                other computers. After install, you'll get a one-line command to
+                paste into your terminal — or run <code>bash agent-cli.sh --local-cos</code>
+                inside an existing CLI install.
+              </p>
             </div>
 
             <!-- Encryption Settings -->
@@ -352,6 +494,99 @@
                   class="text-sm text-red-400 hover:text-red-300 font-medium transition-colors focus:outline-none hover:underline">
                   Clear Saved Encryption Key
                 </button>
+              </div>
+            </div>
+
+            <!-- Keyboard Shortcuts -->
+            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.37s;">
+              <div class="flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M5 7h14a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2V9a2 2 0 012-2z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M7 11h.01M11 11h.01M15 11h.01M8 15h8" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 class="text-lg font-semibold text-slate-100">Keyboard Shortcuts</h2>
+                  <p class="text-xs text-slate-400">Navigate the Council Chamber and compose faster</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Council & navigation -->
+                <div>
+                  <h3 class="text-sm font-semibold text-indigo-300 mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                    Council Chamber &amp; Navigation
+                  </h3>
+                  <dl class="space-y-2.5">
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Cycle focus (Council → List → Chat)</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Tab</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Move between agents</dt>
+                      <dd class="shrink-0 flex items-center gap-1">
+                        <kbd class="settings-kbd">&larr;</kbd><kbd class="settings-kbd">&uarr;</kbd><kbd class="settings-kbd">&darr;</kbd><kbd class="settings-kbd">&rarr;</kbd>
+                      </dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Jump to agent by position</dt>
+                      <dd class="shrink-0 flex items-center gap-1"><kbd class="settings-kbd">1</kbd><span class="text-slate-600 text-xs">&ndash;</span><kbd class="settings-kbd">9</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Open focused agent &amp; go to message box</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Enter</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Jump to the message box</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">/</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Delete focused agent</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Delete</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Back to Council / close popup</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Esc</kbd></dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- Message composer -->
+                <div>
+                  <h3 class="text-sm font-semibold text-emerald-300 mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    Message Composer
+                  </h3>
+                  <dl class="space-y-2.5">
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Send message</dt>
+                      <dd class="shrink-0 flex items-center gap-1">
+                        <kbd class="settings-kbd">Ctrl</kbd><span class="text-slate-600 text-xs">/</span><kbd class="settings-kbd">&#8984;</kbd><span class="text-slate-600 text-xs">+</span><kbd class="settings-kbd">Enter</kbd>
+                      </dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Recall your recent messages</dt>
+                      <dd class="shrink-0 flex items-center gap-1"><kbd class="settings-kbd">&uarr;</kbd><kbd class="settings-kbd">&darr;</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Reorder side chat / switch main agent</dt>
+                      <dd class="shrink-0 flex items-center gap-1">
+                        <kbd class="settings-kbd">Ctrl</kbd><span class="text-slate-600 text-xs">+</span><kbd class="settings-kbd">Shift</kbd><span class="text-slate-600 text-xs">+</span><kbd class="settings-kbd">&larr;</kbd><kbd class="settings-kbd">&rarr;</kbd>
+                      </dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Leave the message box</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Esc</kbd></dd>
+                    </div>
+                  </dl>
+                  <p class="text-[11px] text-slate-500 mt-4 leading-relaxed">
+                    Tip: hold the <span class="text-slate-400">Send</span> button to schedule a message for later.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -455,16 +690,22 @@
   </div>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
   // Make CSRF token available to JavaScript
   window.csrfToken = '<%= csrfToken %>';
-  window.apiGuideConfig = <% - JSON.stringify({
+  window.apiGuideConfig = <%- safeJsonForScript({
     apiKey,
     baseUrl,
     defaultAgentName,
     encryptionSalt: typeof encryptionSalt !== 'undefined' ? encryptionSalt : null
   }) %>;
+  window.mfaConfig = <%- safeJsonForScript({
+    enabled: mfaEnabledSafe
+  }) %>;
 </script>
 <script src="/js/encryption.js"></script>
 <script src="/js/voice-control.js"></script>
 <script src="/js/settings.js"></script>
+
+<%- include('partials/cos-install-modal') %>
+<script src="/js/cos-install.js?v=<%= Date.now() %>"></script>

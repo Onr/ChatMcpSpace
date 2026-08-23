@@ -12,12 +12,29 @@ echo ""
 
 # Load environment variables
 if [ -f ".env" ]; then
-  export $(grep -v '^#' .env | sed 's/#.*//' | xargs)
+  get_env_value() {
+    local key="$1"
+    local line
+    local value
+
+    line="$(grep -E "^${key}=" .env | tail -n 1 || true)"
+    value="${line#*=}"
+    value="${value%$'\r'}"
+
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value:1:-1}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value:1:-1}"
+    fi
+
+    printf '%s' "$value"
+  }
 else
   echo "[fix-db-auth] ERROR: .env file not found." >&2
   exit 1
 fi
 
+DB_NAME=${DB_NAME:-$(get_env_value "DB_NAME")}
 DB_NAME=${DB_NAME:-agent_messaging_platform}
 APP_DB_USER="agent_app_user"
 APP_DB_PASSWORD=$(openssl rand -base64 24)

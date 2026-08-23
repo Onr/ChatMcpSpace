@@ -104,7 +104,9 @@ function handleDatabaseError(res, error, operation = 'database operation') {
       return sendError(res, 400, ErrorCodes.VALIDATION_ERROR, 'Invalid data format');
       
     default:
-      return sendError(res, 500, ErrorCodes.DATABASE_ERROR, `Failed to complete ${operation}`);
+      // Include error code hint for debugging (safe to expose - PG error codes are not sensitive)
+      const codeHint = error.code ? ` [${error.code}]` : '';
+      return sendError(res, 500, ErrorCodes.DATABASE_ERROR, `Failed to complete ${operation}${codeHint}`);
   }
 }
 

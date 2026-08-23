@@ -107,23 +107,26 @@
           <div>
             <label for="password" class="block text-sm font-medium text-slate-300 mb-1">Password</label>
             <input 
-              id="password" 
-              name="password" 
-              type="password" 
-              required 
-              minlength="8"
+              id="password"
+              name="password"
+              type="password"
+              required
+              minlength="12"
+              maxlength="128"
               class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
-              placeholder="Min 8 characters"
+              placeholder="Min 12 characters"
             >
+            <p class="mt-1 text-xs text-slate-400">At least 12 characters, including a letter and a number.</p>
           </div>
           <div>
             <label for="confirmPassword" class="block text-sm font-medium text-slate-300 mb-1">Confirm Password</label>
             <input 
-              id="confirmPassword" 
-              name="confirmPassword" 
-              type="password" 
-              required 
-              minlength="8"
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              required
+              minlength="12"
+              maxlength="128"
               class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
               placeholder="Re-enter your password"
             >
@@ -167,7 +170,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
 (function() {
   const form = document.getElementById('registerForm');
   const submitButton = form.querySelector('button[type="submit"]');

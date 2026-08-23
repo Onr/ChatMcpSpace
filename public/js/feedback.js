@@ -16,6 +16,9 @@ function initializeFeedbackWidget() {
     const sendBtn = document.getElementById('feedbackSendBtn');
     const loveBtn = document.getElementById('feedbackLoveBtn');
     const successEl = document.getElementById('feedbackSuccess');
+    const imageInput = document.getElementById('feedbackImageInput');
+    const imageName = document.getElementById('feedbackImageName');
+    const imageClear = document.getElementById('feedbackImageClear');
 
     if (!triggerBtn || !panel || !textarea || !sendBtn || !loveBtn) {
         console.warn('Feedback widget elements not found');
@@ -24,6 +27,14 @@ function initializeFeedbackWidget() {
 
     const DRAFT_STORAGE_KEY = 'feedback_draft';
     let isSubmitting = false;
+    let selectedImage = null;
+
+    function clearImage() {
+        selectedImage = null;
+        if (imageInput) imageInput.value = '';
+        if (imageName) imageName.textContent = '';
+        imageClear?.classList.add('hidden');
+    }
 
     // Restore draft from localStorage
     const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -82,6 +93,7 @@ function initializeFeedbackWidget() {
         textarea.value = '';
         updateCharCount();
         updateSendButtonState();
+        clearImage();
     }
 
     // Show success state
@@ -113,17 +125,17 @@ function initializeFeedbackWidget() {
         sendBtn.disabled = true;
 
         try {
+            const body = new FormData();
+            body.append('kind', kind);
+            if (message) body.append('message', message);
+            body.append('pageUrl', window.location.href);
+            if (selectedImage) body.append('image', selectedImage, selectedImage.name);
             const response = await fetch('/api/user/feedback', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
                     'X-CSRF-Token': window.csrfToken || ''
                 },
-                body: JSON.stringify({
-                    kind: kind,
-                    message: message,
-                    pageUrl: window.location.href
-                })
+                body
             });
 
             if (response.ok) {
@@ -215,6 +227,21 @@ function initializeFeedbackWidget() {
         updateSendButtonState();
         saveDraft();
     });
+
+    imageInput?.addEventListener('change', () => {
+        const file = imageInput.files?.[0] || null;
+        if (!file) return clearImage();
+        if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) || file.size > 5_000_000) {
+            clearImage();
+            const hint = document.querySelector('.feedback-panel-hint');
+            if (hint) hint.textContent = 'Choose one PNG, JPEG, WebP, or GIF image up to 5MB.';
+            return;
+        }
+        selectedImage = file;
+        if (imageName) imageName.textContent = file.name;
+        imageClear?.classList.remove('hidden');
+    });
+    imageClear?.addEventListener('click', clearImage);
 
     // Send button
     sendBtn.addEventListener('click', () => {

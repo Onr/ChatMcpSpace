@@ -127,4 +127,74 @@ describe('Rate limit middleware', () => {
     await request(app).get('/ping').query({ agentName: 'A' }).expect(429);
     await request(app).get('/ping').query({ agentName: 'B' }).expect(429);
   });
+
+  it('adds adaptive fair-share headers and gives one active user more room', async () => {
+    jest.doMock('../../src/utils/redisClient', () => ({ rateLimitRedisClient: null }));
+    jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
+
+    const { createRateLimiter } = require('../../src/middleware/rateLimitMiddleware');
+    const limiter = createRateLimiter({
+      windowMs: 1000,
+      max: 10,
+      keyPrefix: 'adaptive-user-test',
+      adaptive: { scope: 'test-user-share', globalMax: 100, min: 1, max: 100 },
+      minPollIntervalMs: 1000,
+      maxPollIntervalMs: 30000
+    });
+
+    const app = express();
+    app.use((req, _res, next) => {
+      req.user = { userId: req.get('x-test-user') || 'u1' };
+      next();
+    });
+    app.get('/ping', limiter, (_req, res) => res.status(200).json({ ok: true }));
+
+    const alone = await request(app).get('/ping').set('x-test-user', 'u1').expect(200);
+    const withSecondUser = await request(app).get('/ping').set('x-test-user', 'u2').expect(200);
+    const firstAfterSecondUser = await request(app).get('/ping').set('x-test-user', 'u1').expect(200);
+
+    expect(alone.headers['x-ratelimit-policy']).toBe('adaptive-fair-share');
+    expect(alone.headers['x-ratelimit-scope']).toBe('adaptive-user-test');
+    expect(alone.headers['x-poll-interval-ms']).toBeTruthy();
+    expect(Number(alone.headers['x-ratelimit-limit']))
+      .toBeGreaterThan(Number(firstAfterSecondUser.headers['x-ratelimit-limit']));
+    expect(Number(withSecondUser.headers['x-ratelimit-active-users'])).toBe(2);
+  });
+
+  it('splits adaptive agent polling budget across active agents for the same user', async () => {
+    jest.doMock('../../src/utils/redisClient', () => ({ rateLimitRedisClient: null }));
+    jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
+
+    const { createRateLimiter } = require('../../src/middleware/rateLimitMiddleware');
+    const limiter = createRateLimiter({
+      windowMs: 1000,
+      max: 10,
+      keyPrefix: 'adaptive-agent-test',
+      perAgent: true,
+      adaptive: {
+        scope: 'test-agent-share',
+        globalMax: 120,
+        min: 1,
+        minPerAgent: 1,
+        max: 120
+      },
+      minPollIntervalMs: 1000,
+      maxPollIntervalMs: 30000
+    });
+
+    const app = express();
+    app.use((req, _res, next) => {
+      req.user = { userId: 'u1' };
+      next();
+    });
+    app.get('/ping', limiter, (_req, res) => res.status(200).json({ ok: true }));
+
+    const oneAgent = await request(app).get('/ping').query({ agentName: 'A' }).expect(200);
+    await request(app).get('/ping').query({ agentName: 'B' }).expect(200);
+    const afterSecondAgent = await request(app).get('/ping').query({ agentName: 'A' }).expect(200);
+
+    expect(Number(oneAgent.headers['x-ratelimit-limit']))
+      .toBeGreaterThan(Number(afterSecondAgent.headers['x-ratelimit-limit']));
+    expect(Number(afterSecondAgent.headers['x-ratelimit-active-agents'])).toBe(2);
+  });
 });

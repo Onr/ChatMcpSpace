@@ -8,7 +8,17 @@ const crypto = require('crypto');
 const { query } = require('../db/connection');
 const { generateEncryptionSalt } = require('../utils/encryptionHelper');
 
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 12;
+
+function getEmailLogFingerprint(email) {
+  if (!email || typeof email !== 'string') {
+    return 'unknown-email';
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const digest = crypto.createHash('sha256').update(normalized).digest('hex');
+  return `email-sha256:${digest.slice(0, 12)}`;
+}
 
 /**
  * Hash a password using bcrypt
@@ -90,7 +100,7 @@ async function registerUser(email, password) {
   } catch (error) {
     // Check for unique constraint violation (duplicate email)
     if (error.code === '23505' && error.constraint === 'users_email_key') {
-      console.error('Registration failed: Email already exists -', email);
+      console.error('Registration failed: Email already exists -', getEmailLogFingerprint(email));
       throw new Error('Email already registered');
     }
     
@@ -120,23 +130,23 @@ async function validateCredentials(email, password) {
     );
     
     if (result.rows.length === 0) {
-      console.error('Login failed: User not found -', email);
+      console.error('Login failed for user');
       return null; // User not found
     }
-    
+
     const user = result.rows[0];
-    
+
     // Compare password with hash
     const isValid = await bcrypt.compare(password, user.password_hash);
-    
+
     if (!isValid) {
-      console.error('Login failed: Invalid password for user -', email);
+      console.error('Login failed for user');
       return null; // Invalid password
     }
-    
+
     // Check if email is verified
     if (!user.email_verified) {
-      console.error('Login failed: Email not verified for user -', email);
+      console.error('Login failed for user');
       return {
         emailNotVerified: true,
         email: user.email,
@@ -152,7 +162,7 @@ async function validateCredentials(email, password) {
       encryptionSalt: user.encryption_salt
     };
   } catch (error) {
-    console.error('Error validating credentials for user', email, ':', error);
+    console.error('Error validating credentials for user', getEmailLogFingerprint(email), ':', error);
     throw error;
   }
 }

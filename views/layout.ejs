@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>
     <%= typeof title !=='undefined' ? title : 'ChatMCPSpace' %>
   </title>
@@ -12,7 +12,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/style.css?v=<%= Date.now() %>">
+  <link rel="stylesheet" href="/css/rich-rendering.css">
   <style>
     /* Styles moved to public/css/style.css */
 
@@ -103,7 +104,27 @@
   </style>
 </head>
 
-<body class="min-h-screen text-slate-100 antialiased">
+<body class="min-h-screen text-slate-100 antialiased <%= typeof pageBodyClass !== 'undefined' ? pageBodyClass : '' %>">
+  <script nonce="<%= cspNonce %>">
+    // Apply persisted mobile Fast Mode before dashboard markup paints, so the
+    // full stats/header chrome does not flash or remain visible while JS loads.
+    (function () {
+      try {
+        if (!/^\/dashboard(?:\/)?$/.test(window.location.pathname)) return;
+        var mobileShell = window.matchMedia && (
+          window.matchMedia('(max-width: 1023px)').matches ||
+          window.matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 600px)').matches
+        );
+        if (!mobileShell) return;
+        document.body.classList.add('dashboard-mobile');
+        if (window.localStorage && window.localStorage.getItem('dashboardFastMode') === '1') {
+          document.body.classList.add('dashboard-fast-mode');
+        }
+      } catch (_) {
+        // Keep initial render resilient if storage or matchMedia is unavailable.
+      }
+    })();
+  </script>
   <% if (user) { %>
     <!-- Email Verification Banner -->
     <% if (typeof emailVerified !=='undefined' && emailVerified===false) { %>
@@ -131,8 +152,8 @@
         <nav class="px-4 sm:px-6 lg:px-8 pt-6 overflow-visible">
           <div class="max-w-7xl mx-auto overflow-visible">
             <div class="glass-panel px-6 py-4 flex flex-wrap items-center justify-between gap-4 overflow-visible">
-              <div>
-                <div class="flex items-center gap-3">
+              <a href="/architecture" class="group flex flex-col rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400/70" aria-label="Open Chat MCP Space instructions and information" title="Instructions and information">
+                <div class="flex items-center gap-3 transition-opacity group-hover:opacity-80">
                   <svg class="w-12 h-12 flex-shrink-0" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
                     <!-- Central command center -->
                     <circle cx="128" cy="128" r="56" fill="none" stroke="#22d3ee" stroke-width="4" />
@@ -154,55 +175,94 @@
                 </div>
                 <p class="text-[10px] text-slate-400 mt-0.5" style="display: none;">Monitor every agent, maintain
                   control, and delegate with focus.</p>
-              </div>
+              </a>
               <div class="flex flex-wrap items-center gap-2 text-sm text-slate-300 overflow-visible nav-right-buttons">
-                <span
-                  class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs tracking-wide uppercase">Signed
-                  in
-                  as <%= user.email %></span>
-                <button id="feedbackTriggerBtn" type="button"
-                  class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Feedback</button>
-                <div class="relative overflow-visible" id="settingsButtonWrapper">
-                  <a href="/settings" id="navToggleButton"
-                    class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium relative"
-                    data-next-text="Dashboard">
-                    <span class="button-text">Settings</span>
-                    <span class="button-text-next">Dashboard</span>
-                  </a>
-                </div>
-                <script>
-                  // Toggle button based on current page
-                  (function () {
-                    const btn = document.getElementById('navToggleButton');
-                    if (!btn) return;
-                    const path = window.location.pathname;
-                    if (path === '/settings' || path.startsWith('/settings/')) {
-                      btn.href = '/dashboard';
-                      btn.textContent = 'Dashboard';
-                    } else {
-                      btn.href = '/settings';
-                      btn.textContent = 'Settings';
-                    }
-                  })();
-                </script>
-                <% if (typeof showSetupShortcut !=='undefined' && showSetupShortcut) { %>
-                  <button id="navCopySetupButton" type="button" onclick="copyMainCLIScript(this)"
-                    class="px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition flex items-center gap-2 text-xs font-medium">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                    </svg>
-                    Setup Script
+                <button id="mobileNavActionsToggle" type="button"
+                  class="mobile-nav-actions-toggle hidden rounded-lg border border-slate-700/50 text-slate-200 hover:bg-slate-800 transition font-medium"
+                  aria-label="Open navigation actions" aria-expanded="false">
+                  <svg class="mobile-nav-actions-toggle__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="4" y1="7" x2="20" y2="7"></line>
+                    <line x1="4" y1="12" x2="20" y2="12"></line>
+                    <line x1="4" y1="17" x2="20" y2="17"></line>
+                  </svg>
+                  <span class="mobile-nav-actions-toggle__label">Menu</span>
+                </button>
+                <div id="mobileNavActionsMenu" class="mobile-nav-actions-menu">
+                  <button id="mobileFastModeToggle" type="button" class="mobile-fast-mode-toggle"
+                    aria-pressed="false" aria-label="Enable fast mobile mode" title="Toggle fast mobile mode">
+                    <span class="mobile-fast-mode-toggle__copy">
+                      <span class="mobile-fast-mode-toggle__label">Fast Mode</span>
+                      <span class="mobile-fast-mode-toggle__state">Off</span>
+                    </span>
+                    <span class="mobile-fast-mode-toggle__switch" aria-hidden="true">
+                      <span class="mobile-fast-mode-toggle__thumb"></span>
+                    </span>
                   </button>
-                  <% } %>
-                    <a href="/logout"
-                      class="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-xs font-medium">Logout</a>
+                  <span
+                    class="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs tracking-wide uppercase">Signed
+                    in
+                    as <%= user.email %></span>
+                  <button id="feedbackTriggerBtn" type="button"
+                    class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Feedback</button>
+                  <div class="relative overflow-visible" id="settingsButtonWrapper">
+                    <a href="/settings" id="navToggleButton"
+                      class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium relative"
+                      data-next-text="Dashboard">
+                      <span class="button-text">Settings</span>
+                      <span class="button-text-next">Dashboard</span>
+                    </a>
+                  </div>
+                  <script nonce="<%= cspNonce %>">
+                    // Toggle button based on current page
+                    (function () {
+                      const btn = document.getElementById('navToggleButton');
+                      if (!btn) return;
+                      const path = window.location.pathname;
+                      const currentText = btn.querySelector('.button-text');
+                      const nextText = btn.querySelector('.button-text-next');
+                      const isSettingsPage = path === '/settings' || path.startsWith('/settings/');
+                      if (path === '/settings' || path.startsWith('/settings/')) {
+                        btn.href = '/dashboard';
+                        if (currentText) currentText.textContent = 'Dashboard';
+                        if (nextText) nextText.textContent = 'Settings';
+                      } else {
+                        btn.href = '/settings';
+                        if (currentText) currentText.textContent = 'Settings';
+                        if (nextText) nextText.textContent = 'Dashboard';
+                      }
+                      btn.setAttribute('data-next-text', isSettingsPage ? 'Settings' : 'Dashboard');
+                    })();
+                  </script>
+                  <% if (typeof showSetupShortcut !=='undefined' && showSetupShortcut) { %>
+                    <button id="navCopySetupButton" type="button" onclick="copyMainCLIScript(this)"
+                      class="hidden md:inline-flex px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition items-center gap-2 text-xs font-medium">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Setup Script
+                    </button>
+                    <% if (typeof apiKey !== 'undefined' && apiKey) { %>
+                    <button id="navCopyApiKeyButton" type="button" data-api-key="<%= apiKey %>"
+                      class="hidden md:inline-flex px-3 py-1.5 rounded-lg border border-slate-700/60 text-slate-200 hover:bg-white/5 transition items-center gap-2 text-xs font-medium"
+                      onclick="copyNavApiKey(this)">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V9a2 2 0 00-2-2h-2M8 5a2 2 0 012 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-6 9h4" />
+                      </svg>
+                      Copy API Key
+                    </button>
+                    <% } %>
+                    <% } %>
+                      <a href="/logout" id="navLogoutLink"
+                        class="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-xs font-medium">Logout</a>
+                </div>
               </div>
             </div>
           </div>
         </nav>
 
-        <script>
+        <script nonce="<%= cspNonce %>">
           // Onboarding tooltip for first-time users
           (function () {
             const ONBOARDING_KEY = 'chatmcp_setup_script_onboarding_v1'; // Key for setup script hint
@@ -272,6 +332,54 @@
               }, { once: true });
             }, 1000);
           })();
+
+          // Copy API key from nav button
+          function copyNavApiKey(btn) {
+            if (!btn) return;
+            const apiKey = btn.dataset.apiKey || '';
+            if (!apiKey) {
+              alert('API key unavailable.');
+              return;
+            }
+
+            const original = btn.innerHTML;
+            btn.disabled = true;
+
+            const setCopiedState = () => {
+              btn.innerHTML = `
+                <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Copied!
+              `;
+              btn.classList.add('border-emerald-500/50', 'text-emerald-400');
+              setTimeout(() => {
+                btn.innerHTML = original;
+                btn.classList.remove('border-emerald-500/50', 'text-emerald-400');
+                btn.disabled = false;
+              }, 1800);
+            };
+
+            navigator.clipboard.writeText(apiKey)
+              .then(setCopiedState)
+              .catch(() => {
+                try {
+                  const textarea = document.createElement('textarea');
+                  textarea.value = apiKey;
+                  textarea.style.position = 'fixed';
+                  textarea.style.opacity = '0';
+                  document.body.appendChild(textarea);
+                  textarea.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(textarea);
+                  setCopiedState();
+                } catch (err) {
+                  console.error('Failed to copy API key:', err);
+                  btn.disabled = false;
+                  alert('Failed to copy API key. Please copy manually.');
+                }
+              });
+          }
         </script>
         <% } %>
 
@@ -281,6 +389,53 @@
           <script src="/js/setup-script.js"></script>
           <script src="/js/notifications.js"></script>
           <script src="/js/page-transitions.js"></script>
+          <script nonce="<%= cspNonce %>">
+            (function () {
+              function initSharedMobileNavActions() {
+                if (document.body.dataset.mobileOverflowDelegated === 'true') return;
+
+                const button = document.getElementById('mobileNavActionsToggle');
+                const menu = document.getElementById('mobileNavActionsMenu');
+                if (!button || !menu) return;
+
+                const syncAriaState = () => {
+                  const isOpen = document.body.classList.contains('mobile-nav-actions-open');
+                  button.setAttribute('aria-expanded', String(isOpen));
+                  button.setAttribute('aria-label', isOpen ? 'Close navigation actions' : 'Open navigation actions');
+                };
+
+                document.body.dataset.mobileOverflowDelegated = 'true';
+                syncAriaState();
+
+                document.addEventListener('click', (event) => {
+                  const target = event.target;
+                  if (!target || typeof target.closest !== 'function') return;
+
+                  const clickedToggle = target.closest('#mobileNavActionsToggle');
+                  const clickedNavActions = target.closest('#mobileNavActionsToggle, nav .nav-right-buttons');
+
+                  if (clickedToggle) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    document.body.classList.toggle('mobile-nav-actions-open');
+                    syncAriaState();
+                    return;
+                  }
+
+                  if (!clickedNavActions && document.body.classList.contains('mobile-nav-actions-open')) {
+                    document.body.classList.remove('mobile-nav-actions-open');
+                    syncAriaState();
+                  }
+                });
+              }
+
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initSharedMobileNavActions, { once: true });
+              } else {
+                initSharedMobileNavActions();
+              }
+            })();
+          </script>
 
           <!-- Global Feedback Panel -->
           <div id="feedbackPanel" class="feedback-panel hidden">
@@ -297,6 +452,12 @@
               <textarea id="feedbackTextarea" class="feedback-textarea"
                 placeholder="What's on your mind? Bug reports, feature ideas, or just say hi..." rows="4"
                 maxlength="5000"></textarea>
+              <div class="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                <label for="feedbackImageInput" class="cursor-pointer hover:text-slate-200">Attach one image</label>
+                <input id="feedbackImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+                <span id="feedbackImageName" aria-live="polite"></span>
+                <button id="feedbackImageClear" type="button" class="hidden text-slate-400 hover:text-white" aria-label="Remove feedback image">×</button>
+              </div>
               <div class="feedback-char-count">
                 <span id="feedbackCharCount">0</span> / 5000
               </div>
@@ -322,7 +483,9 @@
               <span class="feedback-success-text">Thanks!</span>
             </div>
           </div>
-          <script src="/js/feedback.js"></script>
+          <!-- Feedback submissions use multipart requests when an image is attached.
+               Version this script so clients never keep a pre-upload implementation cached. -->
+          <script src="/js/feedback.js?v=<%= Date.now() %>"></script>
 </body>
 
 </html>

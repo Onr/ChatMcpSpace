@@ -5,6 +5,11 @@
   --border: rgba(148, 163, 184, 0.1);
   --glow: rgba(56, 189, 248, 0.15);
   --primary-glow: rgba(16, 185, 129, 0.4);
+  --mobile-composer-bottom-gap: max(2.25rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem));
+  --mobile-composer-scroll-buffer: 0.25rem;
+  --council-panel-width: 470px;
+  --council-list-height: 300px;
+  --council-orbit-squash: 1;
 }
 
 /* Screen reader only - visually hidden but accessible */
@@ -20,6 +25,11 @@
   border: 0;
 }
 
+html {
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: none;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   /* Reverted to previous blue-slate gradient */
@@ -29,6 +39,7 @@ body {
   color: #f8fafc;
   min-height: 100vh;
   overflow-x: hidden;
+  overscroll-behavior: none;
   position: relative;
 }
 
@@ -87,6 +98,10 @@ body::before {
 .message-bubble {
   max-width: 95%;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+  min-width: 0;
   background: rgba(30, 41, 59, 0.7);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
@@ -105,6 +120,9 @@ body::before {
 /* Markdown Typography Styles for Message Content */
 .message-content {
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* Bold text (** or __) */
@@ -311,6 +329,21 @@ body::before {
   line-height: 1.4;
 }
 
+.message-timestamp--interactive {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.message-timestamp--interactive:hover,
+.message-timestamp--interactive:focus-visible {
+  color: #e2f3ff;
+  opacity: 1;
+  outline: none;
+}
+
 .message-bubble--user .message-header {
   justify-content: space-between;
   width: 100%;
@@ -402,6 +435,15 @@ body::before {
   color: #e2e8f0;
 }
 
+.message-info-btn {
+  color: #93c5fd;
+}
+
+.message-info-btn:hover,
+.message-info-btn:focus-visible {
+  color: #bfdbfe;
+}
+
 .message-copy-btn.copied {
   color: #6ee7b7;
 }
@@ -417,6 +459,10 @@ body::before {
 
 .message-read-indicator--pending {
   color: #475569;
+}
+
+.message-read-indicator--failed {
+  color: #fca5a5;
 }
 
 /* Encrypted Message Placeholder Styles */
@@ -475,6 +521,23 @@ body::before {
   box-shadow: 0 2px 6px rgba(139, 92, 246, 0.2);
 }
 
+/* Encrypted badge for successfully decrypted messages */
+.encrypted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #c4b5fd;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(59, 130, 246, 0.12));
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .message-bubble--user .message-tts-btn {
   color: #38bdf8;
 }
@@ -531,7 +594,7 @@ body::before {
 }
 
 .message-animate-in {
-  animation: messageSlideIn 0.3s ease-out forwards;
+  animation: messageSlideIn 360ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* Chat carousel transition (used on mobile when switching agents) */
@@ -544,8 +607,8 @@ body::before {
 
   100% {
     opacity: 0;
-    transform: translateX(-36px) scale(0.965);
-    filter: blur(1px);
+    transform: translateX(-24px) scale(0.98);
+    filter: blur(0.6px);
   }
 }
 
@@ -558,8 +621,8 @@ body::before {
 
   100% {
     opacity: 0;
-    transform: translateX(36px) scale(0.965);
-    filter: blur(1px);
+    transform: translateX(24px) scale(0.98);
+    filter: blur(0.6px);
   }
 }
 
@@ -572,16 +635,16 @@ body::before {
 
   100% {
     opacity: 0;
-    transform: translateX(0) scale(0.975);
-    filter: blur(1px);
+    transform: translateX(0) scale(0.985);
+    filter: blur(0.6px);
   }
 }
 
 @keyframes chatCarouselEnterFromLeft {
   0% {
     opacity: 0;
-    transform: translateX(-36px) scale(0.975);
-    filter: blur(1px);
+    transform: translateX(-24px) scale(0.985);
+    filter: blur(0.6px);
   }
 
   100% {
@@ -594,8 +657,8 @@ body::before {
 @keyframes chatCarouselEnterFromRight {
   0% {
     opacity: 0;
-    transform: translateX(36px) scale(0.975);
-    filter: blur(1px);
+    transform: translateX(24px) scale(0.985);
+    filter: blur(0.6px);
   }
 
   100% {
@@ -608,8 +671,8 @@ body::before {
 @keyframes chatCarouselEnterFade {
   0% {
     opacity: 0;
-    transform: translateX(0) scale(0.985);
-    filter: blur(1px);
+    transform: translateX(0) scale(0.99);
+    filter: blur(0.6px);
   }
 
   100% {
@@ -625,27 +688,27 @@ body::before {
 }
 
 #conversationArea.chat-carousel-leave-left {
-  animation: chatCarouselLeaveLeft 180ms ease forwards;
+  animation: chatCarouselLeaveLeft 230ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
 #conversationArea.chat-carousel-leave-right {
-  animation: chatCarouselLeaveRight 180ms ease forwards;
+  animation: chatCarouselLeaveRight 230ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
 #conversationArea.chat-carousel-leave-fade {
-  animation: chatCarouselLeaveFade 160ms ease forwards;
+  animation: chatCarouselLeaveFade 210ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
 #conversationArea.chat-carousel-enter-from-left {
-  animation: chatCarouselEnterFromLeft 220ms ease forwards;
+  animation: chatCarouselEnterFromLeft 300ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 #conversationArea.chat-carousel-enter-from-right {
-  animation: chatCarouselEnterFromRight 220ms ease forwards;
+  animation: chatCarouselEnterFromRight 300ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 #conversationArea.chat-carousel-enter-fade {
-  animation: chatCarouselEnterFade 200ms ease forwards;
+  animation: chatCarouselEnterFade 270ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* Agent message ripple - expanding blue circle */
@@ -727,6 +790,33 @@ body::before {
   color: #fbbf24;
 }
 
+/* Inter-agent DM message styling */
+.message-bubble--agent-dm-sent {
+  margin-left: auto;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(99, 102, 241, 0.1));
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-left: 3px solid rgba(56, 189, 248, 0.6);
+  text-align: left;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.message-bubble--agent-dm-received {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(56, 189, 248, 0.1));
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-left: 3px solid rgba(168, 85, 247, 0.6);
+  text-align: left;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.message-bubble--agent-dm-sent .message-footer,
+.message-bubble--agent-dm-received .message-footer {
+  justify-content: flex-start;
+}
+
 .priority-low {
   border-left: 3px solid #10b981;
 }
@@ -780,6 +870,53 @@ body::before {
   background: rgba(148, 163, 184, 0.1);
   border: 1px solid rgba(148, 163, 184, 0.2);
   color: #e2e8f0;
+}
+
+.chat-header__working-indicator {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+  animation: tile-working-pulse 1.5s ease-in-out infinite;
+}
+
+.chat-header__pin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  background: rgba(15, 23, 42, 0.75);
+  color: #94a3b8;
+  padding: 0.32rem 0.6rem;
+  font-size: 0.68rem;
+  line-height: 1;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+
+.chat-header__pin-btn .pin-chat-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-header__pin-btn:hover {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.chat-header__pin-btn--active {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(16, 185, 129, 0.16);
 }
 
 .agent-item {
@@ -912,8 +1049,17 @@ body::before {
   background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05), transparent 70%), var(--surface);
 }
 
+/* Stats bar: always horizontal 3-column layout */
+#mobileStatsToggle > .grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 1rem;
+  text-align: center;
+}
+
 #councilCircle {
   min-height: 0;
+  transition: opacity 0.24s ease, flex-basis 0.28s ease, padding 0.28s ease, margin 0.28s ease;
 }
 
 .council-orbit {
@@ -923,8 +1069,8 @@ body::before {
   width: min(95cqmin, 95%);
   height: min(95cqmin, 95%);
   /* Also set min dimensions as a safety net */
-  min-width: 300px;
-  min-height: 300px;
+  min-width: var(--council-orbit-min-size, 300px);
+  min-height: var(--council-orbit-min-size, 300px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -932,9 +1078,10 @@ body::before {
   isolation: isolate;
   /* Ensure aspect ratio is strictly enforced */
   aspect-ratio: 1 / 1;
+  transition: width 0.35s ease, height 0.35s ease;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 767px) {
   .council-orbit {
     /* Maintain squareness on mobile dock view if visible */
     width: min(90cqmin, 90%);
@@ -946,7 +1093,172 @@ body::before {
 
 .council-center {
   z-index: 10;
-  animation: float 6s ease-in-out infinite;
+  animation: float 8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  /* Used for group theming when zooming into a group */
+  --group-hue: 270;
+  /* Ensure wrapper size = circle size so translate(-50%,-50%) centers on the circle */
+  width: 4rem;
+  height: 4rem;
+  overflow: visible;
+}
+
+.dashboard-resize-handle {
+  align-self: stretch;
+  width: 6px;
+  min-width: 6px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 20;
+  touch-action: none;
+  user-select: none;
+}
+
+.dashboard-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0) 0%, rgba(148, 163, 184, 0.5) 18%, rgba(45, 212, 191, 0.7) 50%, rgba(148, 163, 184, 0.5) 82%, rgba(148, 163, 184, 0) 100%);
+  opacity: 0.55;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.dashboard-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 56px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.9) 0 16%, transparent 18% 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06));
+  background-size: 100% 14px, 100% 100%;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 10px 25px rgba(15, 23, 42, 0.35);
+  opacity: 0.92;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dashboard-resize-handle--horizontal {
+  width: auto;
+  min-width: 0;
+  height: 6px;
+  min-height: 6px;
+  cursor: row-resize;
+}
+
+.dashboard-resize-handle--horizontal::before {
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0) 0%, rgba(148, 163, 184, 0.5) 18%, rgba(45, 212, 191, 0.7) 50%, rgba(148, 163, 184, 0.5) 82%, rgba(148, 163, 184, 0) 100%);
+}
+
+.dashboard-resize-handle--horizontal::after {
+  width: 56px;
+  height: 2px;
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.9) 0 16%, transparent 18% 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06));
+  background-size: 14px 100%, 100% 100%;
+}
+
+.dashboard-main-grid.dashboard-main-grid--resizing,
+.dashboard-main-grid.dashboard-main-grid--resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.dashboard-main-grid.dashboard-main-grid--resizing-row,
+.dashboard-main-grid.dashboard-main-grid--resizing-row * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+.dashboard-main-grid.dashboard-main-grid--resizing .council-orbit,
+.dashboard-main-grid.dashboard-main-grid--resizing #multiChatContainer,
+.dashboard-main-grid.dashboard-main-grid--resizing > .council-chamber {
+  transition: none !important;
+}
+
+.dashboard-main-grid.dashboard-main-grid--resizing-row .council-rings,
+.dashboard-main-grid.dashboard-main-grid--resizing-row .council-list-section,
+.dashboard-main-grid.dashboard-main-grid--resizing-row #agentListPanel {
+  transition: none !important;
+}
+
+.dashboard-resize-handle:hover::before,
+.dashboard-main-grid.dashboard-main-grid--resizing .dashboard-resize-handle::before {
+  opacity: 0.92;
+  transform: scaleX(1.08);
+}
+
+.dashboard-resize-handle:hover::after,
+.dashboard-main-grid.dashboard-main-grid--resizing .dashboard-resize-handle::after {
+  transform: translate(-50%, -50%) scaleY(1.04);
+  box-shadow:
+    0 0 0 1px rgba(110, 231, 183, 0.32),
+    0 12px 30px rgba(16, 185, 129, 0.22);
+}
+
+.dashboard-resize-handle--horizontal:hover::after,
+.dashboard-main-grid.dashboard-main-grid--resizing-row .dashboard-resize-handle--horizontal::after {
+  transform: translate(-50%, -50%) scaleX(1.04);
+}
+
+/* Float the label below the circle without affecting wrapper size */
+#councilCenterLabel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+/* In group view, stop the floating animation so the badge stays exactly centered */
+.council-center--group {
+  animation: none;
+  transform: translate(-50%, -50%);
+}
+
+.council-center--group .council-center__avatar {
+  display: none;
+}
+
+.council-center--group .council-center__group {
+  display: flex !important;
+  border-width: 2px;
+  border-color: hsl(var(--group-hue) 85% 65% / 0.65);
+  background: radial-gradient(circle at 40% 35%,
+      hsl(var(--group-hue) 85% 68% / 0.42),
+      rgba(15, 23, 42, 0.92));
+  box-shadow:
+    0 0 28px hsl(var(--group-hue) 85% 60% / 0.25),
+    0 0 0 4px hsl(var(--group-hue) 85% 60% / 0.15),
+    inset 0 0 16px rgba(0, 0, 0, 0.5);
+}
+
+.council-center__group-text {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  color: hsl(var(--group-hue) 95% 92% / 0.95);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  text-align: center;
+  max-width: 48px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  pointer-events: none;
+  word-break: break-word;
+  margin: auto;
 }
 
 @keyframes float {
@@ -957,25 +1269,28 @@ body::before {
   }
 
   50% {
-    transform: translate(-50%, -50%) translateY(-10px);
+    transform: translate(-50%, -50%) translateY(-6px);
   }
 }
 
 .agent-seat {
   z-index: 5;
-  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 320ms ease,
+    opacity 320ms ease;
   transform-origin: center;
   touch-action: none;
+  will-change: transform;
 }
 
 .agent-seat:hover {
   z-index: 20;
-  transform: translate(-50%, -50%) scale(1.25) !important;
+  transform: translate(-50%, -50%) scale(1.16) !important;
 }
 
 .agent-seat--focused {
   z-index: 20;
-  transform: translate(-50%, -50%) scale(1.25) !important;
+  transform: translate(-50%, -50%) scale(1.16) !important;
 }
 
 .agent-seat--focused .agent-avatar>.rounded-full {
@@ -986,13 +1301,43 @@ body::before {
 
 .agent-seat--selected {
   z-index: 20;
-  transform: translate(-50%, -50%) scale(1.25) !important;
+  transform: translate(-50%, -50%) scale(1.16) !important;
 }
 
 .agent-seat--selected .agent-avatar>.rounded-full {
   border-radius: 9999px;
   box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.6), 0 0 20px rgba(56, 189, 248, 0.4);
   animation: focusPulse 2s infinite;
+}
+
+.agent-seat--loading {
+  z-index: 25;
+  transform: translate(-50%, -50%) scale(1.16) !important;
+}
+
+.agent-seat--loading .agent-avatar>.rounded-full {
+  border-radius: 9999px;
+  border-color: rgba(56, 189, 248, 0.9);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35), 0 0 28px rgba(56, 189, 248, 0.55);
+  animation: focusPulse 1.1s ease-in-out infinite;
+}
+
+.agent-seat--loading::before {
+  content: 'Loading…';
+  position: absolute;
+  left: 50%;
+  bottom: -34px;
+  transform: translateX(-50%);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: rgba(186, 230, 253, 0.95);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .agent-seat--dragging {
@@ -1034,8 +1379,353 @@ body.orbit-dragging .agent-seat {
 }
 
 .agent-seat .agent-avatar img {
-  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
   box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================
+   Group Seat - Mini Solar System
+   ============================================ */
+.group-seat {
+  z-index: 5;
+  --group-hue: 270;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 320ms ease,
+    opacity 320ms ease;
+  transform-origin: center;
+  touch-action: none;
+  will-change: transform;
+  cursor: pointer;
+}
+
+.group-seat:hover {
+  z-index: 20;
+  transform: translate(-50%, -50%) scale(1.16) !important;
+}
+
+.group-seat__center {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%,
+      hsl(var(--group-hue) 85% 65% / 0.35),
+      rgba(15, 23, 42, 0.95));
+  border: 2px solid hsl(var(--group-hue) 85% 60% / 0.40);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 20px hsl(var(--group-hue) 85% 60% / 0.18),
+    inset 0 0 12px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 300ms ease, border-color 300ms ease;
+}
+
+.group-seat:hover .group-seat__center {
+  border-color: hsl(var(--group-hue) 85% 60% / 0.68);
+  box-shadow: 0 0 30px hsl(var(--group-hue) 85% 60% / 0.30),
+    inset 0 0 12px rgba(0, 0, 0, 0.4);
+}
+
+.group-seat__center-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--group-hue) 90% 88% / 0.90);
+  text-align: center;
+  line-height: 1.1;
+  max-width: 38px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.group-seat__dots {
+  position: absolute;
+  inset: -8px;
+  pointer-events: none;
+}
+
+.group-seat__dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+  transition: transform 300ms ease;
+}
+
+.group-seat:hover .group-seat__dot {
+  transform: scale(1.3);
+}
+
+.group-seat__dot--urgent {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+.group-seat__dot--attention {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.group-seat__dot--idle {
+  background: #64748b;
+}
+
+.group-seat__dot--online {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+.group-seat__overflow {
+  position: absolute;
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.8);
+  bottom: -2px;
+  right: -2px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 4px;
+  padding: 0 3px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.group-seat__badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 20;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  border: 2px solid rgba(15, 23, 42, 0.9);
+  padding: 0 4px;
+}
+
+.group-seat__badge--urgent {
+  background: #ef4444;
+  color: white;
+  animation: pulse 2s infinite;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+}
+
+.group-seat__badge--unread {
+  background: #f59e0b;
+  color: #0f172a;
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.6);
+}
+
+.group-seat__name {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--group-hue) 90% 88% / 0.80);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.group-seat--selected .group-seat__center {
+  border-color: rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.4), 0 0 20px rgba(56, 189, 248, 0.3);
+  animation: focusPulse 2s infinite;
+}
+
+.group-seat--selected .group-seat__name {
+  color: rgba(56, 189, 248, 0.9);
+}
+
+/* Group zoom view transitions */
+.group-seat--zooming {
+  transition: all 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.agent-seat--group-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 300ms ease;
+}
+
+.group-seat--group-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 300ms ease;
+}
+
+/* Group view: remove button on agent seats */
+.agent-seat__group-remove {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  z-index: 30;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.9);
+  border: 2px solid rgba(15, 23, 42, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.agent-seat:hover .agent-seat__group-remove {
+  opacity: 1;
+}
+
+.agent-seat__group-remove svg {
+  width: 8px;
+  height: 8px;
+  color: white;
+}
+
+/* Agent list group headers */
+.agent-list-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 200ms ease;
+  margin-top: 4px;
+}
+
+.agent-list-group-header:hover {
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.agent-list-group-header__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.25);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agent-list-group-header__name {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(196, 181, 253, 0.9);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-list-group-header__count {
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.7);
+  font-weight: 600;
+}
+
+.agent-list-group-header__arrow {
+  width: 16px;
+  height: 16px;
+  color: rgba(148, 163, 184, 0.5);
+  transition: transform 200ms ease;
+}
+
+.agent-list-group-header--collapsed .agent-list-group-header__arrow {
+  transform: rotate(-90deg);
+}
+
+.agent-list-group-section {
+  overflow: hidden;
+  transition: max-height 300ms ease;
+}
+
+.agent-list-group-section--collapsed {
+  max-height: 0 !important;
+}
+
+/* Mobile dock group item */
+.dock-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 12px;
+  transition: background 200ms ease;
+}
+
+.dock-group:active {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.dock-group-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(139, 92, 246, 0.3), rgba(30, 27, 75, 0.8));
+  border: 2px solid rgba(139, 92, 246, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.dock-group-avatar__stacked {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-group-avatar__mini {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(15, 23, 42, 0.8);
+  margin: -1px;
+}
+
+.dock-group-name {
+  font-size: 10px;
+  color: rgba(196, 181, 253, 0.8);
+  font-weight: 600;
+  max-width: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Group Management FAB - mobile repositioning */
+@media (max-width: 767px) {
+  #groupManagementFab {
+    display: none !important;
+  }
+
+  #mobileHeader .mobile-group-management-action {
+    display: flex !important;
+  }
+
+  #groupBackBtn {
+    top: 12px;
+    left: 12px;
+  }
 }
 
 .agent-seat:hover .agent-avatar img {
@@ -1044,6 +1734,23 @@ body.orbit-dragging .agent-seat {
 
 .agent-seat--active:hover {
   filter: drop-shadow(0 0 25px rgba(16, 185, 129, 0.4));
+}
+
+/* Disconnected agent icon (orbit view) */
+.agent-status-disconnected {
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+  background: #1e293b;
+  border: 1.5px solid #475569;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.agent-status-disconnected svg {
+  width: 10px;
+  height: 10px;
 }
 
 .agent-seat--urgent .agent-avatar::before {
@@ -1092,7 +1799,7 @@ body.orbit-dragging .agent-seat {
 
 .connection-line {
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 350ms cubic-bezier(0.22, 1, 0.36, 1);
   filter: drop-shadow(0 0 5px rgba(16, 185, 129, 0.5));
 }
 
@@ -1134,6 +1841,457 @@ body.orbit-dragging .agent-seat {
   backdrop-filter: blur(10px);
 }
 
+.fast-mode-chat-list-toggle {
+  display: none;
+  width: 2.35rem;
+  height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  background:
+    radial-gradient(circle at 35% 28%, rgba(110, 231, 183, 0.32), transparent 45%),
+    rgba(15, 23, 42, 0.92);
+  color: #bbf7d0;
+  box-shadow: 0 8px 22px rgba(16, 185, 129, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 0;
+  touch-action: manipulation;
+  transition: transform 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.fast-mode-chat-list-toggle:active {
+  transform: scale(0.96);
+}
+
+.fast-mode-chat-list-toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke-width: 2.4;
+}
+
+#conversationArea {
+  overflow-x: hidden;
+  contain: layout paint;
+}
+
+#scrollToBottomBtn {
+  display: none;
+}
+#scrollToBottomBtn:not(.hidden) {
+  display: flex;
+}
+
+.mobile-fast-mode-toggle {
+  display: none;
+}
+
+.mobile-nav-actions-menu {
+  display: contents;
+}
+
+.mobile-fast-mode-toggle__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.05;
+}
+
+.mobile-fast-mode-toggle__label {
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.mobile-fast-mode-toggle__state {
+  font-size: 0.62rem;
+  color: #94a3b8;
+}
+
+.mobile-fast-mode-toggle__switch {
+  width: 2rem;
+  height: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.mobile-fast-mode-toggle__thumb {
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transform: translateX(0);
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+.mobile-fast-mode-toggle[aria-pressed="true"] .mobile-fast-mode-toggle__switch {
+  background: rgba(16, 185, 129, 0.32);
+  border-color: rgba(52, 211, 153, 0.58);
+}
+
+.mobile-fast-mode-toggle[aria-pressed="true"] .mobile-fast-mode-toggle__thumb {
+  transform: translateX(0.88rem);
+  background: #6ee7b7;
+}
+
+body.dashboard-fast-mode .glass-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  background: rgba(2, 6, 23, 0.96) !important;
+}
+
+body.dashboard-fast-mode .glass-panel::before,
+body.dashboard-fast-mode .council-chamber::before,
+body.dashboard-fast-mode .dock-position-indicator,
+body.dashboard-fast-mode .dock-interaction-hints,
+body.dashboard-fast-mode .dock-swipe-hint,
+body.dashboard-fast-mode .council-orbit,
+body.dashboard-fast-mode #mainInteractiveSpace,
+body.dashboard-fast-mode #interAgentStatsInline,
+body.dashboard-fast-mode .message-tts-btn,
+body.dashboard-fast-mode .message-info-btn {
+  display: none !important;
+}
+
+body.dashboard-fast-mode #mobileAgentDock {
+  display: none !important;
+}
+
+/* Fast Mode: drop the council 3-dots row and the stats counts row.
+   The council actions (groups, password, archive, voice) and the
+   urgent/attention indicators are exposed in the top nav instead.
+   #mobileHeader stays rendered (zero-size) so its absolutely-positioned
+   dropdown can still anchor against the viewport when opened. */
+body.dashboard-fast-mode #mobileHeader {
+  display: block !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  position: relative;
+  z-index: 200;
+}
+
+body.dashboard-fast-mode #mobileHeader > .flex,
+body.dashboard-fast-mode #mobileHeader .council-header-title,
+body.dashboard-fast-mode #mobileHeader #headerNavLeft,
+body.dashboard-fast-mode #mobileHeader #headerNavRight,
+body.dashboard-fast-mode #mobileHeader #collapseMobileListBtn,
+body.dashboard-fast-mode #mobileHeader #minimizeCouncilBtn,
+body.dashboard-fast-mode #mobileHeader .mobile-council-actions-toggle {
+  display: none !important;
+}
+
+body.dashboard-fast-mode #mobileStatsToggle {
+  display: none !important;
+}
+
+/* Fast Mode: keep the agent list usable for chat switching but drop the
+   "Agents" title and count chip so the list itself takes priority. */
+body.dashboard-fast-mode .agent-list-title,
+body.dashboard-fast-mode .agent-list-count {
+  display: none !important;
+}
+
+/* Fast Mode: float the council actions dropdown near the top nav so the
+   new 3-dots button up there can still open Groups/Password/Archive/Voice. */
+body.dashboard-fast-mode.mobile-council-actions-open #mobileHeader .council-header-actions {
+  display: flex !important;
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 4.5rem) !important;
+  right: 0.75rem !important;
+  left: auto !important;
+  z-index: 220 !important;
+}
+
+/* Fast Mode: top-nav status indicators.
+   Hidden by default; revealed only when in fast mobile mode. */
+.fast-mode-nav-cluster {
+  display: none;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.fast-mode-nav-cluster__indicator {
+  display: none;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  color: #f8fafc;
+}
+
+.fast-mode-nav-cluster__indicator--urgent {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
+}
+
+.fast-mode-nav-cluster__indicator--attention {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #fde68a;
+}
+
+.fast-mode-nav-cluster__indicator[data-count="0"] {
+  display: none !important;
+}
+
+.fast-mode-nav-cluster__indicator[data-active="true"] {
+  display: inline-flex;
+}
+
+.fast-mode-nav-cluster__indicator svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+/* When the indicators are buttons (mobile bell / urgent badges), reset the
+   default UA button look but keep them tappable. */
+button.fast-mode-nav-cluster__indicator {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.fast-mode-nav-cluster__indicator:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.65);
+  outline-offset: 1px;
+}
+
+button.fast-mode-nav-cluster__indicator[aria-expanded="true"] {
+  filter: brightness(1.2);
+}
+
+/* Popover listing agents that match a fast-mode badge (urgent / attention).
+   Lives outside the cluster so it doesn't get clipped by the nav. */
+.fast-mode-alert-panel {
+  position: fixed;
+  z-index: 240;
+  max-width: 280px;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  padding: 0.6rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+  font-size: 0.78rem;
+}
+
+.fast-mode-alert-panel.hidden {
+  display: none !important;
+}
+
+.fast-mode-alert-panel__title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  margin-bottom: 0.45rem;
+}
+
+.fast-mode-alert-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.fast-mode-alert-panel__item {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.fast-mode-alert-panel__item:hover,
+.fast-mode-alert-panel__item:focus {
+  background: rgba(51, 65, 85, 0.7);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.fast-mode-alert-panel__item[data-priority="urgent"] {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.fast-mode-alert-panel__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.fast-mode-alert-panel__badge {
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fast-mode-alert-panel__badge--urgent {
+  background: rgba(239, 68, 68, 0.55);
+  color: #fff;
+}
+
+.fast-mode-alert-panel__badge--unread {
+  background: rgba(245, 158, 11, 0.5);
+  color: #1f2937;
+}
+
+.fast-mode-alert-panel__empty {
+  padding: 0.5rem;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.fast-mode-nav-cluster__actions {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: #e2e8f0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.fast-mode-nav-cluster__actions:hover,
+.fast-mode-nav-cluster__actions:focus {
+  background: rgba(30, 41, 59, 0.95);
+  color: #ffffff;
+}
+
+.fast-mode-nav-cluster__actions svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+body.dashboard-fast-mode .fast-mode-nav-cluster {
+  display: inline-flex;
+}
+
+body.dashboard-fast-mode .fast-mode-chat-list-toggle {
+  display: inline-flex;
+}
+
+/* Fast Mode: "Open Chats" button in the placeholder — only visible in fast mode */
+.fast-mode-placeholder-open-chats {
+  display: none;
+}
+
+body.dashboard-fast-mode .fast-mode-placeholder-open-chats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  padding: 0.6rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 0.6rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+body.dashboard-fast-mode .fast-mode-placeholder-open-chats:hover,
+body.dashboard-fast-mode .fast-mode-placeholder-open-chats:active {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+body.dashboard-fast-mode #agentListPanel:not(.mobile-expanded) {
+  max-height: 0 !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
+body.dashboard-fast-mode #agentListPanel.mobile-expanded {
+  max-height: min(38vh, 17rem) !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+body.dashboard-fast-mode .agent-list-header {
+  padding: 0.3rem 0.55rem !important;
+}
+
+body.dashboard-fast-mode .message-bubble {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border-radius: 0.9rem !important;
+}
+
+body.dashboard-fast-mode #conversationArea {
+  padding-top: 0.55rem !important;
+  scroll-behavior: auto !important;
+}
+
+body.dashboard-fast-mode[data-agent-selected="true"]:not([data-all-chats-view="true"]) #messageInputArea,
+body.dashboard-fast-mode[data-agent-selected="true"]:not([data-all-chats-view="true"]) #messageInputArea.hidden {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+body.dashboard-fast-mode #messageInputArea .mobile-agent-status-strip {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+body.dashboard-fast-mode #messageInputArea #agentConfigBtn {
+  display: none !important;
+}
+
+body.dashboard-fast-mode * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+
 #conversationArea::-webkit-scrollbar {
   width: 6px;
 }
@@ -1173,11 +2331,11 @@ body.orbit-dragging .agent-seat {
 }
 
 .slide-in-right {
-  animation: fadeInFromFront 0.15s ease-out;
+  animation: fadeInFromFront 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .slide-in-left {
-  animation: fadeInFromBack 0.15s ease-out;
+  animation: fadeInFromBack 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .agent-avatar {
@@ -1216,6 +2374,9 @@ body.orbit-dragging .agent-seat {
   place-items: center;
   z-index: 1;
   pointer-events: none;
+  transform: perspective(1600px) rotateX(calc((1 - var(--council-orbit-squash, 1)) * 68deg)) scaleY(var(--council-orbit-squash, 1));
+  transform-origin: center center;
+  transition: transform 0.35s ease;
 }
 
 .orbital-ring {
@@ -1227,7 +2388,10 @@ body.orbit-dragging .agent-seat {
   border: 2px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 0 15px rgba(16, 185, 129, 0.1);
   pointer-events: none;
-  transition: all 0.5s ease;
+  transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    opacity 300ms ease;
 }
 
 .orbital-ring--urgent {
@@ -1445,6 +2609,104 @@ body.orbit-dragging .agent-seat {
   }
 }
 
+.landing-mouse-demo-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.landing-demo-mouse-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  width: 1.55rem;
+  height: 1.55rem;
+  color: rgba(241, 245, 249, 0.95);
+  filter: drop-shadow(0 3px 10px rgba(15, 23, 42, 0.85));
+}
+
+.landing-demo-mouse-cursor svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.landing-demo-mouse-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  transform: translate(-45%, -40%) scale(0.4);
+  animation: landingMouseRing 1.8s ease-out infinite;
+}
+
+.landing-demo-mouse-trail {
+  position: absolute;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(167, 243, 208, 0.9), rgba(56, 189, 248, 0.2));
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes landingMouseRing {
+  0% {
+    opacity: 0.55;
+    transform: translate(-45%, -40%) scale(0.4);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-45%, -40%) scale(1.35);
+  }
+}
+
+.story-underlined {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 0.15rem;
+}
+
+.story-underlined::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(52, 211, 153, 0.05), rgba(52, 211, 153, 0.75), rgba(56, 189, 248, 0.15));
+}
+
+.preview-storyline-caption {
+  margin-top: 0.35rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(148, 163, 184, 0.85);
+  line-height: 1.35;
+}
+
+.preview-storyline-caption__text {
+  color: rgba(196, 181, 253, 0.92);
+  text-decoration: underline;
+  text-decoration-color: rgba(167, 139, 250, 0.45);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-demo-mouse-ring {
+    animation: none;
+  }
+}
+
 /* Fixed Header transition */
 header {
   transition: all 0.3s ease;
@@ -1465,6 +2727,50 @@ header {
 /* Smooth section transitions */
 section {
   scroll-margin-top: 80px;
+}
+
+/* Prevent composer actions from clipping in narrow layouts */
+#messageInputArea .flex.justify-between {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#messageInputArea .flex.justify-between>p {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+#messageInputArea .flex.justify-between>div {
+  flex: 0 0 auto;
+}
+
+.mobile-agent-status-strip {
+  display: none;
+}
+
+#userMessageSend {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+#userMessageSend .send-spaceship-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(18deg);
+  filter: drop-shadow(0 0 4px rgba(15, 23, 42, 0.28));
+}
+
+#userMessageSend .send-spaceship-flame {
+  stroke: #f59e0b;
 }
 
 /* Input focus states - improved accessibility */
@@ -1600,7 +2906,7 @@ button:focus-visible {
 }
 
 .agent-seat--new {
-  animation: agentEntrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: agentEntrance 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .agent-seat--new .agent-avatar>.rounded-full {
@@ -1634,34 +2940,34 @@ button:focus-visible {
 }
 
 /* ============================================
-   Mobile Agent Dock - Horizontal Carousel
-   Shows on screens < 1024px (lg breakpoint)
+   Mobile (Narrow) Dashboard Layout
+   Use list view only (no orbit/dock)
    ============================================ */
 
-/* Hide orbital view on mobile, show dock */
-/* Hide orbital view on mobile, show dock */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .council-chamber #councilCircle {
     display: none !important;
   }
 
   .council-chamber .mobile-agent-dock {
-    display: block !important;
+    display: none !important;
   }
 
-  /* Conflicting legacy mobile styles removed */
+  /* Remove orbit navigation UI (dock-only controls) */
+  #headerNavLeft,
+  #headerNavRight {
+    display: none !important;
+  }
 
-  /* Show a 'tap to close' drag handle or indicator could be nice, but simple for now */
-  .mobile-agent-dock::after {
-    content: '';
-    position: absolute;
-    bottom: 2px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 40px;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+  /* Show the collapse/expand button on mobile for agent list toggle */
+  #collapseMobileListBtn {
+    display: flex !important;
+  }
+
+  /* Let the list be the primary "council" view on mobile */
+  .agent-list-panel {
+    max-height: none;
+    min-height: 0;
   }
 }
 
@@ -1828,6 +3134,8 @@ button:focus-visible {
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
+  /* Improve tap responsiveness on mobile */
+  touch-action: manipulation;
 }
 
 .dock-agent:hover {
@@ -1926,6 +3234,32 @@ button:focus-visible {
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
 }
 
+.dock-agent-status--away {
+  background: #94a3b8;
+  width: 8px;
+  height: 8px;
+  top: auto;
+  bottom: 0;
+  right: 0;
+  box-shadow: 0 0 4px rgba(148, 163, 184, 0.3);
+}
+
+.dock-agent-status--offline {
+  background: #334155;
+  border: 1px solid #64748b;
+  width: 8px;
+  height: 8px;
+  top: auto;
+  bottom: 0;
+  right: 0;
+  font-size: 6px;
+  line-height: 6px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Priority Ring Glow */
 .dock-agent--urgent .dock-agent-avatar {
   border-color: rgba(239, 68, 68, 0.7);
@@ -1969,6 +3303,28 @@ button:focus-visible {
 
 .dock-agent--selected .dock-agent-name {
   color: #38bdf8;
+}
+
+.dock-agent--loading .dock-agent-avatar {
+  border-color: rgba(56, 189, 248, 0.9);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3), 0 0 16px rgba(56, 189, 248, 0.55);
+  animation: dockLoadingPulse 1.1s ease-in-out infinite;
+}
+
+.dock-agent--loading .dock-agent-name {
+  color: #7dd3fc;
+}
+
+@keyframes dockLoadingPulse {
+  0%, 100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
 }
 
 /* Focused Agent (center but not selected) */
@@ -2137,16 +3493,86 @@ button:focus-visible {
 }
 
 /* Mobile-specific adjustments for the message panel */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
+  /* Prevent page-level scrolling on mobile - only chat area should scroll */
+  /* Scoped to dashboard pages only so landing page remains scrollable */
+  html:has(#dashboardRoot) {
+    overflow: hidden !important;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--vh, 100dvh);
+  }
+
+  body:has(#dashboardRoot) {
+    overflow: hidden !important;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--vh, 100dvh);
+    position: fixed;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  html.landing-page,
+  body.landing-page {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+    position: static !important;
+  }
+
+  body.landing-page {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    display: block;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: auto;
+  }
+
+  /* Compact nav on mobile */
+  nav {
+    padding: 0.25rem 0.5rem !important;
+  }
+
+  nav .glass-panel {
+    padding: 0.35rem 0.75rem !important;
+    border-radius: 0 !important;
+  }
+
+  /* Remove main padding on mobile - dashboard only */
+  body:has(#dashboardRoot) main {
+    padding: 0 !important;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: none !important;
+    transform: none !important;
+  }
+
   #dashboardRoot {
-    height: 100vh !important;
-    height: 100dvh !important;
-    /* Dynamic viewport height for mobile */
+    flex: 1 !important;
+    height: auto !important;
     min-height: 0;
     padding: 0 !important;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    gap: 0 !important;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  /* Override Tailwind space-y-6 on mobile */
+  #dashboardRoot > * + * {
+    margin-top: 0 !important;
   }
 
   #dashboardRoot>.grid {
@@ -2170,6 +3596,7 @@ button:focus-visible {
     border-left: none !important;
     border-right: none !important;
     border-top: none !important;
+    overflow: visible !important;
   }
 
   /* Hide the title header on mobile to save space */
@@ -2177,18 +3604,44 @@ button:focus-visible {
     display: none;
   }
 
-  /* Hide Quick Stats Bar on mobile */
-  .council-chamber .px-6.py-3.border-t {
+  /* Stats bar as toggle on mobile */
+  .council-chamber .px-6.py-3.border-t,
+  #mobileStatsToggle {
     display: block;
-    /* Show stats bar as toggle */
     cursor: pointer;
     position: relative;
     z-index: 20;
     background: rgba(15, 23, 42, 0.95);
+    padding: 0.45rem 0.75rem !important;
+    /* Improve tap responsiveness on mobile */
+    touch-action: manipulation;
+  }
+
+  #mobileStatsToggle .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
+  #mobileStatsToggle p:first-child {
+    font-size: 0.95rem !important;
+    line-height: 1.05 !important;
+  }
+
+  #mobileStatsToggle p:last-child {
+    font-size: 0.62rem !important;
+    line-height: 1.05 !important;
+    white-space: nowrap;
+  }
+
+  body.mobile-list-expanded #mobileStatsToggle {
+    padding-top: 0.55rem !important;
+    padding-bottom: 0.55rem !important;
   }
 
   /* Add visual indicator for toggle */
-  .council-chamber .px-6.py-3.border-t::after {
+  .council-chamber .px-6.py-3.border-t::after,
+  #mobileStatsToggle::after {
     content: '';
     position: absolute;
     top: 0;
@@ -2206,6 +3659,30 @@ button:focus-visible {
     display: none;
   }
 
+  #councilListResizeHandle {
+    display: none !important;
+  }
+
+  .council-list-section {
+    flex: 0 0 auto !important;
+    min-height: 0;
+    max-height: none;
+  }
+
+  #agentListPanel {
+    max-height: none;
+  }
+
+  /* Multi-chat container fills remaining vertical space on mobile */
+  #multiChatContainer {
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+
   /* Message panel - flex layout for proper scrolling */
   aside.glass-panel {
     flex: 1;
@@ -2216,6 +3693,27 @@ button:focus-visible {
     border-radius: 0 !important;
     border: none !important;
     overflow: hidden;
+  }
+
+  /* Chat tile fills container on mobile */
+  .chat-tile--main {
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-width: none !important;
+    width: 100% !important;
+    border-radius: 0 !important;
+    border: none !important;
+    animation: none !important;
+    box-shadow: none !important;
+  }
+
+  .chat-tile--main:hover {
+    transform: none !important;
+  }
+
+  .chat-tile--main::before {
+    display: none !important;
   }
 
   /* Agent header - compact */
@@ -2239,40 +3737,680 @@ button:focus-visible {
     min-height: 0;
   }
 
-  /* Conversation area - scrollable, takes remaining space */
+  /* Conversation area - scrollable and fills remaining space. */
   #conversationArea {
-    flex: 1 1 auto;
+    flex: 1;
     min-height: 0;
-    overflow-y: auto;
+    overflow-y: auto !important;
+    overflow-x: hidden;
     padding: 0.75rem !important;
+    /* Reserve the real composer height plus extra runway so bottom overscroll reveals the footer */
+    padding-bottom: calc(var(--mobile-composer-height, 90px) + var(--mobile-composer-scroll-buffer, 3.5rem) + env(safe-area-inset-bottom, 0px)) !important;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    max-height: none;
+    scrollbar-gutter: stable;
+    scroll-padding-bottom: calc(var(--mobile-composer-height, 90px) + env(safe-area-inset-bottom, 0px));
+    overflow-anchor: none;
   }
 
-  /* Message input - fixed at bottom, always visible */
+  #scrollToBottomBtn {
+    position: absolute !important;
+    right: max(1rem, env(safe-area-inset-right, 0px)) !important;
+    bottom: calc(var(--mobile-composer-height, 110px) + 0.85rem) !important;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-width: 2.75rem !important;
+    min-height: 2.75rem !important;
+    z-index: 130 !important;
+    touch-action: manipulation;
+  }
+
+  body.dashboard-fast-mode .council-chamber {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: 42vh !important;
+  }
+
+  /* Remove the large desktop bottom padding (input is absolute on mobile) */
+  #conversationArea.pb-48 {
+    padding-bottom: calc(var(--mobile-composer-height, 90px) + var(--mobile-composer-scroll-buffer, 3.5rem) + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Message input - anchor to the bottom of the viewport-constrained chat tile.
+     Avoid position: fixed here: the glass/animation layers can create containing
+     blocks on mobile Chromium and push a fixed child below the visible screen. */
   #messageInputArea {
-    flex: 0 0 auto;
-    position: relative;
-    z-index: 50;
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 120 !important;
     background: rgba(2, 6, 23, 0.98) !important;
-    backdrop-filter: blur(10px);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 0.5rem 0.75rem !important;
-    margin-top: auto;
+    padding: 0.3rem 0.75rem 0.5rem !important;
+    padding-bottom: var(--mobile-composer-bottom-gap) !important;
+    box-sizing: border-box;
+    max-height: min(48vh, calc(var(--vh, 100dvh) - 3.5rem));
+    overflow-y: visible;
+    overflow-x: visible;
+    overscroll-behavior: contain;
+    box-shadow: 0 -16px 34px rgba(2, 6, 23, 0.42);
+    transform: none !important;
+  }
+
+  #messageInputArea .mobile-agent-status-strip {
+    display: flex !important;
+    position: relative;
+    width: 100%;
+    margin: 0;
+    z-index: 125;
+    align-items: center;
+    gap: 0.35rem;
+    box-sizing: border-box;
+    min-height: 1.45rem;
+    max-height: 1.6rem;
+    padding: 0.18rem 0.45rem;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 0.65rem;
+    background: rgba(15, 23, 42, 0.9);
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+    backdrop-filter: blur(14px);
+    color: rgb(203, 213, 225);
+    font-size: 0.625rem;
+    line-height: 1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  #messageInputArea .mobile-agent-status-strip.hidden {
+    display: none !important;
+  }
+
+  #messageInputArea .mobile-agent-status-strip__item {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0.18rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #messageInputArea .mobile-agent-status-strip__item--strong {
+    color: rgb(110, 231, 183);
+    font-weight: 600;
+  }
+
+  #messageInputArea .mobile-agent-status-strip__item span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #messageInputArea .mobile-agent-status-strip__label {
+    color: rgb(100, 116, 139);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    flex: 0 0 auto;
+  }
+
+  #messageInputArea #userMessageForm {
+    display: grid !important;
+    grid-template-columns: 2.0625rem 2.0625rem 2.0625rem 2.0625rem minmax(0, 1fr) 2.25rem;
+    grid-template-rows: minmax(4.75rem, auto) 2.5rem;
+    column-gap: 0.3rem;
+    row-gap: 0;
+    position: relative;
+    align-items: end;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #messageInputArea #userMessageForm>* {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  #messageInputArea #imagePreviewArea {
+    grid-column: 1 / -1;
+  }
+
+  #messageInputArea #imagePreviewArea:not(.hidden) {
+    grid-row: 1;
+  }
+
+  #messageInputArea #imagePreviewArea:not(.hidden)~.relative textarea {
+    grid-row: 2 / 4;
+  }
+
+  #messageInputArea #imagePreviewArea:not(.hidden)~.relative #generalFileUploadLabel,
+  #messageInputArea #imagePreviewArea:not(.hidden)~.relative #imageUploadLabel,
+  #messageInputArea #imagePreviewArea:not(.hidden)~.composer-action-row #agentConfigContainer,
+  #messageInputArea #imagePreviewArea:not(.hidden)~.composer-action-row #agentStopBtn,
+  #messageInputArea #imagePreviewArea:not(.hidden)~.composer-action-row #userMessageSend {
+    grid-row: 3;
+  }
+
+  #messageInputArea.message-input--config-open {
+    overflow: visible;
+  }
+
+  /* Force input visible on mobile when an agent is selected.
+     The body gets data-agent-selected="true" from JS whenever an agent is active.
+     This overrides the Tailwind 'hidden' class which sets display:none. */
+  body[data-agent-selected="true"]:not([data-all-chats-view="true"]) #messageInputArea,
+  body[data-agent-selected="true"]:not([data-all-chats-view="true"]) #messageInputArea.hidden {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+  }
+
+  #messageInputArea #userMessageForm>.relative {
+    display: contents;
+  }
+
+  #messageInputArea .composer-action-row {
+    display: contents !important;
+  }
+
+  #messageInputArea .composer-action-row>p,
+  #messageInputArea .flex.justify-between>p {
+    display: none !important;
+  }
+
+  #messageInputArea .composer-action-row>.composer-controls,
+  #messageInputArea .flex.justify-between>div {
+    display: contents !important;
+  }
+
+  #messageInputArea .composer-controls,
+  #messageInputArea .flex.justify-between>div.flex.items-center {
+    display: contents !important;
+  }
+
+  #userMessageSend {
+    white-space: nowrap;
+  }
+
+  #messageInputArea #agentConfigContainer {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    max-width: none;
+    min-width: 0;
+    width: 2.0625rem;
+    height: 2.0625rem;
+    margin-bottom: 0.56rem;
+    margin-left: 0.5rem;
+    align-self: end;
+    justify-self: start;
+    z-index: 4;
+  }
+
+  #messageInputArea #agentConfigBtn {
+    display: flex !important;
+    align-items: center;
+    width: 2.0625rem;
+    justify-content: center;
+    min-height: 2.0625rem;
+    height: 2.0625rem;
+    padding: 0;
+    border-radius: 0.75rem;
+  }
+
+  #messageInputArea #agentConfigBtn #configStatusProvider,
+  #messageInputArea #agentConfigBtn #configStatusMode,
+  #messageInputArea #agentConfigBtn .w-px,
+  #messageInputArea #agentConfigBtn .text-slate-600,
+  #messageInputArea #agentConfigBtn div:first-child {
+    display: none !important;
+  }
+
+  #messageInputArea #agentConfigDropdown {
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(var(--mobile-composer-height, 90px) + 0.5rem);
+    width: auto;
+    max-width: none;
+    max-height: min(58vh, calc(var(--vh, 100dvh) - var(--mobile-composer-height, 90px) - 4rem));
+    overflow-y: auto;
+    margin-bottom: 0;
+    border-radius: 1rem;
+    z-index: 140;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #userMessageForm {
+    grid-template-columns: 2.0625rem 2.0625rem 2.0625rem minmax(0, 1fr) 2.25rem;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #agentStopBtn {
+    grid-column: 1;
+    margin-left: 0.5rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #generalFileUploadLabel {
+    grid-column: 2;
+    margin-left: 0.25rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #imageUploadLabel {
+    grid-column: 3;
+    margin-left: 0.1rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #userMessageSend {
+    grid-column: 5;
+  }
+
+  #messageInputArea #agentStopBtn,
+  #messageInputArea #userMessageSend {
+    display: flex !important;
+    align-items: center;
+    flex: none;
+    justify-content: center;
+    width: 2rem;
+    min-height: 2.0625rem;
+    height: 2.0625rem;
+    margin-bottom: 0.56rem;
+    padding: 0;
+    border-radius: 0.75rem;
+    align-self: end;
+    justify-self: center;
+    z-index: 4;
+  }
+
+  #messageInputArea #agentStopBtn {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0.32rem;
+    justify-self: start;
+  }
+
+  #messageInputArea #agentStopBtn span {
+    display: none !important;
+  }
+
+  #messageInputArea #userMessageSend {
+    grid-column: 6;
+    grid-row: 2;
+    margin-right: 0.45rem;
+    justify-self: end;
+  }
+
+  #messageInputArea #userMessageSend .send-label {
+    display: none;
+  }
+
+  #messageInputArea #userMessageSend .send-spaceship-icon {
+    width: 1.08rem;
+    height: 1.08rem;
   }
 
   #messageInputArea textarea {
-    min-height: 36px;
-    max-height: 60px;
+    grid-column: 1 / -1;
+    grid-row: 1 / 3;
+    min-height: 5.5rem;
+    height: 5.5rem;
+    max-height: 5.5rem;
+    padding: 0.75rem 0.75rem 3.25rem 0.75rem !important;
     resize: none;
   }
 
-  #messageInputArea .flex.justify-between {
-    margin-top: 0.25rem;
+  #messageInputArea #generalFileUploadLabel,
+  #messageInputArea #imageUploadLabel {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    position: relative !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 2.0625rem;
+    height: 2.0625rem;
+    margin-bottom: 0.56rem;
+    border-radius: 0.75rem;
+    align-self: end;
+    justify-self: start;
+    z-index: 4;
+  }
+
+  #messageInputArea #generalFileUploadLabel {
+    grid-column: 3;
+    grid-row: 2;
+    margin-left: 0.14rem;
+  }
+
+  #messageInputArea #imageUploadLabel {
+    grid-column: 4;
+    grid-row: 2;
+    margin-left: 0;
+  }
+
+  /* Compact mobile header */
+  #mobileHeader {
+    padding: 0.35rem 0.6rem !important;
+    position: relative;
+  }
+
+  #mobileHeader .council-header-title {
+    display: none !important;
+  }
+
+  /* Mobile header buttons: wrap and make touch-friendly */
+  #mobileHeader .flex.gap-2 {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  #mobileHeader .flex.gap-2 button,
+  #mobileHeader .flex.gap-2 a {
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.65rem !important;
+  }
+
+  #mobileHeader .mobile-council-actions-toggle {
+    display: flex !important;
+    flex: 0 0 2rem;
+    padding: 0 !important;
+  }
+
+  #mobileHeader .council-header-actions {
+    display: none !important;
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0.6rem;
+    z-index: 160;
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 11.5rem;
+    padding: 0.45rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 0.9rem;
+    background: rgba(15, 23, 42, 0.98);
+    box-shadow: 0 18px 34px rgba(2, 6, 23, 0.45);
+    backdrop-filter: blur(16px);
+  }
+
+  body.mobile-council-actions-open #mobileHeader .council-header-actions {
+    display: flex !important;
+  }
+
+  #mobileHeader .mobile-group-management-action {
+    display: flex !important;
+  }
+
+  #mobileHeader .council-header-actions button,
+  #mobileHeader .council-header-actions a {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0.5rem 0.65rem !important;
+    border-radius: 0.7rem !important;
   }
 
   /* Hide "Press Ctrl+Enter" hint on mobile */
   #messageInputArea p.text-\[10px\] {
     display: none;
+  }
+
+  /* Interactive space should be collapsible on mobile */
+  #mainInteractiveSpace {
+    flex: 0 0 auto !important;
+    max-height: 30vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  #mainInteractiveContent {
+    max-height: 25vh !important;
+    min-height: 0;
+  }
+
+  /* Hide feedback widget on mobile to save space */
+  .feedback-widget {
+    display: none;
+  }
+
+  /* Compact nav on mobile - hide non-essential items */
+  nav p.text-sm {
+    font-size: 0.7rem !important;
+  }
+
+  /* Hide signed-in-as label, feedback button on small screens */
+  nav .mobile-nav-actions-menu > span:first-child {
+    display: none !important;
+  }
+
+  /* Hide group back button on mobile (not needed in mobile layout) */
+  #groupBackBtn {
+    display: none !important;
+  }
+
+  nav #feedbackTriggerBtn {
+    display: none !important;
+  }
+
+  /* Make nav logo smaller */
+  nav svg.w-12 {
+    width: 1.75rem !important;
+    height: 1.75rem !important;
+  }
+
+  nav .nav-right-buttons {
+    position: relative;
+    gap: 0.25rem !important;
+    font-size: 0.65rem;
+    overflow: visible !important;
+  }
+
+  /* Smaller nav buttons */
+  nav .nav-right-buttons a,
+  nav .nav-right-buttons button {
+    padding: 0.2rem 0.5rem !important;
+    font-size: 0.6rem !important;
+  }
+
+  nav .nav-right-buttons button.mobile-nav-actions-toggle,
+  nav .mobile-nav-actions-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.6rem !important;
+    min-width: 2.6rem !important;
+    padding: 0.55rem 0.7rem !important;
+    font-size: 0.72rem !important;
+    line-height: 1;
+    border-color: rgba(34, 211, 238, 0.55) !important;
+    background: rgba(15, 23, 42, 0.55);
+    color: #e2e8f0;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(34, 211, 238, 0.35);
+    position: relative;
+    z-index: 5;
+  }
+
+  nav .mobile-nav-actions-toggle .mobile-nav-actions-toggle__icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    flex-shrink: 0;
+  }
+
+  nav .mobile-nav-actions-toggle .mobile-nav-actions-toggle__label {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  nav .nav-right-buttons > :not(#mobileNavActionsToggle):not(#mobileNavActionsMenu):not(.fast-mode-nav-cluster) {
+    display: none !important;
+  }
+
+  nav .mobile-nav-actions-menu {
+    display: none !important;
+  }
+
+  /* Fast mobile mode: re-expose the urgent/attention indicators and the
+     council 3-dots button that we inject into the top nav row. */
+  body.dashboard-fast-mode nav .nav-right-buttons > .fast-mode-nav-cluster {
+    display: inline-flex !important;
+  }
+
+  /* When the mobile menu is open, lift the entire nav header above the
+     #main content so the dropdown is not painted behind sibling sections.
+     The dropdown itself is position: fixed with z-index: 210, but because
+     .glass-panel uses backdrop-filter it creates a containing block AND
+     a stacking context that the fixed menu cannot escape. Without these
+     overrides, <main> (later in document order) paints over the menu. */
+  body.mobile-nav-actions-open nav {
+    position: relative;
+    z-index: 1000;
+  }
+
+  body.mobile-nav-actions-open nav .glass-panel {
+    z-index: 1000;
+    overflow: visible !important;
+  }
+
+  body.mobile-nav-actions-open nav .nav-right-buttons {
+    position: relative;
+    z-index: 1010;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    max-width: min(100%, 16rem);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu {
+    display: flex !important;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
+    right: 0.75rem;
+    z-index: 1100;
+    width: min(18rem, calc(100vw - 1.5rem));
+    max-height: min(62vh, 24rem);
+    overflow-y: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    padding: 0.6rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+    box-shadow: 0 20px 44px rgba(2, 6, 23, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    pointer-events: auto;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu::before {
+    content: '';
+    position: absolute;
+    top: -0.38rem;
+    right: 1.35rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    transform: rotate(45deg);
+    border-top: 1px solid rgba(148, 163, 184, 0.24);
+    border-left: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(15, 23, 42, 0.98);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #mobileFastModeToggle,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    display: flex !important;
+    justify-content: center;
+    width: 100%;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #mobileFastModeToggle {
+    order: 1;
+    width: 100%;
+    min-height: 2.65rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    padding: 0.55rem 0.65rem 0.55rem 0.75rem !important;
+    border-radius: 0.8rem;
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: rgba(16, 185, 129, 0.1);
+    color: #a7f3d0;
+    touch-action: manipulation;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper {
+    order: 2;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    order: 3;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper a,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    width: 100%;
+    min-height: 2.45rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.8rem;
+    font-size: 0.78rem !important;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper a {
+    display: inline-flex;
+    color: #e2e8f0;
+    background: rgba(30, 41, 59, 0.72);
+    border-color: rgba(148, 163, 184, 0.24);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    color: #fca5a5;
+    background: rgba(127, 29, 29, 0.12);
+    border-color: rgba(248, 113, 113, 0.28);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > span:first-child {
+    display: none !important;
+  }
+
+  body.dashboard-fast-mode.mobile-nav-actions-open #mobileHeader .council-header-actions {
+    display: flex !important;
+    position: fixed !important;
+    top: calc(env(safe-area-inset-top, 0px) + 13.35rem) !important;
+    right: 0.75rem !important;
+    left: auto !important;
+    z-index: 220 !important;
+    width: min(18rem, calc(100vw - 1.5rem));
+    padding: 0.6rem !important;
+    border-radius: 1rem !important;
+    background: rgba(15, 23, 42, 0.98) !important;
+    box-shadow: 0 18px 34px rgba(2, 6, 23, 0.45);
+  }
+
+  body.dashboard-fast-mode.mobile-nav-actions-open #mobileHeader .council-header-actions::before {
+    content: 'Agent actions';
+    display: block;
+    width: 100%;
+    padding: 0 0.15rem 0.2rem;
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #94a3b8;
   }
 }
 
@@ -2281,13 +4419,51 @@ button:focus-visible {
    ===================================================== */
 
 /* Container for the agent list */
+.council-list-section {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--council-list-height, 300px);
+  min-height: 220px;
+  max-height: none;
+}
+
+@media (max-width: 767px) {
+  .council-list-section {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+}
+
+.council-chamber.council-chamber--orbit-collapsed #councilCircle {
+  flex: 0 1 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.council-chamber.council-chamber--orbit-collapsed #councilCircle .absolute.bottom-4,
+.council-chamber.council-chamber--orbit-collapsed .council-orbit {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.council-chamber.council-chamber--orbit-collapsed #councilListSection {
+  min-height: 0;
+}
+
 .agent-list-panel {
   display: flex;
   flex-direction: column;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(0, 0, 0, 0.2);
-  max-height: 480px;
-  min-height: 220px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -2302,7 +4478,7 @@ button:focus-visible {
   box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15), inset 0 0 20px rgba(251, 191, 36, 0.05);
 }
 
-.glass-panel--focused {
+.glass-panel--focused:not(.chat-tile--main) {
   border-color: rgba(56, 189, 248, 0.5) !important;
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15), inset 0 0 20px rgba(56, 189, 248, 0.05);
 }
@@ -2312,8 +4488,14 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
   padding: 0.35rem 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.agent-list-header__meta {
+  min-width: 0;
 }
 
 .agent-list-title {
@@ -2333,12 +4515,312 @@ button:focus-visible {
   border-radius: 999px;
 }
 
+.agent-list-search {
+  flex: 1 1 220px;
+  display: flex;
+  justify-content: flex-end;
+  min-width: min(220px, 100%);
+}
+
+.agent-list-search__input {
+  width: min(100%, 280px);
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.94);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  padding: 0.48rem 0.85rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.agent-list-search__input::placeholder {
+  color: rgba(148, 163, 184, 0.62);
+}
+
+.agent-list-search__input:focus {
+  outline: none;
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.agent-list-empty {
+  padding: 1rem;
+  color: rgba(148, 163, 184, 0.8);
+  text-align: center;
+}
+
+.agent-list-empty p {
+  margin: 0;
+}
+
 #collapseMobileListBtn {
   z-index: 50;
   cursor: pointer;
   pointer-events: auto !important;
+  /* Improve tap responsiveness on mobile */
+  touch-action: manipulation;
   /* Visual rotation feedback */
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Mobile-specific: make agent list toggles prominent across the full mobile shell. */
+@media (max-width: 1023px), (pointer: coarse) and (max-width: 1180px) {
+  nav .nav-right-buttons {
+    position: relative;
+    gap: 0.25rem !important;
+    font-size: 0.65rem;
+    overflow: visible !important;
+  }
+
+  nav .nav-right-buttons a,
+  nav .nav-right-buttons button {
+    padding: 0.2rem 0.5rem !important;
+    font-size: 0.6rem !important;
+  }
+
+  nav .nav-right-buttons button.mobile-nav-actions-toggle,
+  nav .mobile-nav-actions-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2.6rem !important;
+    min-width: 2.6rem !important;
+    padding: 0.55rem 0.7rem !important;
+    font-size: 0.72rem !important;
+    line-height: 1;
+    border-color: rgba(34, 211, 238, 0.55) !important;
+    background: rgba(15, 23, 42, 0.55);
+    color: #e2e8f0;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(34, 211, 238, 0.35);
+    position: relative;
+    z-index: 5;
+  }
+
+  nav .mobile-nav-actions-toggle .mobile-nav-actions-toggle__icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    flex-shrink: 0;
+  }
+
+  nav .mobile-nav-actions-toggle .mobile-nav-actions-toggle__label {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  nav .nav-right-buttons > :not(#mobileNavActionsToggle):not(#mobileNavActionsMenu):not(.fast-mode-nav-cluster) {
+    display: none !important;
+  }
+
+  nav .mobile-nav-actions-menu {
+    display: none !important;
+  }
+
+  body.dashboard-fast-mode nav .nav-right-buttons > .fast-mode-nav-cluster {
+    display: inline-flex !important;
+  }
+
+  /* See the matching block above (line ~4095) for why these z-index lifts
+     are required: .glass-panel's backdrop-filter traps the fixed menu in a
+     nested stacking context that <main> would otherwise paint over. */
+  body.mobile-nav-actions-open nav {
+    position: relative;
+    z-index: 1000;
+  }
+
+  body.mobile-nav-actions-open nav .glass-panel {
+    z-index: 1000;
+    overflow: visible !important;
+  }
+
+  body.mobile-nav-actions-open nav .nav-right-buttons {
+    position: relative;
+    z-index: 1010;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    max-width: min(100%, 16rem);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu {
+    display: flex !important;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
+    right: 0.75rem;
+    z-index: 1100;
+    width: min(18rem, calc(100vw - 1.5rem));
+    max-height: min(62vh, 24rem);
+    overflow-y: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
+    padding: 0.6rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+    box-shadow: 0 20px 44px rgba(2, 6, 23, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    pointer-events: auto;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu::before {
+    content: '';
+    position: absolute;
+    top: -0.38rem;
+    right: 1.35rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    transform: rotate(45deg);
+    border-top: 1px solid rgba(148, 163, 184, 0.24);
+    border-left: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(15, 23, 42, 0.98);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #mobileFastModeToggle,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    display: flex !important;
+    justify-content: center;
+    width: 100%;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #mobileFastModeToggle {
+    order: 1;
+    width: 100%;
+    min-height: 2.65rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    padding: 0.55rem 0.65rem 0.55rem 0.75rem !important;
+    border-radius: 0.8rem;
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: rgba(16, 185, 129, 0.1);
+    color: #a7f3d0;
+    touch-action: manipulation;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper {
+    order: 2;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    order: 3;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper a,
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    width: 100%;
+    min-height: 2.45rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.8rem;
+    font-size: 0.78rem !important;
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #settingsButtonWrapper a {
+    display: inline-flex;
+    color: #e2e8f0;
+    background: rgba(30, 41, 59, 0.72);
+    border-color: rgba(148, 163, 184, 0.24);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > #navLogoutLink {
+    color: #fca5a5;
+    background: rgba(127, 29, 29, 0.12);
+    border-color: rgba(248, 113, 113, 0.28);
+  }
+
+  body.mobile-nav-actions-open nav .mobile-nav-actions-menu > span:first-child {
+    display: none !important;
+  }
+
+  body.dashboard-fast-mode.mobile-nav-actions-open #mobileHeader .council-header-actions {
+    display: flex !important;
+    position: fixed !important;
+    top: calc(env(safe-area-inset-top, 0px) + 13.35rem) !important;
+    right: 0.75rem !important;
+    left: auto !important;
+    z-index: 220 !important;
+    width: min(18rem, calc(100vw - 1.5rem));
+    padding: 0.6rem !important;
+    border-radius: 1rem !important;
+    background: rgba(15, 23, 42, 0.98) !important;
+    box-shadow: 0 18px 34px rgba(2, 6, 23, 0.45);
+  }
+
+  #collapseMobileListBtn {
+    width: 2.45rem;
+    height: 2.45rem;
+    min-width: 2.45rem;
+    min-height: 2.45rem;
+    background:
+      radial-gradient(circle at 35% 28%, rgba(110, 231, 183, 0.28), transparent 45%),
+      rgba(15, 23, 42, 0.92) !important;
+    border: 1px solid rgba(52, 211, 153, 0.56) !important;
+    color: #bbf7d0 !important;
+    position: relative;
+    box-shadow: 0 8px 22px rgba(16, 185, 129, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  #collapseMobileListBtn svg {
+    width: 1.18rem;
+    height: 1.18rem;
+    stroke-width: 2.5;
+  }
+
+  /* Pulsing hint animation on first load */
+  #collapseMobileListBtn::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 1px solid rgba(52, 211, 153, 0.5);
+    animation: mobileListHint 2s ease-in-out 3;
+    pointer-events: none;
+  }
+
+  @keyframes mobileListHint {
+    0%, 100% { opacity: 0; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+
+  /* Label next to button on mobile */
+  #collapseMobileListBtn[data-mobile-label]::before {
+    content: attr(data-mobile-label);
+    position: absolute;
+    left: calc(100% + 6px);
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: rgba(187, 247, 208, 0.92);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: mobileListHint 2s ease-in-out 3;
+  }
+
+  .fast-mode-chat-list-toggle {
+    width: 2.5rem;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+
+  .fast-mode-chat-list-toggle svg {
+    width: 1.22rem;
+    height: 1.22rem;
+  }
 }
 
 body.mobile-list-expanded #collapseMobileListBtn svg {
@@ -2356,6 +4838,10 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0.25rem;
+  /* Smooth scrolling on iOS, allow vertical pan within the list */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .agent-list-scroll::-webkit-scrollbar {
@@ -2378,6 +4864,8 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   transition: all 0.2s ease;
   border: 1px solid transparent;
   margin-bottom: 2px;
+  /* Improve tap responsiveness on mobile - prevents 300ms delay and scroll/tap confusion */
+  touch-action: manipulation;
 }
 
 .agent-list-item:hover {
@@ -2394,6 +4882,80 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   background: rgba(251, 191, 36, 0.1);
   border-color: rgba(251, 191, 36, 0.4);
   outline: none;
+}
+
+/* Loading state when opening a chat */
+.agent-list-item--loading {
+  background: rgba(56, 189, 248, 0.12) !important;
+  border-color: rgba(56, 189, 248, 0.3) !important;
+  animation: agentListItemPulse 1.2s ease-in-out infinite;
+  position: relative;
+}
+
+.agent-list-item--loading .agent-list-item__arrow {
+  display: none;
+}
+
+.agent-list-item--loading .agent-list-item__status {
+  visibility: hidden;
+}
+
+.agent-list-item--loading::after {
+  content: 'Loading…';
+  font-size: 0.65rem;
+  color: rgba(56, 189, 248, 0.9);
+  letter-spacing: 0.04em;
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@keyframes agentListItemPulse {
+  0%, 100% { background: rgba(56, 189, 248, 0.08) !important; }
+  50% { background: rgba(56, 189, 248, 0.18) !important; }
+}
+
+/* Loading overlay in the conversation area */
+.conversation-loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1rem;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.85rem;
+}
+.conversation-loading-overlay__spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid rgba(56, 189, 248, 0.2);
+  border-top-color: rgba(56, 189, 248, 0.8);
+  border-radius: 50%;
+  animation: convLoadSpin 0.8s linear infinite;
+}
+@keyframes convLoadSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Load-more banner at top of conversation */
+.load-more-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0;
+  gap: 0.5rem;
+  color: rgba(148, 163, 184, 0.7);
+  font-size: 0.75rem;
+}
+.load-more-banner__spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid rgba(56, 189, 248, 0.2);
+  border-top-color: rgba(56, 189, 248, 0.7);
+  border-radius: 50%;
+  animation: convLoadSpin 0.7s linear infinite;
 }
 
 /* Avatar container */
@@ -2487,6 +5049,29 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   background: #10b981;
 }
 
+.agent-list-item__badge--working {
+  width: 0.5rem;
+  height: 0.5rem;
+  min-width: 0.5rem;
+  background: #fbbf24;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.agent-list-item__badge--away {
+  width: 0.5rem;
+  height: 0.5rem;
+  min-width: 0.5rem;
+  background: #94a3b8;
+}
+
+.agent-list-item__badge--offline {
+  width: 0.5rem;
+  height: 0.5rem;
+  min-width: 0.5rem;
+  background: #475569;
+  border: 1px solid #64748b;
+}
+
 /* Arrow indicator */
 .agent-list-item__arrow {
   flex-shrink: 0;
@@ -2531,7 +5116,7 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 /* Reduce orbit size to make room for the list */
 #councilCircle {
   flex: 1;
-  min-height: 360px;
+  min-height: var(--council-orbit-container-min, 360px);
   max-height: 70vh;
   overflow: hidden;
   /* Prevent orbit from spilling onto list */
@@ -2539,26 +5124,62 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 }
 
 /* Hide agent list panel on very small screens, make collapsible */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .agent-list-panel {
     display: flex;
+    flex-direction: column;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 60;
+    background: rgba(2, 6, 23, 0.98);
+    backdrop-filter: blur(12px);
     max-height: 0;
     min-height: 0;
     opacity: 0;
     overflow: hidden;
+    /* Prevent touch interception when collapsed */
+    pointer-events: none;
     padding: 0;
-    /* No padding when collapsed */
     border-top: none;
-    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.35s ease;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Council chamber needs relative positioning for the overlay */
+  .council-chamber {
+    position: relative;
+    z-index: 50;
   }
 
   .agent-list-panel.mobile-expanded {
-    max-height: 50vh;
-    /* Part of the way */
+    max-height: min(52vh, calc(var(--vh, 100dvh) - var(--mobile-composer-height, 92px) - 7rem));
+    min-height: 120px;
+    height: min(52vh, calc(var(--vh, 100dvh) - var(--mobile-composer-height, 92px) - 7rem));
     opacity: 1;
+    /* Re-enable interactions when visible */
+    pointer-events: auto;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
-    padding-bottom: 1rem;
+    padding-bottom: 0;
+    padding-top: 0;
+    /* Use hidden so only inner agent-list-scroll handles scrolling, avoiding double-scroll */
+    overflow: hidden;
+  }
+
+  /* When expanded, give padding to inner header only, not the panel itself */
+  .agent-list-panel.mobile-expanded .agent-list-header {
     padding-top: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  /* Ensure the scroll container fills the remaining space in expanded panel */
+  .agent-list-panel.mobile-expanded .agent-list-scroll {
+    flex: 1;
+    min-height: 0;
+    padding-bottom: 1rem;
   }
 
   /* Chevron rotation */
@@ -2664,10 +5285,25 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   transform: scale(1.05);
 }
 
-.image-preview-item img {
+.image-preview-item img,
+.image-preview-item video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.video-preview-item::before {
+  content: 'VIDEO';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  z-index: 2;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(2, 6, 23, 0.72);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 8px;
+  font-weight: 700;
 }
 
 /* Remove button */
@@ -2926,6 +5562,58 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   object-fit: contain;
   cursor: pointer;
   background: rgba(0, 0, 0, 0.2);
+}
+
+.message-attachment-video {
+  display: block;
+  width: min(300px, 100%);
+  max-height: 220px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.message-attachment-file {
+  min-width: 200px;
+  max-width: 300px;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  background:
+    linear-gradient(180deg, rgba(14, 165, 233, 0.14), rgba(15, 23, 42, 0.55)),
+    rgba(2, 6, 23, 0.75);
+}
+
+.message-attachment-file-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: #7dd3fc;
+}
+
+.message-attachment-file-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.message-attachment-file-ext {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e0f2fe;
+}
+
+.message-attachment-file-type {
+  max-width: 100%;
+  font-size: 0.63rem;
+  color: rgba(224, 242, 254, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Attachment info bar below image */
@@ -3602,6 +6290,7 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   display: inline-flex;
   animation: fadeIn 0.3s ease-out forwards;
 }
+
 /* =========================================
    Unified Notification System Styles
    ========================================= */
@@ -3614,7 +6303,8 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  pointer-events: none; /* Let clicks pass through if not on toast */
+  pointer-events: none;
+  /* Let clicks pass through if not on toast */
   width: auto;
   max-width: 90vw;
 }
@@ -3632,26 +6322,31 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   pointer-events: auto;
   min-width: 300px;
   max-width: 400px;
-  background: rgba(15, 23, 42, 0.95); /* Deep slate */
+  background: rgba(15, 23, 42, 0.95);
+  /* Deep slate */
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-left-width: 4px; /* Color indicator */
-  border-radius: 1rem; /* Matching the theme rounded-xl look */
+  border-left-width: 4px;
+  /* Color indicator */
+  border-radius: 1rem;
+  /* Matching the theme rounded-xl look */
   padding: 1rem 1.25rem;
-  box-shadow: 
-    0 20px 25px -5px rgba(0, 0, 0, 0.5), 
-    0 8px 10px -6px rgba(0, 0, 0, 0.5); /* Deep shadow */
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.5),
+    0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  /* Deep shadow */
   color: #f8fafc;
   font-family: Inter, sans-serif;
   display: flex;
   align-items: flex-start;
   gap: 1rem;
-  
+
   /* Animation Start State */
   transform: translateX(100%) scale(0.95);
   opacity: 0;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); /* Spring-like pop */
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Spring-like pop */
 }
 
 @media (max-width: 640px) {
@@ -3695,7 +6390,8 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 /* Content */
 .toast-content {
   flex: 1;
-  min-width: 0; /* Text truncation fix */
+  min-width: 0;
+  /* Text truncation fix */
 }
 
 .toast-title {
@@ -3707,7 +6403,8 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 }
 
 .toast-message {
-  color: #cbd5e1; /* slate-300 */
+  color: #cbd5e1;
+  /* slate-300 */
   font-size: 0.875rem;
   line-height: 1.5;
   word-wrap: break-word;
@@ -3761,44 +6458,80 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 
 /* Success */
 .toast-success {
-  border-left-color: #10b981; /* Emerald 500 */
+  border-left-color: #10b981;
+  /* Emerald 500 */
   background: linear-gradient(145deg, rgba(6, 78, 59, 0.4), rgba(15, 23, 42, 0.95));
 }
-.toast-success .toast-icon { color: #34d399; }
-.toast-success .toast-title { color: #34d399; }
-.toast-success .toast-action-btn { color: #34d399; border-color: rgba(52, 211, 153, 0.3); }
+
+.toast-success .toast-icon {
+  color: #34d399;
+}
+
+.toast-success .toast-title {
+  color: #34d399;
+}
+
+.toast-success .toast-action-btn {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
 
 /* Error */
 .toast-error {
-  border-left-color: #ef4444; /* Red 500 */
+  border-left-color: #ef4444;
+  /* Red 500 */
   background: linear-gradient(145deg, rgba(127, 29, 29, 0.4), rgba(15, 23, 42, 0.95));
 }
-.toast-error .toast-icon { color: #f87171; }
-.toast-error .toast-title { color: #f87171; }
-.toast-error .toast-action-btn { color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
+
+.toast-error .toast-icon {
+  color: #f87171;
+}
+
+.toast-error .toast-title {
+  color: #f87171;
+}
+
+.toast-error .toast-action-btn {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
 
 /* Warning */
 .toast-warning {
-  border-left-color: #f59e0b; /* Amber 500 */
+  border-left-color: #f59e0b;
+  /* Amber 500 */
   background: linear-gradient(145deg, rgba(120, 53, 15, 0.4), rgba(15, 23, 42, 0.95));
 }
-.toast-warning .toast-icon { color: #fbbf24; }
-.toast-warning .toast-title { color: #fbbf24; }
+
+.toast-warning .toast-icon {
+  color: #fbbf24;
+}
+
+.toast-warning .toast-title {
+  color: #fbbf24;
+}
 
 /* Info */
 .toast-info {
-  border-left-color: #3b82f6; /* Blue 500 */
+  border-left-color: #3b82f6;
+  /* Blue 500 */
   background: linear-gradient(145deg, rgba(30, 58, 138, 0.4), rgba(15, 23, 42, 0.95));
 }
-.toast-info .toast-icon { color: #60a5fa; }
-.toast-info .toast-title { color: #60a5fa; }
+
+.toast-info .toast-icon {
+  color: #60a5fa;
+}
+
+.toast-info .toast-title {
+  color: #60a5fa;
+}
 
 /* ==================== Navigation Bar Morphing ==================== */
 
 /* Settings button wrapper - enable smooth layout transitions */
 #settingsButtonWrapper {
   transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-              flex 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    flex 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: inline-flex;
   align-items: center;
 }
@@ -3855,7 +6588,45 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 
 /* Navigation stays smooth during page transitions */
 nav {
-  transition: all 0.3s ease;
+  transition: all 0.3s ease, transform 0.3s ease;
+  position: relative;
+  z-index: 2;
+  /* Keep nav above body::before overlay */
+}
+
+/* Mobile chrome stays stable while scrolling. Scroll-driven collapse caused
+   hidden controls and layout jumps in mobile browsers. */
+@media (max-width: 767px) {
+  nav {
+    transition: max-height 0.28s ease, transform 0.28s ease, opacity 0.22s ease, margin 0.28s ease;
+    opacity: 1;
+    max-height: 120px;
+    overflow: hidden;
+    will-change: transform, opacity, max-height;
+  }
+
+  body.mobile-nav-hidden nav,
+  body.mobile-chrome-collapsed nav {
+    max-height: 120px !important;
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
+
+  .council-chamber {
+    transition: max-height 0.28s ease, opacity 0.22s ease, margin 0.28s ease, border-color 0.2s ease;
+  }
+
+  /* Do NOT collapse council-chamber on scroll — only the nav slides up (via transform).
+     Collapsing the council-chamber via max-height causes layout reflow which creates
+     the gap above the agent name and jitter during scroll. The nav transition is
+     GPU-accelerated (transform) and sufficient for hiding top chrome. */
+  body.mobile-chrome-collapsed .council-chamber {
+    transform: translateY(0);
+    opacity: 1;
+    max-height: none;
+    margin: 0;
+  }
 }
 
 /* Right buttons container smooth reflow */
@@ -3872,6 +6643,9 @@ nav {
 /* Main transition container - fade + slide effect */
 main {
   animation: pageEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  z-index: 2;
+  /* Ensure main content sits above body::before overlay (z-index: 1) */
 }
 
 /* Page enter animation - slide up with fade */
@@ -3880,6 +6654,7 @@ main {
     opacity: 0;
     transform: translateY(20px);
   }
+
   100% {
     opacity: 1;
     transform: translateY(0);
@@ -3892,6 +6667,7 @@ main {
     opacity: 1;
     transform: translateY(0);
   }
+
   100% {
     opacity: 0;
     transform: translateY(-20px);
@@ -3904,6 +6680,7 @@ main {
     opacity: 0;
     transform: scale(0.95) translateY(15px);
   }
+
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -3967,19 +6744,30 @@ nav.transitioning {
 }
 
 /* Staggered animation for content children */
-main > * {
-  animation: contentFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+main>* {
+  animation: contentFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  opacity: 1;
+  /* Fallback: ensure content is visible even if animation fails */
 }
 
-main > *:nth-child(1) { animation-delay: 0.05s; }
-main > *:nth-child(2) { animation-delay: 0.1s; }
-main > *:nth-child(3) { animation-delay: 0.15s; }
+main>*:nth-child(1) {
+  animation-delay: 0.05s;
+}
+
+main>*:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+main>*:nth-child(3) {
+  animation-delay: 0.15s;
+}
 
 @keyframes contentFadeIn {
   0% {
     opacity: 0;
     transform: translateY(10px);
   }
+
   100% {
     opacity: 1;
     transform: translateY(0);
@@ -3992,6 +6780,7 @@ main > *:nth-child(3) { animation-delay: 0.15s; }
     opacity: 1;
     filter: blur(0px);
   }
+
   100% {
     opacity: 0;
     filter: blur(3px);
@@ -4000,4 +6789,1831 @@ main > *:nth-child(3) { animation-delay: 0.15s; }
 
 main.page-exiting-blur {
   animation: pageBlurExit 0.4s ease-in forwards;
+}
+
+/* =============================================================================
+ * Inter-Agent Communication Connection Lines
+ * ============================================================================= */
+
+/* Animated dashed stroke effect for agent-to-agent connection lines */
+@keyframes dashMove {
+  0% {
+    stroke-dashoffset: 20;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.agent-connection-line {
+  transition: stroke-width 0.3s ease, stroke 0.3s ease;
+}
+
+.agent-connection-line:hover {
+  stroke-width: 3;
+  stroke: rgba(56, 189, 248, 0.9);
+}
+
+/* Connection count badge styling */
+#agentConnectionCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #0c4a6e;
+  background: linear-gradient(135deg, #38bdf8, #22d3ee);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+
+/* =============================================================================
+ * Agent Chats Panel (Inter-Agent Conversations)
+ * ============================================================================= */
+
+.agent-chats-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0.75rem 1rem;
+  max-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.agent-chats-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+}
+
+.agent-chats-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #0e7490;
+  background: rgba(34, 211, 238, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 999px;
+}
+
+.agent-chats-refresh {
+  padding: 0.25rem;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: color 0.2s, transform 0.2s;
+}
+
+.agent-chats-refresh:hover {
+  color: #22d3ee;
+  transform: rotate(90deg);
+}
+
+.agent-chats-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.agent-chats-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.agent-chats-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 2px;
+}
+
+.agent-chats-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  color: #64748b;
+}
+
+/* Individual chat conversation item */
+.agent-chat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.agent-chat-item:hover {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateX(2px);
+}
+
+.agent-chat-item--active {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+/* Avatar group showing both agents */
+.agent-chat-avatars {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.agent-chat-avatar {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 2px solid #0f172a;
+  background: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.5rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+.agent-chat-avatar:last-child {
+  margin-left: -0.5rem;
+}
+
+.agent-chat-avatar svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Chat info section */
+.agent-chat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-chat-names {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-chat-separator {
+  color: #64748b;
+  font-weight: 400;
+  margin: 0 0.2rem;
+}
+
+.agent-chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+
+.agent-chat-count {
+  font-size: 0.6rem;
+  color: #64748b;
+}
+
+.agent-chat-time {
+  font-size: 0.55rem;
+  color: #475569;
+}
+
+/* Badge for unread/new messages */
+.agent-chat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0 0.2rem;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #0c4a6e;
+  background: linear-gradient(135deg, #22d3ee, #38bdf8);
+  border-radius: 999px;
+  margin-left: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Multi-Chat Side-by-Side Panels
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (min-width: 768px) {
+  .dashboard-main-grid {
+    display: flex !important;
+    align-items: stretch;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open) {
+    justify-content: center;
+    gap: clamp(1.5rem, 2.2vw, 2.5rem);
+  }
+
+  /* Default desktop split: council ~1/3, chat panel ~2/3 */
+  .dashboard-main-grid>.council-chamber {
+    flex: 0 0 var(--council-panel-width, 470px);
+    min-width: 285px;
+    max-width: 825px;
+  }
+
+  /* Chat panel (aside) — fixed proportion so it doesn't resize when switching agents */
+  .dashboard-main-grid>aside.glass-panel {
+    flex: 1.22 1 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open)>.council-chamber {
+    flex: 0 0 var(--council-panel-width, 470px);
+    max-width: 825px;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open)>#multiChatContainer {
+    flex: 0 1 760px;
+    max-width: 760px;
+    margin-left: 0;
+    padding-left: 0;
+    padding-right: 0;
+    justify-content: center;
+    overflow-x: visible;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open)>#multiChatContainer>.chat-tile--main {
+    flex: 1 1 auto;
+    width: min(760px, 100%);
+    max-width: 760px;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open) .council-header-actions {
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open) #voiceToggle {
+    position: relative;
+    padding-inline: 0.95rem;
+    border-color: rgba(52, 211, 153, 0.75);
+    background:
+      linear-gradient(135deg, rgba(16, 185, 129, 0.24), rgba(20, 184, 166, 0.12)),
+      rgba(15, 23, 42, 0.72);
+    box-shadow:
+      0 0 0 1px rgba(16, 185, 129, 0.12),
+      0 10px 24px rgba(16, 185, 129, 0.18);
+  }
+
+  .dashboard-main-grid:not(.dashboard-main-grid--multi-open) #voiceToggle span {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  /* Multi-chat open: reserve room for side tiles */
+  .dashboard-main-grid.dashboard-main-grid--multi-open>.council-chamber {
+    flex: 0 0 var(--council-panel-width, 375px);
+    min-width: 330px;
+    max-width: 570px;
+  }
+
+  /* ─── Council Minimized State ─── */
+  .dashboard-main-grid.council-minimized {
+    gap: 0.75rem !important;
+  }
+
+  .dashboard-main-grid.council-minimized>.council-chamber {
+    flex: 0 0 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    border-right: none;
+    border-radius: 1.5rem;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .dashboard-main-grid.council-minimized>.council-chamber #councilMinimizedView {
+    display: flex !important;
+  }
+
+  .dashboard-main-grid.council-minimized>.council-chamber #mobileHeader,
+  .dashboard-main-grid.council-minimized>.council-chamber #councilCircle,
+  .dashboard-main-grid.council-minimized>.council-chamber #councilListResizeHandle,
+  .dashboard-main-grid.council-minimized>.council-chamber #councilListSection,
+  .dashboard-main-grid.council-minimized>.council-chamber #mobileStatsToggle,
+  .dashboard-main-grid.council-minimized>.council-chamber #agentListPanel {
+    display: none !important;
+  }
+
+  /* Create the liquid glass overlap effect for the chats sliding under the council chamber */
+  .dashboard-main-grid>.council-chamber {
+    z-index: 10;
+    position: relative;
+    /* Add a subtle right shadow to enhance depth */
+    box-shadow: 15px 0 30px -10px rgba(0, 0, 0, 0.5);
+  }
+
+  .dashboard-main-grid>#multiChatContainer {
+    /* Pull container 300px to the left (under the council chamber) */
+    margin-left: -300px;
+    /* Push the first chat tile back out by 300px so it visually starts in the same place */
+    padding-left: 300px;
+    z-index: 5;
+    position: relative;
+  }
+
+  .dashboard-main-grid.council-minimized>.dashboard-resize-handle {
+    display: none !important;
+  }
+}
+
+/* Outer wrapper — sits to the right of main chat, takes all remaining space */
+#multiChatContainer {
+  --multi-chat-gap: 1.25rem;
+  --tile-width: 594px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--multi-chat-gap);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.75rem 1rem 2rem 1rem;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  flex: 2 1 0;
+  transition:
+    margin-left 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    padding-left 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    gap 0.2s ease;
+  position: relative;
+}
+
+#multiChatContainer::-webkit-scrollbar {
+  height: 6px;
+}
+
+#multiChatContainer::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+#multiChatContainer::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: content-box;
+}
+
+/* Medium desktop: keep the desktop side-by-side layout, but remove the wide
+   overlap treatment so council + chats fit instead of clipping vertically. */
+@media (min-width: 768px) and (max-width: 1440px) {
+  .dashboard-main-grid.dashboard-main-grid--multi-open {
+    flex-direction: row !important;
+    overflow: hidden;
+    height: 100% !important;
+    min-height: 0;
+  }
+
+  .dashboard-main-grid.dashboard-main-grid--multi-open>.council-chamber {
+    flex-basis: clamp(285px, 30vw, var(--council-panel-width, 375px));
+    min-width: 285px;
+    max-width: 430px;
+  }
+
+  #multiChatContainer {
+    display: flex !important;
+    --tile-width: clamp(340px, 42vw, 520px);
+    flex: 1 1 0 !important;
+    height: 100% !important;
+    min-height: 0;
+    padding: 0.75rem !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin-left: 0 !important;
+    padding-left: 0.75rem !important;
+  }
+
+  .chat-tile {
+    max-width: 520px;
+  }
+}
+
+@media (max-width: 768px) {
+  #multiChatContainer {
+    --tile-width: 90vw !important;
+  }
+
+  .chat-tile {
+    min-width: 300px !important;
+  }
+}
+
+@media (min-width: 768px) and (max-height: 820px) {
+  #dashboardRoot {
+    --council-list-height: 240px;
+    --council-orbit-container-min: 220px;
+    --council-orbit-min-size: 160px;
+  }
+
+  #councilCircle {
+    padding: 1rem !important;
+  }
+
+  .council-orbit {
+    min-width: var(--council-orbit-min-size, 160px);
+    min-height: var(--council-orbit-min-size, 160px);
+  }
+
+  .council-list-section {
+    min-height: 180px;
+  }
+}
+
+/* Re-override: ensure the 1440px multi-chat rules don't break mobile layout.
+   This block MUST come after @media (max-width: 1440px) to win the cascade. */
+@media (max-width: 767px) {
+  /* Restore flex:1 so the container fills all available space on mobile */
+  #multiChatContainer {
+    flex: 1 !important;
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  /* Ensure the main chat aside fills the container */
+  aside.chat-tile--main {
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: hidden;
+  }
+}
+
+/* Touch tablets and wide/rotated phones can sit above the narrow mobile
+   breakpoint while still using mobile browser chrome. Give that band an
+   explicit viewport-bound app shell so the page itself does not grow with the
+   message history; only the conversation pane should scroll. */
+@media (pointer: coarse) and (min-width: 768px) and (max-width: 1180px) {
+  html:has(#dashboardRoot),
+  body:has(#dashboardRoot) {
+    height: 100vh;
+    height: 100dvh;
+    height: var(--vh, 100dvh);
+    overflow: hidden !important;
+  }
+
+  body:has(#dashboardRoot) {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#dashboardRoot) main,
+  #dashboardRoot,
+  #dashboardRoot > .dashboard-main-grid,
+  #multiChatContainer,
+  aside.chat-tile--main {
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body:has(#dashboardRoot) main {
+    flex: 1 1 auto !important;
+    display: flex;
+    flex-direction: column;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  #dashboardRoot {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    max-height: var(--vh, 100dvh) !important;
+  }
+
+  #dashboardRoot > .dashboard-main-grid {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    align-items: stretch;
+    gap: 0.75rem !important;
+  }
+
+  .dashboard-main-grid > .council-chamber {
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .dashboard-main-grid > #multiChatContainer {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin-left: 0 !important;
+    padding: 0.5rem !important;
+    overflow: hidden !important;
+  }
+
+  .dashboard-main-grid > #multiChatContainer > .chat-tile--main {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  #agentPanelHeader,
+  #mainInteractiveSpace,
+  #messageInputArea {
+    flex: 0 0 auto;
+  }
+
+  #conversationArea {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-bottom: calc(var(--mobile-composer-height, 110px) + 0.25rem) !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  #scrollToBottomBtn {
+    position: absolute !important;
+    right: max(1rem, env(safe-area-inset-right, 0px)) !important;
+    bottom: calc(var(--mobile-composer-height, 110px) + 0.75rem) !important;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-width: 2.75rem !important;
+    min-height: 2.75rem !important;
+    z-index: 130 !important;
+    touch-action: manipulation;
+  }
+
+  #messageInputArea {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+  }
+}
+
+/* Rotated phones can be wider than the narrow mobile breakpoint while still
+   needing mobile height/scroll behavior. Keep the side-by-side council/chat
+   layout, but constrain it to the visual viewport and make only messages scroll. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 600px) {
+  html:has(#dashboardRoot),
+  body:has(#dashboardRoot) {
+    height: 100vh;
+    height: 100dvh;
+    height: var(--vh, 100dvh);
+    overflow: hidden !important;
+  }
+
+  body:has(#dashboardRoot) {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#dashboardRoot) main,
+  #dashboardRoot,
+  #dashboardRoot > .dashboard-main-grid,
+  #multiChatContainer,
+  aside.chat-tile--main {
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: hidden !important;
+  }
+
+  body:has(#dashboardRoot) main,
+  #dashboardRoot {
+    flex: 1 1 auto !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  #dashboardRoot > .dashboard-main-grid {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    align-items: stretch;
+    gap: 0.5rem !important;
+  }
+
+  .dashboard-main-grid > .council-chamber {
+    flex: 0 0 clamp(230px, 34vw, 340px) !important;
+    min-width: 220px !important;
+    max-width: 42vw !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
+  .dashboard-main-grid > #multiChatContainer {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .dashboard-main-grid > #multiChatContainer > .chat-tile--main {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  #conversationArea {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 0.65rem !important;
+    padding-bottom: calc(var(--mobile-composer-height, 86px) + 0.25rem) !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  #scrollToBottomBtn {
+    position: absolute !important;
+    right: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
+    bottom: calc(var(--mobile-composer-height, 86px) + 0.55rem) !important;
+    width: 2.5rem !important;
+    height: 2.5rem !important;
+    min-width: 2.5rem !important;
+    min-height: 2.5rem !important;
+    z-index: 130 !important;
+    touch-action: manipulation;
+  }
+
+  #messageInputArea {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    padding: 0.45rem !important;
+    padding-bottom: var(--mobile-composer-bottom-gap, 2.25rem) !important;
+    box-sizing: border-box;
+    overflow: visible;
+    transform: none !important;
+  }
+
+  #messageInputArea .mobile-agent-status-strip {
+    display: flex !important;
+    position: relative;
+    width: 100%;
+    margin: 0;
+    box-sizing: border-box;
+    min-height: 1.35rem;
+    max-height: 1.5rem;
+    padding: 0.16rem 0.4rem;
+    font-size: 0.58rem;
+  }
+
+  #messageInputArea .mobile-agent-status-strip.hidden {
+    display: none !important;
+  }
+
+  #messageInputArea #userMessageForm {
+    display: grid !important;
+    grid-template-columns: 1.95rem 1.95rem 1.95rem 1.95rem minmax(0, 1fr) 2.15rem;
+    grid-template-rows: minmax(3.5rem, auto) 2.35rem;
+    column-gap: 0.25rem;
+    row-gap: 0;
+    min-width: 0;
+    align-items: end;
+  }
+
+  #messageInputArea #userMessageForm > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  #messageInputArea #userMessageForm > .relative,
+  #messageInputArea .composer-action-row,
+  #messageInputArea .composer-action-row > .composer-controls,
+  #messageInputArea .composer-controls {
+    display: contents !important;
+  }
+
+  #messageInputArea .composer-action-row > p {
+    display: none !important;
+  }
+
+  #messageInputArea textarea {
+    grid-column: 1 / -1;
+    grid-row: 1 / 3;
+    min-height: 4.75rem;
+    height: 4.75rem;
+    max-height: 4.75rem;
+    padding: 0.6rem 0.6rem 2.85rem 0.6rem !important;
+    resize: none;
+  }
+
+  #messageInputArea #agentConfigContainer,
+  #messageInputArea #agentStopBtn,
+  #messageInputArea #generalFileUploadLabel,
+  #messageInputArea #imageUploadLabel,
+  #messageInputArea #userMessageSend {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    grid-row: 2;
+    position: relative !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 1.95rem;
+    height: 1.95rem;
+    min-height: 1.95rem;
+    max-width: 2.35rem;
+    margin-bottom: 0.5rem;
+    padding: 0 !important;
+    align-self: end;
+    justify-self: center;
+    z-index: 4;
+  }
+
+  #messageInputArea #agentConfigContainer {
+    grid-column: 1;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin-left: 0.42rem;
+    justify-self: start;
+  }
+
+  #messageInputArea #agentStopBtn {
+    grid-column: 2;
+    margin-left: 0.25rem;
+    justify-self: start;
+  }
+
+  #messageInputArea #generalFileUploadLabel {
+    grid-column: 3;
+    margin-left: 0.1rem;
+    justify-self: start;
+  }
+
+  #messageInputArea #imageUploadLabel {
+    grid-column: 4;
+  }
+
+  #messageInputArea #userMessageSend {
+    grid-column: 5;
+    margin-right: 0.4rem;
+    justify-self: end;
+  }
+
+  #messageInputArea #userMessageSend .send-label {
+    display: none;
+  }
+
+  #messageInputArea #userMessageSend .send-spaceship-icon {
+    width: 1.02rem;
+    height: 1.02rem;
+  }
+
+  #messageInputArea #agentConfigBtn {
+    display: flex !important;
+    align-items: center;
+    width: 1.95rem;
+    height: 1.95rem;
+    min-height: 1.95rem;
+    padding: 0 !important;
+    justify-content: center;
+  }
+
+  #messageInputArea #agentConfigBtn #configStatusProvider,
+  #messageInputArea #agentConfigBtn #configStatusMode,
+  #messageInputArea #agentConfigBtn .w-px,
+  #messageInputArea #agentConfigBtn .text-slate-600,
+  #messageInputArea #agentConfigBtn div:first-child,
+  #messageInputArea #agentStopBtn span {
+    display: none !important;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #userMessageForm {
+    grid-template-columns: 1.95rem 1.95rem 1.95rem minmax(0, 1fr) 2.15rem;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #agentStopBtn {
+    grid-column: 1;
+    margin-left: 0.42rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #generalFileUploadLabel {
+    grid-column: 2;
+    margin-left: 0.25rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #imageUploadLabel {
+    grid-column: 3;
+    margin-left: 0.1rem;
+    justify-self: start;
+  }
+
+  body.dashboard-fast-mode #messageInputArea #userMessageSend {
+    grid-column: 5;
+  }
+}
+
+/* ─── Individual Chat Tile ─── */
+.chat-tile {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--tile-width, clamp(340px, 38vw, 594px));
+  width: var(--tile-width, clamp(340px, 38vw, 594px));
+  min-width: 340px;
+  max-width: 594px;
+  /* Keep the messages pane scrollable and every composer aligned at the bottom. */
+  height: 100%;
+  align-self: stretch;
+  min-height: 0;
+  border-radius: 1.75rem;
+  overflow: hidden;
+  scroll-snap-align: center;
+  position: relative;
+  contain: layout paint;
+
+  /* Liquid Glass Aesthetic */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  backdrop-filter: blur(25px) saturate(200%);
+  -webkit-backdrop-filter: blur(25px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 8px 32px 0 rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+
+  animation: chat-tile-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.5s ease;
+}
+
+.chat-tile:hover {
+  transform: translateY(-8px) scale(1.01);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 15px 45px -10px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.chat-tile--main {
+  animation: none;
+}
+
+.chat-tile--main:hover {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 8px 32px 0 rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.side-chat-add-btn {
+  display: none;
+}
+
+.side-chat-picker {
+  display: none;
+}
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .side-chat-add-btn {
+    position: absolute;
+    top: 50%;
+    right: calc(-2rem - 0.65rem);
+    z-index: 42;
+    display: flex;
+    width: 2rem;
+    height: 2rem;
+    margin: 0;
+    flex: 0 0 2rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(110, 231, 183, 0.36);
+    background:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(15, 118, 110, 0.42)),
+      rgba(15, 23, 42, 0.86);
+    color: rgba(209, 250, 229, 0.92);
+    box-shadow:
+      0 12px 32px -18px rgba(16, 185, 129, 0.8),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px);
+    transform: translateY(-50%);
+    transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, opacity 0.16s ease;
+  }
+
+  .side-chat-add-btn.hidden,
+  .side-chat-add-btn[hidden] {
+    display: none !important;
+  }
+
+  .side-chat-add-btn:hover,
+  .side-chat-add-btn:focus-visible {
+    transform: translate(-1px, -50%) scale(1.06);
+    border-color: rgba(110, 231, 183, 0.68);
+    background:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(16, 185, 129, 0.5)),
+      rgba(15, 23, 42, 0.9);
+    outline: none;
+  }
+
+  .side-chat-add-btn[aria-expanded='true'] {
+    color: rgb(6, 78, 59);
+    background: rgba(110, 231, 183, 0.92);
+    border-color: rgba(167, 243, 208, 0.9);
+  }
+
+  .side-chat-picker {
+    position: absolute;
+    top: 50%;
+    right: 3.15rem;
+    z-index: 43;
+    display: flex;
+    width: min(20rem, calc(100vw - 8rem));
+    max-height: min(32rem, calc(100vh - 8rem));
+    margin-left: -20rem;
+    flex: 0 0 20rem;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(15, 23, 42, 0.94);
+    box-shadow:
+      0 24px 70px -28px rgba(0, 0, 0, 0.9),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    transform: translateY(-50%);
+  }
+
+  .side-chat-picker.hidden,
+  .side-chat-picker[hidden] {
+    display: none !important;
+  }
+
+  .side-chat-picker__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.9rem 0.95rem 0.65rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  .side-chat-picker__header h3 {
+    margin: 0;
+    color: rgba(248, 250, 252, 0.96);
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+
+  .side-chat-picker__header p {
+    margin: 0.18rem 0 0;
+    color: rgba(148, 163, 184, 0.9);
+    font-size: 0.68rem;
+    line-height: 1.3;
+  }
+
+  .side-chat-picker__close {
+    display: flex;
+    width: 1.85rem;
+    height: 1.85rem;
+    flex: 0 0 1.85rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: rgba(15, 23, 42, 0.72);
+    color: rgba(203, 213, 225, 0.9);
+    transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+  }
+
+  .side-chat-picker__close:hover,
+  .side-chat-picker__close:focus-visible {
+    border-color: rgba(110, 231, 183, 0.45);
+    background: rgba(30, 41, 59, 0.9);
+    color: rgba(209, 250, 229, 0.98);
+    outline: none;
+  }
+
+  .side-chat-picker__search {
+    margin: 0.75rem 0.8rem 0.55rem;
+    border-radius: 0.72rem;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(2, 6, 23, 0.45);
+    color: rgba(248, 250, 252, 0.94);
+    font-size: 0.78rem;
+    padding: 0.55rem 0.7rem;
+    outline: none;
+  }
+
+  .side-chat-picker__search:focus {
+    border-color: rgba(52, 211, 153, 0.6);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.12);
+  }
+
+  .side-chat-picker__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0.65rem 0.75rem;
+  }
+
+  .side-chat-picker__item {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+    padding: 0.55rem 0.55rem;
+    border-radius: 0.82rem;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    background: rgba(15, 23, 42, 0.46);
+    color: rgba(226, 232, 240, 0.95);
+    text-align: left;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  }
+
+  .side-chat-picker__item:hover,
+  .side-chat-picker__item:focus-visible {
+    transform: translateX(-1px);
+    border-color: rgba(110, 231, 183, 0.36);
+    background: rgba(30, 41, 59, 0.76);
+    outline: none;
+  }
+
+  .side-chat-picker__avatar {
+    display: flex;
+    width: 2rem;
+    height: 2rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(110, 231, 183, 0.18);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.26), rgba(14, 165, 233, 0.16));
+    color: rgba(209, 250, 229, 0.92);
+    font-size: 0.68rem;
+    font-weight: 800;
+  }
+
+  .side-chat-picker__name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  .side-chat-picker__meta {
+    display: block;
+    margin-top: 0.1rem;
+    color: rgba(148, 163, 184, 0.88);
+    font-size: 0.64rem;
+  }
+
+  .side-chat-picker__state {
+    color: rgba(110, 231, 183, 0.9);
+    font-size: 0.64rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .side-chat-picker__empty {
+    padding: 1.1rem 0.8rem 1.25rem;
+    color: rgba(148, 163, 184, 0.9);
+    font-size: 0.76rem;
+    text-align: center;
+  }
+}
+
+/* Glossy sheen effect */
+.chat-tile::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.05) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes chat-tile-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(20px) rotateX(-5deg);
+    filter: blur(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0) rotateX(0);
+    filter: blur(0);
+  }
+}
+
+.chat-tile--leaving {
+  animation: chat-tile-leave 0.5s cubic-bezier(0.19, 1, 0.22, 1) forwards !important;
+}
+
+@keyframes chat-tile-leave {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.92) translateY(20px);
+    filter: blur(10px);
+  }
+}
+
+.chat-tile--flash {
+  animation: chat-tile-flash 0.6s ease !important;
+}
+
+@keyframes chat-tile-flash {
+
+  0%,
+  100% {
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  40% {
+    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.7), 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* ─── Tile Header ─── */
+.chat-tile__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.chat-tile__agent-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-tile__agent-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.chat-tile__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-tile__avatar-initials {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(6, 182, 212, 0.2));
+}
+
+.chat-tile__avatar-marble {
+  width: 100%;
+  height: 100%;
+}
+
+.chat-tile__avatar-oc {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  background: linear-gradient(135deg, #020617, rgba(124, 45, 18, 0.3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-tile__name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.chat-tile__name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.chat-tile__name--menu-trigger {
+  cursor: pointer;
+  border-radius: 0.3rem;
+  padding: 0 0.2rem;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.chat-tile__name--menu-trigger:hover {
+  color: #6ee7b7;
+  background: rgba(110, 231, 183, 0.12);
+}
+
+.chat-tile__name--menu-trigger:focus-visible {
+  outline: 2px solid rgba(110, 231, 183, 0.7);
+  outline-offset: 1px;
+}
+
+.chat-tile__working-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  animation: tile-working-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tile-working-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  }
+
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 2px rgba(245, 158, 11, 0.3);
+  }
+}
+
+.chat-tile__a2a-btn {
+  width: fit-content;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 0.58rem;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.chat-tile__a2a-btn:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  background: rgba(8, 47, 73, 0.35);
+}
+
+.chat-tile__a2a-btn--on {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(6, 182, 212, 0.16);
+}
+
+.chat-tile__close-btn {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.chat-tile__close-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.chat-tile__close-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+/* ─── Messages Area ─── */
+.chat-tile__messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.6rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+  contain: layout paint;
+}
+
+.chat-tile__messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-tile__messages::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 2px;
+}
+
+.chat-tile__loading,
+.chat-tile__empty,
+.chat-tile__error {
+  font-size: 0.7rem;
+  color: #475569;
+  text-align: center;
+  padding: 1rem;
+  margin: auto 0;
+}
+
+.chat-tile__error {
+  color: #f87171;
+}
+
+/* ─── Message bubbles inside tiles ─── */
+.chat-tile__msg-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-tile__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.chat-tile__msg--user {
+  align-items: flex-end;
+}
+
+.chat-tile__msg--agent,
+.chat-tile__msg--dm {
+  align-items: flex-start;
+}
+
+.chat-tile__bubble {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.85rem;
+  word-break: break-word;
+  max-width: 90%;
+}
+
+.chat-tile__bubble--user {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(6, 182, 212, 0.16));
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  color: #f0fdf4;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-tile__bubble--agent {
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-tile__bubble--dm {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(99, 102, 241, 0.08));
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  color: #e0f2fe;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-tile__dm-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #38bdf8;
+  margin-bottom: 3px;
+  letter-spacing: 0.03em;
+}
+
+.chat-tile__encrypted {
+  font-size: 0.65rem;
+  color: #c4b5fd;
+  font-style: italic;
+}
+
+.chat-tile__ts {
+  font-size: 0.58rem;
+  color: #475569;
+  padding: 0 0.15rem;
+  flex: 1;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ─── Tile message footer & action buttons ─── */
+.chat-tile__footer {
+  margin-top: 0.35rem;
+  gap: 0.25rem;
+}
+
+.chat-tile__bubble .message-utilities {
+  gap: 0.2rem;
+}
+
+.chat-tile__bubble .message-utility-btn {
+  width: 1.2rem;
+  height: 1.2rem;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.2s ease, color 0.2s ease;
+}
+
+.chat-tile__bubble .message-utility-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.chat-tile__bubble:hover .message-utility-btn {
+  opacity: 0.75;
+}
+
+.chat-tile__bubble .message-utility-btn:hover {
+  opacity: 1;
+}
+
+/* Hidden from agent styling for tile messages */
+.chat-tile__bubble--hidden-from-agent {
+  opacity: 0.5;
+  border-left: 2px solid rgba(251, 191, 36, 0.6) !important;
+  position: relative;
+}
+
+.chat-tile__bubble--hidden-from-agent::before {
+  content: "Hidden";
+  position: absolute;
+  top: -0.4rem;
+  right: 0.35rem;
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: rgb(251, 191, 36);
+  background: rgba(251, 191, 36, 0.15);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Scale down markdown typography inside side-chat tiles */
+.chat-tile__bubble .message-content {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.chat-tile__bubble .message-content h1 { font-size: 1.15em; }
+.chat-tile__bubble .message-content h2 { font-size: 1.05em; }
+.chat-tile__bubble .message-content h3 { font-size: 0.95em; }
+
+.chat-tile__bubble .message-content p {
+  margin-bottom: 0.4em;
+}
+
+.chat-tile__bubble .message-content pre {
+  font-size: 0.85em;
+  padding: 0.35rem 0.5rem;
+}
+
+.chat-tile__bubble .message-content code {
+  font-size: 0.85em;
+}
+
+.chat-tile__bubble .message-content ul,
+.chat-tile__bubble .message-content ol {
+  padding-left: 1.2em;
+  margin-bottom: 0.4em;
+}
+
+/* Attachments inside side-chat tiles */
+.chat-tile__bubble .message-attachments {
+  margin-top: 0.4rem;
+}
+
+.chat-tile__bubble .message-attachment-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 0.4rem;
+}
+
+.chat-tile__bubble .message-hide-btn[data-hidden="true"] {
+  color: #fbbf24;
+  opacity: 0.9;
+}
+
+/* Read indicator inside tile */
+.chat-tile__bubble .message-read-indicator {
+  margin-left: 0.25rem;
+  font-size: 0.55rem;
+}
+
+/* ─── Input area ─── */
+.chat-tile__input-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.chat-tile__textarea {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  color: #f1f5f9;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  padding: 0.45rem 0.6rem;
+  resize: none;
+  transition: border-color 0.2s;
+  min-height: 36px;
+  max-height: 80px;
+  font-family: inherit;
+}
+
+.chat-tile__textarea::placeholder {
+  color: #475569;
+}
+
+.chat-tile__textarea:focus {
+  outline: none;
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+.chat-tile__send-btn {
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.chat-tile__send-btn:active {
+  transform: scale(0.96);
+}
+
+/* ─── Pin Button (on agent list items) ─── */
+.chat-tile__pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #475569;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+  margin-left: auto;
+}
+
+.chat-tile__pin-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.chat-tile__pin-btn:hover {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.chat-tile__pin-btn--active {
+  color: #34d399 !important;
+  background: rgba(52, 211, 153, 0.12) !important;
+}
+
+/* When tiles are present, keep main panel at a stable base width */
+/* (main panel flex is adjusted dynamically by multi-chat.js) */
+#multiChatContainer:not(.multi-chat-container--empty) {
+  /* Already handled: flex: 1 1 0 in the container rule above */
+}
+
+/* Keep identical tile width across screen sizes */
+
+/* Drop indicator line shown between tiles during drag reorder */
+.chat-drop-indicator {
+  width: 3px;
+  min-width: 3px;
+  flex-shrink: 0;
+  align-self: stretch;
+  background: #10b981;
+  border-radius: 999px;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+  animation: drop-indicator-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes drop-indicator-pulse {
+  from { opacity: 0.7; box-shadow: 0 0 6px rgba(16, 185, 129, 0.5); }
+  to   { opacity: 1;   box-shadow: 0 0 14px rgba(16, 185, 129, 0.9); }
+}
+
+/* Drag to Pin Drop Zone Styles */
+#chatAreaDropOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(16, 185, 129, 0.05);
+  border: 2px dashed rgba(16, 185, 129, 0.4);
+  border-radius: 1rem;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, background 0.2s ease;
+  backdrop-filter: blur(2px);
+}
+
+#chatAreaDropOverlay.dropzone-active {
+  opacity: 1;
+}
+
+#chatAreaDropOverlay.dropzone-hover {
+  background: rgba(16, 185, 129, 0.15);
+  border: 2px dashed rgba(16, 185, 129, 0.8);
+}
+
+.chat-drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: #34d399;
+  /* emerald-400 */
+  transform: scale(0.95);
+  transition: transform 0.2s ease;
+}
+
+#chatAreaDropOverlay.dropzone-hover .chat-drop-content {
+  transform: scale(1);
+}
+
+.agent-list-item--dragging {
+  opacity: 0.5;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(52, 211, 153, 0.3);
+  /* emerald-400/30 */
+}
+
+/* Ensure the main chat container area can hold the absolute overlay */
+.chat-drop-container {
+  position: relative;
+}
+
+/* Mobile/touch layouts do not use pinned side chats. Keep the desktop pin
+   affordances available only where side panels are practical. */
+@media (max-width: 1023px), (pointer: coarse) and (max-width: 1180px) {
+  #pinToSideBtn,
+  .agent-list-pin-btn,
+  #chatAreaDropOverlay {
+    display: none !important;
+    pointer-events: none !important;
+  }
+}
+
+/* All Chats view - agent name labels */
+.all-chats-agent-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.7);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.15rem;
+  padding-left: 0.25rem;
+}
+
+.all-chats-agent-label--user {
+  text-align: right;
+  padding-left: 0;
+  padding-right: 0.25rem;
+}
+
+/* All Chats special list item */
+.all-chats-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 0.25rem;
+}
+
+/* Keyboard shortcut keycaps (Settings › Keyboard Shortcuts) */
+.settings-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: rgb(226, 232, 240); /* slate-200 */
+  background: rgba(30, 41, 59, 0.9); /* slate-800 */
+  border: 1px solid rgba(71, 85, 105, 0.7); /* slate-600 */
+  border-bottom-width: 2px;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
 }

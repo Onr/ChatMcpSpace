@@ -1,0 +1,94 @@
+<!--
+  Local Chief of Staff install modal.
+  Hidden by default; cos-install.js decides whether to show it based on
+  /api/user/install-chief-of-staff/status and the cos_modal_dismissed_at
+  localStorage flag.
+-->
+<div id="cosInstallModal" class="hidden fixed inset-0 z-50 overflow-y-auto" aria-modal="true" role="dialog">
+  <div class="flex items-center justify-center min-h-screen px-4 py-6 sm:px-6">
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" aria-hidden="true" data-cos-dismiss></div>
+
+    <div class="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+      <div class="px-6 py-5 border-b border-slate-700/60 flex items-start gap-4">
+        <div class="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 flex-shrink-0">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+        </div>
+        <div class="flex-1">
+          <h2 class="text-lg font-semibold text-slate-100">Meet your Local Chief of Staff</h2>
+          <p class="mt-1 text-sm text-slate-400">
+            A privileged agent that manages your other agents on your behalf — spawn,
+            brief, restart, retire, and keep a live roster. Optional, but recommended
+            if you plan to run more than one or two agents.
+          </p>
+          <p class="mt-2 text-xs text-amber-300/90">
+            <strong class="font-semibold">Runs locally on your machine.</strong>
+            Any agents it spawns are created as folders on the same computer where
+            you start it. It can message remote agents via the platform, but it
+            cannot create or run agents on other machines.
+          </p>
+        </div>
+        <button type="button" class="text-slate-500 hover:text-slate-300" data-cos-dismiss aria-label="Close">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="px-6 py-5 space-y-4 text-sm text-slate-300">
+        <ul class="space-y-2 list-disc list-inside marker:text-emerald-400">
+          <li>Single point of contact: tell it what you need, it dispatches the work.</li>
+          <li>Spawns new agents <strong>as local folders on this machine</strong> (via tmux) and gives each one its mission.</li>
+          <li>Keeps a roster of every agent — their role, current state, last activity.</li>
+          <li>Can edit or restart agents you ask it to, and propose improvements.</li>
+          <li>Can message remote agents on the platform; cannot create new agents on other machines.</li>
+          <li>Optional heartbeat: wakes itself to audit the team and surface notifications.</li>
+        </ul>
+
+        <div id="cosInstallPasswordWrap" class="rounded-xl bg-slate-800/60 border border-slate-700/60 p-4 space-y-3">
+          <div>
+            <label for="cosInstallName" class="block text-xs font-medium text-slate-300 mb-1">
+              Chief of Staff name
+            </label>
+            <input id="cosInstallName" type="text" autocomplete="off"
+              class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+              placeholder="Local Chief of Staff - laptop" />
+            <p class="mt-1 text-[11px] text-slate-500">Use a distinct name for each computer so you can tell them apart.</p>
+          </div>
+          <label for="cosInstallPassword" class="block text-xs font-medium text-slate-300 mb-1">
+            Your account password (used to decrypt messages locally)
+          </label>
+          <input id="cosInstallPassword" type="password" autocomplete="current-password"
+            class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+            placeholder="Required so the local agent can decrypt your messages" />
+          <p class="mt-1 text-[11px] text-slate-500">Sent only to write your CoS <code>.env</code>; never stored on the server.</p>
+        </div>
+
+        <div id="cosInstallError" class="hidden rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-300"></div>
+
+        <div id="cosInstallSuccess" class="hidden rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-3 text-xs text-emerald-200 space-y-2">
+          <p class="font-medium text-emerald-100">Local Chief of Staff installed.</p>
+          <p>Paste this in a terminal on your machine to start it:</p>
+          <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosInstallBootstrap"></code></pre>
+          <button type="button" id="cosInstallCopyBootstrap"
+            class="text-[11px] px-2 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-100">
+            Copy command
+          </button>
+        </div>
+      </div>
+
+      <div class="px-6 py-4 bg-slate-950/40 border-t border-slate-700/60 flex flex-col sm:flex-row-reverse gap-3">
+        <button type="button" id="cosInstallSubmit"
+          class="inline-flex justify-center rounded-lg px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
+          Install Local Chief of Staff
+        </button>
+        <button type="button" data-cos-dismiss
+          class="inline-flex justify-center rounded-lg px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium border border-slate-700">
+          Maybe later
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

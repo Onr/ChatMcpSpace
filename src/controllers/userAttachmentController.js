@@ -1,6 +1,6 @@
 /**
  * User Attachment Controller
- * Handles upload of encrypted image attachments from users
+ * Handles upload of encrypted attachments from users
  *
  * Security notes:
  * - The server only stores encrypted ciphertext bytes
@@ -25,58 +25,30 @@ const { getStorageProvider, initializeStorage } = require('../storage');
 /**
  * Constants - configurable via environment variables
  */
-const MAX_IMAGE_SIZE_MB = parseInt(process.env.MAX_IMAGE_SIZE_MB || '20', 10);
-const MAX_IMAGE_BYTES = MAX_IMAGE_SIZE_MB * 1_000_000; // Default 20MB for 4K support
-const MAX_IMAGES_PER_USER = parseInt(process.env.MAX_IMAGES_PER_USER || '10', 10);
+const MAX_ATTACHMENT_SIZE_MB = parseInt(process.env.MAX_ATTACHMENT_SIZE_MB || process.env.MAX_IMAGE_SIZE_MB || '20', 10);
+const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_SIZE_MB * 1_000_000;
+const MAX_ATTACHMENTS_PER_USER = parseInt(process.env.MAX_ATTACHMENTS_PER_USER || process.env.MAX_IMAGES_PER_USER || '10', 10);
 const MAX_FILENAME_LENGTH = 200;
 
 
 /**
- * Feature flag for general file uploads (PDFs, text, archives, etc.)
- * Set ENABLE_GENERAL_FILE_UPLOADS=true in .env to enable
- * When disabled, only images are accepted (prevents API bypass)
+ * Feature flag for general file uploads.
+ * Defaults to enabled so users and agents can exchange encrypted files of any
+ * type within the configured size limit. Set to false to hard-disable.
  */
-const ENABLE_GENERAL_FILE_UPLOADS = process.env.ENABLE_GENERAL_FILE_UPLOADS === 'true';
+const ENABLE_GENERAL_FILE_UPLOADS = process.env.ENABLE_GENERAL_FILE_UPLOADS !== 'false';
 
 /**
- * Allowed content types for file uploads
- * When ENABLE_GENERAL_FILE_UPLOADS is false, only images are allowed
+ * Validate MIME type shape.
  */
-const ALLOWED_CONTENT_TYPES = ENABLE_GENERAL_FILE_UPLOADS
-  ? [
-    // Images
-    'image/png',
-    'image/jpeg',
-    'image/webp',
-    'image/gif',
-    'image/svg+xml',
-    // Documents
-    'application/pdf',
-    'text/plain',
-    'text/markdown',
-    'text/csv',
-    // Archives
-    'application/zip',
-    'application/gzip',
-    'application/x-tar',
-    // Code/Data
-    'application/json',
-    'application/xml',
-    'text/xml',
-    'text/html',
-    'text/css',
-    'text/javascript',
-    'application/javascript',
-    // Generic binary (fallback for unknown types)
-    'application/octet-stream'
-  ]
-  : [
-    // Images only (default - more restrictive)
-    'image/png',
-    'image/jpeg',
-    'image/webp',
-    'image/gif'
-  ];
+const CONTENT_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/;
+const IMAGE_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml'
+]);
 
 /**
  * Configure multer for memory storage (we handle file storage ourselves)
@@ -85,8 +57,21 @@ const ALLOWED_CONTENT_TYPES = ENABLE_GENERAL_FILE_UPLOADS
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: MAX_IMAGE_BYTES,
+    fileSize: MAX_ATTACHMENT_BYTES,
     files: 1
+  },
+  // Reject disallowed MIME types up front so we don't buffer megabytes of
+  // bytes into memory only to throw them away in the controller. The
+  // controller still re-validates the contentType from the form body.
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').trim().toLowerCase();
+    if (!CONTENT_TYPE_PATTERN.test(mime)) {
+      return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'invalid content-type'));
+    }
+    if (!ENABLE_GENERAL_FILE_UPLOADS && !IMAGE_CONTENT_TYPES.has(mime)) {
+      return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'only image uploads allowed'));
+    }
+    cb(null, true);
   }
 });
 
@@ -163,7 +148,7 @@ function sanitizeFilename(filename) {
 function handleMulterError(err, res) {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      validationError(res, `File size exceeds maximum of ${MAX_IMAGE_BYTES / 1_000_000}MB`);
+      validationError(res, `File is too large. Maximum size is ${MAX_ATTACHMENT_BYTES / 1_000_000}MB.`);
       return true;
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
@@ -171,6 +156,15 @@ function handleMulterError(err, res) {
       return true;
     }
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      const fieldHint = String(err.field || '').trim().toLowerCase();
+      if (fieldHint === 'invalid content-type') {
+        validationError(res, 'This file type could not be identified. Try a standard file type or re-save the file and upload it again.');
+        return true;
+      }
+      if (fieldHint === 'only image uploads allowed') {
+        validationError(res, 'This workspace currently allows image uploads only.');
+        return true;
+      }
       validationError(res, 'Unexpected field in upload request');
       return true;
     }
@@ -181,7 +175,7 @@ function handleMulterError(err, res) {
 }
 
 /**
- * Cleanup oldest user images when limit is exceeded
+ * Cleanup oldest user attachments when limit is exceeded
  * Deletes the oldest attachments for a user to make room for new ones
  * @param {string} userId - User ID to check
  * @param {Object} storage - Storage provider instance
@@ -200,12 +194,12 @@ async function cleanupOldestUserImages(userId, storage) {
     const totalAttachments = parseInt(countResult.rows[0].total, 10);
 
     // If under limit, no cleanup needed
-    if (totalAttachments < MAX_IMAGES_PER_USER) {
+    if (totalAttachments < MAX_ATTACHMENTS_PER_USER) {
       return 0;
     }
 
     // Calculate how many to delete (delete enough to make room for 1 new image)
-    const toDelete = totalAttachments - MAX_IMAGES_PER_USER + 1;
+    const toDelete = totalAttachments - MAX_ATTACHMENTS_PER_USER + 1;
 
     // Get the oldest attachments to delete
     const oldestResult = await query(`
@@ -245,7 +239,7 @@ async function cleanupOldestUserImages(userId, storage) {
         userId,
         deletedCount,
         previousTotal: totalAttachments,
-        limit: MAX_IMAGES_PER_USER
+        limit: MAX_ATTACHMENTS_PER_USER
       });
     }
 
@@ -315,11 +309,12 @@ async function uploadAttachment(req, res) {
       }
 
       // Validate content type
-      if (!contentType) {
-        return validationError(res, 'Content type is required');
+      const normalizedContentType = String(contentType || '').trim() || 'application/octet-stream';
+      if (!CONTENT_TYPE_PATTERN.test(normalizedContentType)) {
+        return validationError(res, 'Invalid content type format');
       }
-      if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
-        return validationError(res, `Content type must be one of: ${ALLOWED_CONTENT_TYPES.join(', ')}`);
+      if (!ENABLE_GENERAL_FILE_UPLOADS && !IMAGE_CONTENT_TYPES.has(normalizedContentType)) {
+        return validationError(res, 'Only image attachments are currently allowed');
       }
 
       // Validate user owns the agent
@@ -402,7 +397,7 @@ async function uploadAttachment(req, res) {
         RETURNING attachment_id, created_at`,
         [
           attachmentId,
-          contentType,
+          normalizedContentType,
           sanitizedFilename,
           req.file.buffer.length,
           validatedSha256,
@@ -430,7 +425,7 @@ async function uploadAttachment(req, res) {
       res.status(201).json({
         attachment: {
           attachmentId: insertResult.rows[0].attachment_id,
-          contentType: contentType,
+          contentType: normalizedContentType,
           sizeBytes: req.file.buffer.length,
           width: parsedWidth,
           height: parsedHeight,
@@ -446,8 +441,19 @@ async function uploadAttachment(req, res) {
     } catch (error) {
       logError('attachment_upload_error', {
         error: error.message,
+        code: error.code,
+        detail: error.detail,
         stack: error.stack
       });
+
+      // Distinguish storage errors from database errors
+      if (error.message && (
+        error.message.startsWith('Storage failed:') ||
+        error.message.startsWith('Failed to initialize storage')
+      )) {
+        return internalError(res, error.message);
+      }
+
       return handleDatabaseError(res, error, 'uploading attachment');
     }
   });
@@ -669,13 +675,18 @@ module.exports = {
   downloadAttachment,
   uploadMiddleware,
   // Export constants for testing and reuse
-  MAX_IMAGE_BYTES,
-  MAX_IMAGES_PER_USER,
-  MAX_IMAGE_SIZE_MB,
-  ALLOWED_CONTENT_TYPES,
+  MAX_IMAGE_BYTES: MAX_ATTACHMENT_BYTES,
+  MAX_IMAGES_PER_USER: MAX_ATTACHMENTS_PER_USER,
+  MAX_IMAGE_SIZE_MB: MAX_ATTACHMENT_SIZE_MB,
+  ALLOWED_CONTENT_TYPES: null,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_USER,
+  MAX_ATTACHMENT_SIZE_MB,
+  ENABLE_GENERAL_FILE_UPLOADS,
+  CONTENT_TYPE_PATTERN,
+  IMAGE_CONTENT_TYPES,
   // Export helpers for testing and reuse
   isValidBase64,
   sanitizeFilename,
   cleanupOldestUserImages
 };
-

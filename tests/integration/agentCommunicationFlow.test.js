@@ -44,6 +44,7 @@ async function createIntegrationContext() {
     userPollingRateLimiter: (_req, _res, next) => next(),
     agentPollingRateLimiter: (_req, _res, next) => next(),
     agentApiRateLimiter: (_req, _res, next) => next(),
+    agentMessageIngressRateLimiter: (_req, _res, next) => next(),
     feedbackRateLimiter: (_req, _res, next) => next(),
   }));
 
@@ -96,4 +97,3 @@ describe('Integration: agent communication flow', () => {
     await pool.end();
   });
 });
-

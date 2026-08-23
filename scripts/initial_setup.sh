@@ -26,19 +26,27 @@ ensure_env_file() {
 }
 
 ensure_chatspace() {
-  if [ ! -d "chatspace" ]; then
-    echo "[initial-setup] Creating chatspace directory..."
-    mkdir -p chatspace
+  if [ ! -d ".chatspace" ]; then
+    echo "[initial-setup] Creating .chatspace directory..."
+    mkdir -p .chatspace
   else
-    echo "[initial-setup] chatspace directory exists."
+    echo "[initial-setup] .chatspace directory exists."
+  fi
+}
+
+ensure_chatspace_gitignore() {
+  if [ -f ".gitignore" ] && ! grep -qxF ".chatspace/" .gitignore; then
+    echo ".chatspace/" >> .gitignore
+    echo "[initial-setup] Added .chatspace/ to .gitignore"
   fi
 }
 
 # 1. Ensure .env exists
 ensure_env_file
 
-# 2. Ensure chatspace directory exists
+# 2. Ensure .chatspace directory exists
 ensure_chatspace
+ensure_chatspace_gitignore
 
 # 3. Install dependencies
 echo "[initial-setup] Installing npm dependencies..."

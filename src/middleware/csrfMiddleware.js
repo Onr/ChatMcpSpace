@@ -95,8 +95,9 @@ function csrfProtection(req, res, next) {
  * @param {Function} next - Express next function
  */
 function validateCsrfToken(req, res, next) {
-  // Skip CSRF validation for API routes (they use API key authentication)
-  if (req.path.startsWith('/api/')) {
+  // Agent API routes use API-key/scoped-token authentication rather than
+  // browser session cookies, so CSRF is not applicable there.
+  if (req.path.startsWith('/api/agent/')) {
     return next();
   }
   

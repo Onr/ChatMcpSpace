@@ -77,13 +77,107 @@ describe('User API routes (messaging)', () => {
     await pool.end();
   });
 
+  it('POST /api/user/feedback accepts the text submission used by the feedback button', async () => {
+    const { app, query, pool } = await createUserApiTestContext();
+
+    const response = await request(app)
+      .post('/api/user/feedback')
+      .send({ kind: 'feedback', message: 'The feedback button works.', pageUrl: 'https://example.test/dashboard' })
+      .expect(201);
+
+    expect(response.body).toMatchObject({ success: true });
+    const result = await query(
+      'SELECT kind, message, page_url FROM feedback WHERE feedback_id = $1',
+      [response.body.feedbackId]
+    );
+    expect(result.rows).toEqual([{
+      kind: 'feedback',
+      message: 'The feedback button works.',
+      page_url: 'https://example.test/dashboard'
+    }]);
+    await pool.end();
+  });
+
+  it('POST /api/user/feedback accepts the multipart submission used with an image attachment', async () => {
+    const { app, query, pool } = await createUserApiTestContext();
+
+    const response = await request(app)
+      .post('/api/user/feedback')
+      .field('kind', 'feedback')
+      .field('message', 'Screenshot attached')
+      .field('pageUrl', 'https://example.test/dashboard')
+      .attach('image', Buffer.from('png-content'), { filename: 'issue.png', contentType: 'image/png' })
+      .expect(201);
+
+    const result = await query(
+      'SELECT kind, message, image_content_type, image_filename, image_data FROM feedback WHERE feedback_id = $1',
+      [response.body.feedbackId]
+    );
+    expect(result.rows[0]).toMatchObject({
+      kind: 'feedback',
+      message: 'Screenshot attached',
+      image_content_type: 'image/png',
+      image_filename: 'issue.png'
+    });
+    expect(Buffer.from(result.rows[0].image_data)).toEqual(Buffer.from('png-content'));
+    await pool.end();
+  });
+
+  it('POST /api/user/messages/schedule stores an owned agent message for future delivery', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId, userId, 'Alpha', 1,
+    ]);
+
+    const scheduledFor = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const res = await request(app)
+      .post('/api/user/messages/schedule')
+      .send({ agentId, content: 'send this later', encrypted: true, scheduledFor })
+      .expect(201);
+
+    const rows = await query(
+      'SELECT content, encrypted, delivered_at FROM scheduled_user_messages WHERE scheduled_message_id = $1',
+      [res.body.scheduledMessageId]
+    );
+    expect(rows.rows[0]).toMatchObject({ content: 'send this later', encrypted: true, delivered_at: null });
+    const immediate = await query('SELECT count(*)::int AS count FROM user_messages WHERE agent_id = $1', [agentId]);
+    expect(immediate.rows[0].count).toBe(0);
+    await pool.end();
+  });
+
+  it('POST /api/user/messages/schedule rejects past times', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId, userId, 'Alpha', 1,
+    ]);
+    await request(app).post('/api/user/messages/schedule').send({
+      agentId, content: 'too late', scheduledFor: new Date(Date.now() - 1000).toISOString(),
+    }).expect(400);
+    await pool.end();
+  });
+
+  it('lists, edits, and cancels a pending scheduled message', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [agentId, userId, 'Alpha', 1]);
+    const created = await request(app).post('/api/user/messages/schedule').send({ agentId, content: 'later', scheduledFor: new Date(Date.now() + 10 * 60 * 1000).toISOString() }).expect(201);
+    const listed = await request(app).get(`/api/user/messages/scheduled?agentId=${agentId}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.scheduledMessages).toHaveLength(1);
+    await request(app).patch(`/api/user/messages/scheduled/${created.body.scheduledMessageId}`).send({ content: 'updated', scheduledFor: new Date(Date.now() + 20 * 60 * 1000).toISOString() }).expect(200);
+    await request(app).delete(`/api/user/messages/scheduled/${created.body.scheduledMessageId}`).expect(204);
+    await pool.end();
+  });
+
   it('POST /api/user/messages forbids sending to agents not owned by the user', async () => {
     const { app, query, pool } = await createUserApiTestContext();
 
     const otherUserId = uuidv4();
     await query(
-      'INSERT INTO users (user_id, email, password_hash, api_key, encryption_salt, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE)',
-      [otherUserId, 'other@example.com', 'hash', 'api-key-2', 'salt']
+      'INSERT INTO users (user_id, email, password_hash, api_key, script_token, encryption_salt, email_verified) VALUES ($1, $2, $3, $4, $5, $6, TRUE)',
+      [otherUserId, 'other@example.com', 'hash', 'api-key-2', 'script-token-2', 'salt']
     );
 
     const agentId = uuidv4();
@@ -302,6 +396,218 @@ describe('User API routes (messaging)', () => {
     await pool.end();
   });
 
+  it('GET /api/user/messages/:agentId exposes runCommand for agent messages', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const messageId = uuidv4();
+    const runCommand = 'gemini --model gemini-2.5-pro -p -';
+
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'Alpha',
+      1,
+    ]);
+    await query(
+      `INSERT INTO messages (message_id, agent_id, message_type, content, priority, urgent, allow_free_response, run_command, created_at)
+       VALUES ($1, $2, 'message', $3, 0, FALSE, FALSE, $4, $5)`,
+      [messageId, agentId, 'ran', runCommand, new Date('2026-01-01T00:00:00.000Z')]
+    );
+
+    const res = await request(app).get(`/api/user/messages/${agentId}`).expect(200);
+    const message = res.body.messages.find((entry) => entry.messageId === messageId);
+
+    expect(message).toBeTruthy();
+    expect(message.runCommand).toBe(runCommand);
+
+    await pool.end();
+  });
+
+  it('GET /api/user/messages/all includes runCommand for merged agent messages', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const messageId = uuidv4();
+    const runCommand = 'claude --model sonnet -p';
+
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'Alpha',
+      1,
+    ]);
+    await query(
+      `INSERT INTO messages (message_id, agent_id, message_type, content, priority, urgent, allow_free_response, run_command, created_at)
+       VALUES ($1, $2, 'message', $3, 0, FALSE, FALSE, $4, $5)`,
+      [messageId, agentId, 'hello', runCommand, new Date('2026-01-01T00:00:00.000Z')]
+    );
+
+    const res = await request(app).get('/api/user/messages/all').expect(200);
+    const message = res.body.messages.find((entry) => entry.messageId === messageId);
+
+    expect(message).toBeTruthy();
+    expect(message.runCommand).toBe(runCommand);
+
+    await pool.end();
+  });
+
+  it('GET /api/user/messages/:agentId/status/:messageId marks timed-out unread messages as failed when agent is idle', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const staleMsgId = uuidv4();
+    const staleTimestamp = new Date(Date.now() - (3 * 60 * 1000));
+
+    await query(
+      `INSERT INTO agents (agent_id, user_id, agent_name, position, is_working, last_working_heartbeat_at)
+       VALUES ($1, $2, $3, $4, FALSE, NULL)`,
+      [agentId, userId, 'Alpha', 1]
+    );
+
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at)
+       VALUES ($1, $2, $3, FALSE, $4, NULL)`,
+      [staleMsgId, agentId, 'stale unread', staleTimestamp]
+    );
+
+    const failedStatus = await request(app)
+      .get(`/api/user/messages/${agentId}/status/${staleMsgId}`)
+      .expect(200);
+
+    expect(failedStatus.body).toMatchObject({
+      messageId: staleMsgId,
+      readAt: null,
+      deliveryState: 'failed',
+      deliveryFailed: true,
+      failedReason: 'agent_not_receiving'
+    });
+
+    await query(
+      `UPDATE agents
+       SET is_working = TRUE, last_working_heartbeat_at = $2
+       WHERE agent_id = $1`,
+      [agentId, new Date()]
+    );
+
+    const pendingWhileWorking = await request(app)
+      .get(`/api/user/messages/${agentId}/status/${staleMsgId}`)
+      .expect(200);
+
+    expect(pendingWhileWorking.body).toMatchObject({
+      messageId: staleMsgId,
+      readAt: null,
+      deliveryState: 'pending',
+      deliveryFailed: false,
+      failedReason: null
+    });
+
+    await pool.end();
+  });
+
+  it('GET /api/user/messages/:agentId/status returns multiple delivery states in one request', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const staleMsgId = uuidv4();
+    const readMsgId = uuidv4();
+    const staleTimestamp = new Date(Date.now() - (3 * 60 * 1000));
+    const readTimestamp = new Date();
+
+    await query(
+      `INSERT INTO agents (agent_id, user_id, agent_name, position, is_working, last_working_heartbeat_at)
+       VALUES ($1, $2, $3, $4, FALSE, NULL)`,
+      [agentId, userId, 'Alpha', 1]
+    );
+
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at)
+       VALUES ($1, $2, $3, FALSE, $4, NULL)`,
+      [staleMsgId, agentId, 'stale unread', staleTimestamp]
+    );
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at)
+       VALUES ($1, $2, $3, FALSE, $4, $5)`,
+      [readMsgId, agentId, 'read', staleTimestamp, readTimestamp]
+    );
+
+    const res = await request(app)
+      .get(`/api/user/messages/${agentId}/status?ids=${staleMsgId},${readMsgId}`)
+      .expect(200);
+
+    expect(res.body.statuses).toHaveLength(2);
+    expect(res.body.statuses[0]).toMatchObject({
+      messageId: staleMsgId,
+      readAt: null,
+      deliveryState: 'failed',
+      deliveryFailed: true,
+      failedReason: 'agent_not_receiving'
+    });
+    expect(res.body.statuses[1]).toMatchObject({
+      messageId: readMsgId,
+      deliveryState: 'read',
+      deliveryFailed: false,
+      failedReason: null
+    });
+    expect(res.body.statuses[1].readAt).toBeTruthy();
+
+    await pool.end();
+  });
+
+  it('GET /api/user/messages/:agentId returns delivery state metadata for user messages', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const failedMsgId = uuidv4();
+    const hiddenMsgId = uuidv4();
+    const readMsgId = uuidv4();
+
+    await query(
+      `INSERT INTO agents (agent_id, user_id, agent_name, position, is_working, last_working_heartbeat_at)
+       VALUES ($1, $2, $3, $4, FALSE, NULL)`,
+      [agentId, userId, 'Alpha', 1]
+    );
+
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at, hidden_from_agent)
+       VALUES ($1, $2, $3, FALSE, $4, NULL, FALSE)`,
+      [failedMsgId, agentId, 'should fail', new Date(Date.now() - (5 * 60 * 1000))]
+    );
+
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at, hidden_from_agent)
+       VALUES ($1, $2, $3, FALSE, $4, NULL, TRUE)`,
+      [hiddenMsgId, agentId, 'hidden from agent', new Date(Date.now() - (5 * 60 * 1000))]
+    );
+
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at, read_at, hidden_from_agent)
+       VALUES ($1, $2, $3, FALSE, $4, $5, FALSE)`,
+      [readMsgId, agentId, 'already read', new Date(Date.now() - (5 * 60 * 1000)), new Date()]
+    );
+
+    const res = await request(app).get(`/api/user/messages/${agentId}`).expect(200);
+    const byId = new Map(res.body.messages.filter((m) => m.type === 'user_message').map((m) => [m.messageId, m]));
+
+    expect(byId.get(failedMsgId)).toMatchObject({
+      deliveryState: 'failed',
+      deliveryFailed: true,
+      failedReason: 'agent_not_receiving'
+    });
+    expect(byId.get(hiddenMsgId)).toMatchObject({
+      deliveryState: 'pending',
+      deliveryFailed: false,
+      failedReason: null
+    });
+    expect(byId.get(readMsgId)).toMatchObject({
+      deliveryState: 'read',
+      deliveryFailed: false,
+      failedReason: null
+    });
+
+    await pool.end();
+  });
+
   it('GET /api/user/messages/:agentId rejects invalid cursor values', async () => {
     const { app, query, pool, userId } = await createUserApiTestContext();
 
@@ -315,6 +621,41 @@ describe('User API routes (messaging)', () => {
 
     const res = await request(app).get(`/api/user/messages/${agentId}`).query({ cursor: 'not-a-number' }).expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
+
+    await pool.end();
+  });
+
+  it('GET /api/user/messages/:agentId redacts queued self-update payloads from conversation', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+
+    const agentId = uuidv4();
+    const userMsgId = uuidv4();
+    const queuedPayload = 'ivBase64:tagBase64:ciphertextBase64';
+    const queuedContent = `__AGENT_UPDATE__:${queuedPayload}`;
+
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+      agentId,
+      userId,
+      'Updater',
+      1,
+    ]);
+    await query(
+      `INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, created_at)
+       VALUES ($1, $2, $3, TRUE, $4)`,
+      [userMsgId, agentId, queuedContent, new Date('2026-01-03T00:00:00.000Z')]
+    );
+
+    const res = await request(app).get(`/api/user/messages/${agentId}`).expect(200);
+    const queued = res.body.messages.find((m) => m.messageId === userMsgId);
+
+    expect(queued).toBeTruthy();
+    expect(queued).toMatchObject({
+      type: 'user_message',
+      messageSubtype: 'queued_self_update',
+      encrypted: false,
+    });
+    expect(queued.content).toMatch(/self-update package queued/i);
+    expect(queued.content).not.toContain(queuedPayload);
 
     await pool.end();
   });

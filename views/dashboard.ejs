@@ -1,14 +1,26 @@
 <!-- Global Floating Context Menu for Agents -->
 <div id="floatingAgentMenu"
-    class="hidden fixed w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-[100] overflow-hidden">
-    <button id="floatingHideAllMessagesBtn"
-        class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
-        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-        </svg>
-        Hide All Messages
-    </button>
+    class="hidden fixed w-72 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-[100] overflow-hidden">
+    <div class="agent-menu-stats px-3 py-2 border-b border-slate-700/50 bg-slate-900/40 text-[10px] space-y-1">
+        <p class="uppercase tracking-wide text-slate-500 font-semibold">Agent Stats</p>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Messages</span><span class="font-mono" data-agent-stat="message-count">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last heartbeat</span><span class="font-mono" data-agent-stat="last-heartbeat">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Visible chars</span><span class="font-mono" data-agent-stat="visible-chars">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last poll</span><span class="font-mono" data-agent-stat="last-poll">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Parent</span><span class="font-mono truncate max-w-[90px]" data-agent-stat="parent">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Children</span><span class="font-mono" data-agent-stat="children">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Computer</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-name">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">IP</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-ip">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Folder</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="folder-name">—</span></div>
+        <div class="space-y-0.5 text-slate-300">
+            <span class="text-slate-400 block">Project path</span>
+            <span class="font-mono text-[9px] block break-all" data-agent-stat="project-path">—</span>
+        </div>
+        <div class="space-y-0.5 text-slate-300">
+            <span class="text-slate-400 block">Folder path</span>
+            <span class="font-mono text-[9px] block break-all" data-agent-stat="folder-path">—</span>
+        </div>
+    </div>
     <button id="floatingClearConversationBtn"
         class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
         <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -16,6 +28,22 @@
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
         </svg>
         Clear Conversation
+    </button>
+    <button id="floatingHideAllMessagesBtn"
+        class="w-full px-4 py-3 text-left text-xs text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+        </svg>
+        Hide All Messages
+    </button>
+    <button id="floatingRemoveFromGroupBtn"
+        class="hidden w-full px-4 py-3 text-left text-xs text-violet-300 hover:bg-violet-900/30 hover:text-violet-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        Remove from Group
     </button>
     <button id="floatingArchiveAgentBtn"
         class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
@@ -38,13 +66,66 @@
 <!-- Council Chamber Interface -->
 <div id="dashboardRoot" data-encryption-salt="<%= encryptionSalt || '' %>"
     data-is-google-auth="<%= isGoogleAuth ? 'true' : 'false' %>"
-    class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 space-y-6 lg:h-[calc(100vh-8rem)] flex flex-col">
+    class="w-full px-4 sm:px-6 lg:px-8 space-y-6 lg:h-[calc(100vh-8rem)] flex flex-col">
 
     <!-- Council Chamber - Main View -->
-    <div class="grid gap-5 lg:grid-cols-[45fr,55fr] flex-1 lg:overflow-hidden min-h-0">
+    <div class="dashboard-main-grid grid gap-5 flex-1 lg:overflow-hidden min-h-0">
 
         <!-- Council Chamber Circle -->
         <div class="council-chamber glass-panel flex flex-col h-full relative overflow-hidden">
+            <!-- Council Minimized View (desktop only) -->
+            <div id="councilMinimizedView" class="hidden flex-col items-center py-6 gap-8 h-full bg-slate-900/40">
+                <button id="maximizeCouncilBtn"
+                    class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 hover:bg-emerald-500/30 transition shadow-lg shadow-emerald-900/20"
+                    title="Expand Council" aria-label="Expand Council">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                </button>
+
+                <div class="flex flex-col gap-6 mt-4">
+                    <div class="flex flex-col items-center gap-1 group relative">
+                        <div
+                            class="w-10 h-10 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400">
+                            <span class="font-bold text-sm" id="minimizedStatsUrgent">
+                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
+                            </span>
+                        </div>
+                        <span class="text-[9px] uppercase tracking-tighter text-slate-500 font-bold">Urgent</span>
+                        <div
+                            class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-xl border border-slate-700">
+                            Urgent Agents</div>
+                    </div>
+
+                    <div class="flex flex-col items-center gap-1 group relative">
+                        <div
+                            class="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                            <span class="font-bold text-sm" id="minimizedStatsAttention">
+                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
+                            </span>
+                        </div>
+                        <span class="text-[9px] uppercase tracking-tighter text-slate-500 font-bold">Needs</span>
+                        <div
+                            class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-xl border border-slate-700">
+                            Needs Attention</div>
+                    </div>
+
+                    <div class="flex flex-col items-center gap-1 group relative">
+                        <div
+                            class="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                            <span class="font-bold text-sm" id="minimizedStatsTotal">
+                                <%= agents ? agents.length : 0 %>
+                            </span>
+                        </div>
+                        <span class="text-[9px] uppercase tracking-tighter text-slate-500 font-bold">Total</span>
+                        <div
+                            class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-xl border border-slate-700">
+                            Total Agents</div>
+                    </div>
+                </div>
+            </div>
+
             <div id="mobileHeader" class="px-5 pt-3 pb-2 border-b border-white/5 z-10 transition-all duration-300">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
@@ -58,7 +139,16 @@
                             </svg>
                         </button>
 
-                        <h2 class="text-xl font-semibold text-white mt-1 whitespace-nowrap">Council Chamber</h2>
+                        <h2 class="council-header-title text-xl font-semibold text-white mt-1 whitespace-nowrap">Council Chamber</h2>
+
+                        <button id="minimizeCouncilBtn"
+                            class="hidden lg:flex w-8 h-8 rounded-full bg-slate-800/80 border border-slate-700 items-center justify-center text-slate-400 hover:text-white transition ml-2"
+                            title="Minimize Council" aria-label="Minimize Council">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                            </svg>
+                        </button>
 
                         <!-- Header Nav Right -->
                         <button id="headerNavRight"
@@ -79,7 +169,24 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="flex gap-2">
+                    <button id="mobileCouncilActionsToggle" type="button"
+                        class="mobile-council-actions-toggle hidden w-8 h-8 rounded-full bg-slate-800/80 border border-slate-700 items-center justify-center text-slate-300 hover:text-white transition"
+                        aria-label="Open council actions" aria-expanded="false" aria-controls="councilHeaderActions">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                        </svg>
+                    </button>
+                    <div id="councilHeaderActions" class="council-header-actions flex gap-2">
+                        <button id="mobileGroupManagementBtn" type="button"
+                            class="mobile-group-management-action hidden px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-violet-300 hover:text-violet-200 hover:border-violet-400/50 hover:bg-violet-400/10 transition text-xs items-center gap-2"
+                            title="Group Management">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span>Groups</span>
+                        </button>
                         <button id="openDecryptionModalBtn" type="button"
                             class="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-slate-400 hover:text-emerald-400 hover:border-emerald-400/50 hover:bg-emerald-400/10 transition text-xs flex items-center gap-2"
                             title="Set Decryption Password">
@@ -161,9 +268,19 @@
                 </div>
             </div>
 
+            <!-- Group Back Button (shown in group zoom view, placed below the council header divider) -->
+            <button id="groupBackBtn"
+                class="hidden relative z-30 self-start ml-6 mt-3 px-3 py-2 rounded-lg bg-slate-800/95 border border-slate-600 text-slate-200 hover:text-white hover:bg-slate-700 transition-all text-xs flex items-center gap-2 backdrop-blur-sm"
+                aria-label="Back to all agents">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                </svg>
+                <span id="groupBackLabel">Back</span>
+            </button>
+
             <!-- Circular Agent Display -->
             <div id="councilCircle" class="flex-1 flex items-center justify-center p-8 min-h-0 relative">
-                <div class="council-orbit">
+                <div class="council-orbit relative w-full h-full">
                     <!-- Orbital rings that visualize urgency distance -->
                     <div class="council-rings pointer-events-none">
                         <div class="orbital-ring orbital-ring--urgent"></div>
@@ -176,14 +293,18 @@
 
                     <!-- Center User Position -->
                     <div class="council-center absolute" style="left: 50%; top: 50%; transform: translate(-50%, -50%);">
-                        <div
-                            class="w-16 h-16 rounded-full border border-slate-500/30 flex items-center justify-center shadow-2xl shadow-emerald-900/50 backdrop-blur-xl relative overflow-hidden group cursor-pointer transition-transform duration-500 hover:scale-105">
-                            <!-- Planet Image -->
-                            <img src="/images/center-planet-v2.jpg" alt="You"
-                                class="w-full h-full object-cover rounded-full" />
+                        <div id="councilCenterAvatar"
+                            class="council-center__avatar w-16 h-16 rounded-full border border-slate-500/30 flex items-center justify-center shadow-2xl shadow-emerald-900/50 backdrop-blur-xl relative overflow-hidden group cursor-pointer transition-transform duration-500 hover:scale-105">
+                            <img src="/images/center-planet-v2.jpg" alt="You" class="w-full h-full object-cover rounded-full" />
                             <div class="absolute inset-0 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] rounded-full"></div>
                         </div>
+                        <div id="councilCenterGroup"
+                            class="council-center__group hidden w-16 h-16 rounded-full border flex items-center justify-center shadow-2xl backdrop-blur-xl relative overflow-hidden cursor-default select-none">
+                            <span id="councilCenterGroupText" class="council-center__group-text px-2"></span>
+                            <div class="absolute inset-0 shadow-[inset_0_0_20px_rgba(0,0,0,0.55)] rounded-full"></div>
+                        </div>
                         <p
+                            id="councilCenterLabel"
                             class="text-center text-[10px] uppercase tracking-widest text-emerald-400/80 font-bold mt-4 text-shadow">
                             You</p>
                     </div>
@@ -237,6 +358,8 @@
                                 data-agent-unread="<%= agent.unreadCount %>"
                                 data-agent-last-message="<%= agent.lastMessageTime ? agent.lastMessageTime : '' %>"
                                 data-agent-last-activity="<%= agent.lastActivityTime ? agent.lastActivityTime : '' %>"
+                                data-agent-last-heartbeat="<%= agent.lastWorkingHeartbeatTime ? agent.lastWorkingHeartbeatTime : '' %>"
+                                data-agent-working="<%= agent.isWorking ? 'true' : 'false' %>"
                                 data-agent-ring="<%= ringKey %>" data-agent-ring-index="<%= ringIdx %>"
                                 data-agent-index="<%= index %>"
                                 style="left: <%= x %>%; top: <%= y %>%; transform: translate(-50%, -50%);">
@@ -281,11 +404,16 @@
                                                     <%= agent.unreadCount %>
                                                 </span>
                                             </div>
-                                            <% } else { %>
-                                                <div class="absolute bottom-0 right-0 z-20 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-900 shadow-[0_0_10px_rgba(52,211,153,0.6)]"
-                                                    title="Waiting for instructions">
+                                            <% } else if (agent.isWorking) { %>
+                                                <div class="absolute bottom-0 right-0 z-20 w-5 h-5 rounded-md bg-amber-500 border-2 border-slate-900 flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.6)] animate-pulse"
+                                                    title="Agent is working...">
+                                                    <span class="text-[8px]">🛠️</span>
                                                 </div>
-                                                <% } %>
+                                                <% } else { %>
+                                                    <div class="absolute bottom-0 right-0 z-20 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-900 shadow-[0_0_10px_rgba(52,211,153,0.6)]"
+                                                        title="Waiting for instructions">
+                                                    </div>
+                                                    <% } %>
                                 </div>
 
                                 <!-- Agent Name -->
@@ -345,42 +473,71 @@
             </div>
 
 
-            <!-- Quick Stats Bar (Now Header) - Moved ABOVE list -->
-            <div id="mobileStatsToggle"
-                class="px-6 py-3 border-t border-white/5 bg-black/20 backdrop-blur group relative transition-colors z-20">
-                <div class="grid grid-cols-3 gap-4 text-center text-xs">
-                    <div>
-                        <p class="text-emerald-400 font-bold text-lg" id="statsTotal">
-                            <%= agents ? agents.length : 0 %>
-                        </p>
-                        <p class="text-slate-400">Total Agents</p>
-                    </div>
-                    <div>
-                        <p class="text-amber-400 font-bold text-lg" id="statsAttention">
-                            <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
-                        </p>
-                        <p class="text-slate-400">Need Attention</p>
-                    </div>
-                    <div>
-                        <p class="text-red-400 font-bold text-lg" id="statsUrgent">
-                            <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
-                        </p>
-                        <p class="text-slate-400">Urgent</p>
-                    </div>
-                </div>
-            </div>
+            <div id="councilListResizeHandle"
+                class="dashboard-resize-handle dashboard-resize-handle--horizontal hidden xl:flex"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize agent list"
+                tabindex="0"></div>
 
-            <!-- Agent List Panel (scrollable list below orbit) -->
-            <div id="agentListPanel" class="agent-list-panel">
-                <div class="agent-list-header flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                        <span class="agent-list-title">Agents</span>
-                        <span class="agent-list-count" id="agentListCount">
-                            <%= agents ? agents.length : 0 %>
-                        </span>
+            <div id="councilListSection" class="council-list-section">
+                <!-- Quick Stats Bar (Now Header) - Moved ABOVE list -->
+                <div id="mobileStatsToggle"
+                    class="px-6 py-3 border-t border-white/5 bg-black/20 backdrop-blur group relative transition-colors z-20">
+                    <div class="grid grid-cols-3 gap-4 text-center text-xs">
+                        <div>
+                            <p class="text-emerald-400 font-bold text-lg" id="statsTotal">
+                                <%= agents ? agents.length : 0 %>
+                            </p>
+                            <p class="text-slate-400">Total Agents</p>
+                        </div>
+                        <div>
+                            <p class="text-amber-400 font-bold text-lg" id="statsAttention">
+                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
+                            </p>
+                            <p class="text-slate-400">Need Attention</p>
+                        </div>
+                        <div>
+                            <p class="text-red-400 font-bold text-lg" id="statsUrgent">
+                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
+                            </p>
+                            <p class="text-slate-400">Urgent</p>
+                        </div>
                     </div>
                 </div>
-                <div class="agent-list-scroll" id="agentListScroll">
+
+                <!-- Agent List Panel (scrollable list below orbit) -->
+                <div id="agentListPanel" class="agent-list-panel">
+                    <div class="agent-list-header flex items-center justify-between">
+                        <div class="agent-list-header__meta flex items-center gap-2">
+                            <span class="agent-list-title">Agents</span>
+                            <span class="agent-list-count" id="agentListCount">
+                                <%= agents ? agents.length : 0 %>
+                            </span>
+                        </div>
+                        <div class="agent-list-search">
+                            <label class="sr-only" for="agentListSearchInput">Search agents</label>
+                            <input
+                                id="agentListSearchInput"
+                                class="agent-list-search__input"
+                                type="search"
+                                name="agent_search_query"
+                                placeholder="Search agents"
+                                value=""
+                                readonly
+                                autocomplete="off"
+                                autocorrect="off"
+                                autocapitalize="none"
+                                inputmode="search"
+                                data-form-type="other"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
+                                data-bwignore="true"
+                                spellcheck="false"
+                                aria-label="Search agents">
+                        </div>
+                    </div>
+                    <div class="agent-list-scroll" id="agentListScroll">
                     <% if (agents && agents.length> 0) {
                         const orderedAgents = [...agents].sort((a, b) => (a.position || 0) - (b.position || 0));
                         orderedAgents.forEach((agent, index) => {
@@ -388,13 +545,16 @@
                         (agent.lastMessagePriority === 'normal' ? 'attention' : 'idle');
                         const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0;
                         %>
-                        <div class="agent-list-item agent-list-item--<%= ringKey %> <%= needsAttention ? 'agent-list-item--attention' : '' %>"
+                        <div class="agent-list-item agent-list-item--<%= ringKey %> <%= needsAttention ? 'agent-list-item--attention' : '' %> group"
                             data-agent-id="<%= agent.agentId %>" data-agent-name="<%= agent.name %>"
                             data-agent-type="<%= agent.agentType || 'standard' %>"
+                            data-agent-external-provider="<%= agent.externalProvider || '' %>"
                             data-agent-priority="<%= agent.highestPriority %>"
                             data-agent-unread="<%= agent.unreadCount %>"
                             data-agent-last-activity="<%= agent.lastActivityTime ? agent.lastActivityTime : '' %>"
-                            data-agent-last-message="<%= agent.lastMessageTime ? agent.lastMessageTime : '' %>">
+                            data-agent-last-message="<%= agent.lastMessageTime ? agent.lastMessageTime : '' %>"
+                            data-agent-last-heartbeat="<%= agent.lastWorkingHeartbeatTime ? agent.lastWorkingHeartbeatTime : '' %>"
+                            data-agent-working="<%= agent.isWorking ? 'true' : 'false' %>">
                             <div class="agent-list-item__avatar">
                                 <div class="agent-list-item__marble">
                                     <%- agent.marbleSvg %>
@@ -427,11 +587,24 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="agent-list-item__arrow">
-                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-4 h-4">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M9 5l7 7-7 7" />
-                                </svg>
+                            <div class="agent-list-item__actions flex items-center gap-1">
+                                <!-- Open in Side Panel Button -->
+                                <button type="button"
+                                    class="chat-tile__pin-btn agent-list-pin-btn"
+                                    data-agent-id="<%= agent.agentId %>" data-agent-name="<%= agent.name %>"
+                                    data-agent-external-provider="<%= agent.externalProvider || '' %>"
+                                    title="Pin chat to side panel" aria-label="Pin <%= agent.name %> chat to side panel">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M12 17.5V22m0-4.5l4.2-4.2a6 6 0 10-8.4 0L12 17.5z" />
+                                    </svg>
+                                </button>
+                                <div class="agent-list-item__arrow">
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-4 h-4">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </div>
                             </div>
                         </div>
                         <% }); } else { %>
@@ -439,291 +612,586 @@
                                 <p>No agents connected</p>
                             </div>
                             <% } %>
+                    </div>
                 </div>
             </div>
+
         </div>
 
-        <!-- Message Panel -->
-        <aside class="glass-panel flex flex-col h-full min-h-0">
-            <!-- Selected Agent Header -->
-            <div id="agentPanelHeader" class="hidden px-5 pt-3 pb-2 border-b border-white/5 relative z-20">
-                <div class="flex items-start gap-3">
-                    <div
-                        class="w-14 h-14 rounded-full border-2 border-emerald-400/60 shadow-lg shadow-emerald-500/30 relative overflow-hidden bg-slate-900">
-                        <div id="selectedAgentImage" class="w-full h-full marble-container"></div>
-                        <!-- Agent Initials Overlay in Chat Header -->
-                        <div id="selectedAgentInitials"
-                            class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <span class="text-white font-bold text-lg opacity-90"
-                                style="text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);"></span>
-                        </div>
-                        <div class="absolute inset-0 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]"></div>
-                    </div>
-                    <div class="flex-1 relative group cursor-pointer" id="agentHeaderInfo">
-                        <h3 id="selectedAgentName"
-                            class="text-lg font-semibold text-white group-hover:text-emerald-300 transition-colors">
-                        </h3>
-                        <p id="agentLastActive" class="text-xs text-slate-400 mt-0.5"></p>
-                        <div class="flex gap-2 mt-2">
-                            <span id="agentStatusPill" class="status-pill status-pill--neutral text-[10px]">Idle</span>
-                            <span id="agentUnreadBadge" class="hidden status-pill status-pill--warn text-[10px]"></span>
-                        </div>
+        <div id="councilResizeHandle"
+            class="dashboard-resize-handle hidden xl:flex"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize council chamber"
+            tabindex="0"></div>
 
-                        <!-- Context Menu (Floating) -->
-                        <div id="agentContextMenu"
-                            class="hidden absolute top-full left-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                            <button id="hideAllMessagesBtn"
-                                class="w-full px-4 py-3 text-left text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 border-b border-slate-700/50">
-                                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                                </svg>
-                                Hide All Messages
-                            </button>
-                            <button id="clearConversationBtn"
-                                class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
-                                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                                Clear Conversation
-                            </button>
-                            <button id="archiveAgentBtn"
-                                class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
-                                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                                </svg>
-                                Archive Agent
-                            </button>
-                            <button id="deleteAgentBtn"
-                                class="w-full px-4 py-3 text-left text-xs text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-colors flex items-center gap-2">
-                                <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                                Delete Agent
-                            </button>
+        <!-- Multi-Chat Side Panels Container -->
+        <div id="multiChatContainer" class="multi-chat-container">
+            <!-- Message Panel (Main Chat) -->
+            <aside
+                class="chat-tile chat-tile--main glass-panel flex flex-col h-full min-h-0 relative chat-drop-container">
+                <!-- Selected Agent Header -->
+                <div id="agentPanelHeader" class="hidden px-5 pt-3 pb-2 border-b border-white/5 relative z-20">
+                    <div class="flex items-start gap-3">
+                        <div
+                            class="w-14 h-14 rounded-full border-2 border-emerald-400/60 shadow-lg shadow-emerald-500/30 relative overflow-hidden bg-slate-900">
+                            <div id="selectedAgentImage" class="w-full h-full marble-container"></div>
+                            <!-- Agent Initials Overlay in Chat Header -->
+                            <div id="selectedAgentInitials"
+                                class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span class="text-white font-bold text-lg opacity-90"
+                                    style="text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);"></span>
+                            </div>
+                            <div class="absolute inset-0 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]"></div>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Placeholder -->
-            <div id="agentPanelPlaceholder" class="flex-1 flex items-center justify-center p-6">
-                <div class="text-center text-slate-500">
-                    <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                    <p class="text-sm font-semibold">Select an agent from the council</p>
-                    <p class="text-xs text-slate-600 mt-1">Click on any agent to view their messages</p>
-                </div>
-            </div>
-
-            <!-- Messages Area -->
-            <div id="conversationArea"
-                class="hidden flex-1 overflow-y-auto px-5 py-4 pb-48 space-y-4 text-sm min-h-0 outline-none"
-                tabindex="0">
-            </div>
-
-            <!-- Message Input -->
-            <div id="messageInputArea"
-                class="hidden absolute bottom-0 left-0 right-0 z-20 border-t border-white/10 px-5 py-4 bg-slate-900/40 backdrop-blur-xl shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.5)]">
-                <form id="userMessageForm" class="space-y-3">
-                    <!-- Image Preview Area -->
-                    <div id="imagePreviewArea" class="hidden">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs text-slate-400 uppercase tracking-wider font-medium">Attachments</span>
-                            <button type="button" id="clearAllImagesBtn"
-                                class="text-xs text-red-400 hover:text-red-300 transition">
-                                Clear All
-                            </button>
-                        </div>
-                        <div id="imagePreviewContainer"
-                            class="flex flex-wrap gap-2 p-2 bg-white/5 rounded-lg border border-white/10 max-h-40 overflow-y-auto">
-                            <!-- Image previews will be inserted here dynamically -->
-                        </div>
-                    </div>
-                    <div class="relative">
-                        <textarea id="userMessageInput" rows="3"
-                            class="w-full bg-white/5 border border-white/10 focus:border-emerald-400/70 focus:ring-0 text-sm text-slate-100 rounded-xl p-3 pr-12 placeholder:text-slate-500 transition resize-none"
-                            placeholder="Type your message..." disabled></textarea>
-                        <!-- File Input Button for general files (DISABLED BY DEFAULT - remove 'hidden' class to enable) -->
-                        <label for="generalFileInput" id="generalFileUploadLabel"
-                            class="hidden absolute right-12 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-sky-500/20 hover:text-sky-400 text-slate-400 cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Attach files (PDF, TXT, etc.)">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                            </svg>
-                        </label>
-                        <input type="file" id="generalFileInput"
-                            accept=".pdf,.txt,.md,.csv,.zip,.gz,.tar,.json,.xml,.html,.css,.js" multiple class="hidden"
-                            disabled />
-                        <!-- Image Input Button -->
-                        <label for="imageFileInput" id="imageUploadLabel"
-                            class="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-400 cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Attach images">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                        </label>
-                        <input type="file" id="imageFileInput" accept="image/png,image/jpeg,image/webp,image/gif"
-                            multiple class="hidden" disabled />
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <p class="text-[10px] text-slate-500 uppercase tracking-wider">Ctrl+Enter to send • ESC
-                            to
-                            select agent</p>
-                        <div class="flex items-center gap-2">
-                            <!-- Agent Config Dropdown -->
-                            <div class="relative" id="agentConfigContainer">
-                                <button id="agentConfigBtn" type="button"
-                                    class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/50 hover:bg-slate-700/80 hover:border-slate-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 group"
-                                    disabled title="Agent Configuration">
-                                    <div class="flex items-center gap-1.5 text-[10px]">
-                                        <span id="configStatusProvider"
-                                            class="text-emerald-400 font-medium whitespace-nowrap">-</span>
-                                        <span class="text-slate-600 mx-0.5">|</span>
-                                        <span id="configStatusMode"
-                                            class="text-sky-400 font-medium whitespace-nowrap">-</span>
-                                    </div>
-                                    <div class="w-px h-3 bg-slate-700 mx-0.5"></div>
-                                    <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors"
-                                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div class="flex-1 relative group cursor-pointer" id="agentHeaderInfo">
+                            <div class="flex items-center gap-3">
+                                <h3 id="selectedAgentName"
+                                    class="text-lg font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                                </h3>
+                                <button id="fastModeChatListToggle" type="button"
+                                    class="fast-mode-chat-list-toggle"
+                                    aria-label="Open all chats and groups" title="Open all chats and groups">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        aria-hidden="true">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            d="M4 6.5h16M4 12h16M4 17.5h16" />
                                     </svg>
                                 </button>
-                                <!-- Config Dropdown Panel -->
-                                <div id="agentConfigDropdown"
-                                    class="hidden absolute bottom-full right-0 mb-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-                                    <div class="px-4 py-3 border-b border-slate-700/50 bg-slate-900/50">
-                                        <h4 class="text-sm font-semibold text-white">Agent Configuration</h4>
-                                        <p class="text-[10px] text-slate-400">Changes apply at next loop</p>
-                                    </div>
-                                    <div class="p-4 space-y-3">
-                                        <!-- Provider -->
-                                        <div>
-                                            <label
-                                                class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Provider</label>
-                                            <select id="configProvider"
-                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
-                                                <option value="codex">Codex (Default)</option>
-                                                <option value="claude">Claude</option>
-                                                <option value="gemini">Gemini</option>
-                                                <option value="ollama">Ollama</option>
-                                                <option value="openrouter">OpenRouter</option>
-                                            </select>
-                                        </div>
-
-                                        <!-- Model (populated dynamically) -->
-                                        <div>
-                                            <label
-                                                class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Model</label>
-                                            <select id="configModel"
-                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
-                                                <option value="default">Default</option>
-                                            </select>
-                                        </div>
-
-                                        <!-- Codex-specific options -->
-                                        <div id="codexOptions" class="space-y-2">
-                                            <label
-                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Codex
-                                                Sandbox</label>
-                                            <select id="configCodexSandbox"
-                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
-                                                <option value="read-only">Read Only</option>
-                                                <option value="workspace-write">Workspace Write</option>
-                                                <option value="danger-full-access">Full Access (Danger)</option>
-                                            </select>
-                                            <label
-                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
-                                                <input type="checkbox" id="configCodexBypass"
-                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
-                                                Bypass All (--yolo)
-                                            </label>
-                                        </div>
-
-                                        <!-- Claude-specific options -->
-                                        <div id="claudeOptions" class="hidden space-y-2">
-                                            <label
-                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Claude
-                                                Permission Mode</label>
-                                            <select id="configClaudeMode"
-                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
-                                                <option value="default">Default</option>
-                                                <option value="acceptEdits">Accept Edits</option>
-                                                <option value="plan">Plan Only</option>
-                                                <option value="bypassPermissions">Bypass Permissions</option>
-                                            </select>
-                                            <label
-                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
-                                                <input type="checkbox" id="configClaudeSkip"
-                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
-                                                Skip All Permissions (Dangerous)
-                                            </label>
-                                        </div>
-
-                                        <!-- Gemini-specific options -->
-                                        <div id="geminiOptions" class="hidden space-y-2">
-                                            <label
-                                                class="text-[10px] text-slate-400 uppercase tracking-wider block">Gemini
-                                                Mode</label>
-                                            <select id="configGeminiMode"
-                                                class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
-                                                <option value="sandbox">Sandboxed</option>
-                                                <option value="no-sandbox">No Sandbox</option>
-                                            </select>
-                                            <label
-                                                class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
-                                                <input type="checkbox" id="configGeminiYolo"
-                                                    class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
-                                                YOLO Mode (Auto-approve all)
-                                            </label>
-                                        </div>
-
-                                        <button id="saveConfigBtn" type="button"
-                                            class="w-full px-3 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition">
-                                            Save Config
-                                        </button>
-                                    </div>
+                                <span id="selectedAgentWorkingIndicator" class="chat-header__working-indicator"
+                                    style="display:none;" title="Agent is working..."></span>
+                                <!-- Inter-Agent Communication Toggle -->
+                                <div id="interAgentStatsInline"
+                                    class="hidden flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 cursor-pointer hover:bg-slate-700/50 transition-all text-[10px]"
+                                    title="Click to toggle agent-to-agent communication">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                    </svg>
+                                    <span id="interAgentStatsStatus" class="font-medium text-slate-400">A2A Off</span>
                                 </div>
                             </div>
-                            <!-- Stop Agent Button -->
-                            <button id="agentStopBtn" type="button"
-                                class="px-3 py-2 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-xs font-semibold tracking-wide hover:bg-red-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-                                disabled title="Stop Agent">
-                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                            <p id="agentLastActive" class="text-xs text-slate-400 mt-0.5"></p>
+                            <div class="flex gap-2 mt-2">
+                                <span id="agentStatusPill"
+                                    class="status-pill status-pill--neutral text-[10px]">Idle</span>
+                                <span id="agentUnreadBadge"
+                                    class="hidden status-pill status-pill--warn text-[10px]"></span>
+                            </div>
+
+                            <!-- Context Menu (Floating) -->
+                            <div id="agentContextMenu"
+                                class="hidden absolute top-full left-0 mt-2 w-72 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                                <div class="agent-menu-stats px-3 py-2 border-b border-slate-700/50 bg-slate-900/40 text-[10px] space-y-1">
+                                    <p class="uppercase tracking-wide text-slate-500 font-semibold">Agent Stats</p>
+                                    <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Messages</span><span class="font-mono" data-agent-stat="message-count">—</span></div>
+                                    <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last heartbeat</span><span class="font-mono" data-agent-stat="last-heartbeat">—</span></div>
+                                    <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Visible chars</span><span class="font-mono" data-agent-stat="visible-chars">—</span></div>
+                                    <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last poll</span><span class="font-mono" data-agent-stat="last-poll">—</span></div>
+                                    <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Computer</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-name">—</span></div>
+                                    <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">IP</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-ip">—</span></div>
+                                    <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Folder</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="folder-name">—</span></div>
+                                    <div class="space-y-0.5 text-slate-300">
+                                        <span class="text-slate-400 block">Project path</span>
+                                        <span class="font-mono text-[9px] block break-all" data-agent-stat="project-path">—</span>
+                                    </div>
+                                    <div class="space-y-0.5 text-slate-300">
+                                        <span class="text-slate-400 block">Folder path</span>
+                                        <span class="font-mono text-[9px] block break-all" data-agent-stat="folder-path">—</span>
+                                    </div>
+                                </div>
+                                <button id="clearConversationBtn"
+                                    class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+                                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Clear Conversation
+                                </button>
+                                <button id="hideAllMessagesBtn"
+                                    class="w-full px-4 py-3 text-left text-xs text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+                                    <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                    </svg>
+                                    Hide All Messages
+                                </button>
+                                <button id="archiveAgentBtn"
+                                    class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+                                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                                    </svg>
+                                    Archive Agent
+                                </button>
+                                <button id="deleteAgentBtn"
+                                    class="w-full px-4 py-3 text-left text-xs text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-colors flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Delete Agent
+                                </button>
+                            </div>
+                        </div>
+                        <button id="pinToSideBtn" type="button" class="hidden chat-header__pin-btn"
+                            title="Pin selected chat to side panel" aria-label="Pin selected chat to side panel"
+                            aria-pressed="false">
+                            <span class="pin-chat-icon" aria-hidden="true">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9"
+                                        d="M12 17.5V22m0-4.5l4.2-4.2a6 6 0 10-8.4 0L12 17.5z" />
                                 </svg>
-                                <span class="hidden sm:inline">Stop</span>
+                            </span>
+                            <span class="pin-chat-label">Pin Chat</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Placeholder -->
+                <div id="agentPanelPlaceholder" class="flex-1 flex items-center justify-center p-6">
+                    <div class="text-center text-slate-500">
+                        <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <p class="text-sm font-semibold">Select an agent from the council</p>
+                        <p class="text-xs text-slate-600 mt-1">Click on any agent to view their messages</p>
+                        <!-- Fast-mode mobile: visible button to open chats list -->
+                        <button id="fastModePlaceholderOpenChats" type="button"
+                            class="fast-mode-placeholder-open-chats"
+                            aria-label="Open chats list">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6.5h16M4 12h16M4 17.5h16" />
+                            </svg>
+                            Open Chats
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Interactive HTML Space (HTML view for each agent) -->
+                <div id="mainInteractiveSpace" class="border-t border-white/5 flex-shrink-0">
+                    <div id="mainInteractiveToggle"
+                        class="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-white/5 transition select-none"
+                        title="Toggle interactive content">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                            </svg>
+                            <span id="mainInteractiveTitle"
+                                class="text-[11px] font-semibold text-cyan-400 uppercase tracking-wider">Agent
+                                Space</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <!-- Rich history navigation controls (hidden by default) -->
+                            <div id="richHistoryControls" class="hidden flex items-center gap-1 mr-1">
+                                <button id="richHistoryPrev" type="button"
+                                    class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="Previous rich message">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                </button>
+                                <span id="richHistoryCounter" class="text-[10px] text-slate-500 tabular-nums min-w-[28px] text-center select-none">1 / 1</span>
+                                <button id="richHistoryNext" type="button"
+                                    class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="Next rich message">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                                <button id="richHistoryDownload" type="button"
+                                    class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-cyan-400 hover:bg-white/10 transition ml-0.5"
+                                    title="Download as HTML">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <button id="mainInteractiveSizeBtn" type="button"
+                                class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-emerald-400 hover:bg-white/10 transition"
+                                title="Expand">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                </svg>
                             </button>
-                            <button id="userMessageSend" type="submit"
-                                class="px-4 py-2 rounded-full bg-emerald-400 text-slate-950 font-semibold text-xs tracking-wide uppercase shadow-lg shadow-emerald-500/30 hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none"
-                                disabled>
-                                Send
-                            </button>
+                            <svg id="mainInteractiveChevron"
+                                class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" fill="none"
+                                stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 9l-7 7-7-7" />
+                            </svg>
                         </div>
                     </div>
-                </form>
+                    <div id="mainInteractiveContent" class="hidden max-h-[40vh] overflow-y-auto px-4 pb-4">
+                        <div id="mainInteractivePlaceholder"
+                            class="flex flex-col items-center justify-center gap-2 py-5 text-slate-500">
+                            <svg class="w-6 h-6 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                            </svg>
+                            <span class="text-[10px] text-center leading-relaxed">No interactive content yet.<br>This
+                                agent
+                                can send interactive content here.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drag-to-Pin Drop Overlay -->
+                <div id="chatAreaDropOverlay"
+                    class="hidden absolute inset-0 pointer-events-none z-30 rounded-[1.25rem] border-2 border-dashed border-emerald-400/40 bg-emerald-400/5">
+                </div>
+
+                <!-- Messages Area -->
+                <div id="conversationArea"
+                    class="hidden flex-1 overflow-y-auto px-5 py-4 pb-48 space-y-4 text-sm min-h-0 outline-none"
+                    tabindex="0">
+                </div>
+
+                <!-- Scroll-to-Bottom Button -->
+                <button id="scrollToBottomBtn"
+                    class="hidden absolute z-30 right-4 bottom-[calc(var(--composer-height,5rem)+0.75rem)] w-9 h-9 rounded-full bg-slate-800/90 border border-slate-700/60 text-slate-300 hover:text-emerald-400 hover:border-emerald-500/50 hover:bg-slate-700/90 transition shadow-lg backdrop-blur-sm flex items-center justify-center"
+                    title="Scroll to latest message" aria-label="Scroll to bottom">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+
+                <!-- Message Input -->
+                <div id="messageInputArea"
+                    class="hidden absolute bottom-0 left-0 right-0 z-20 border-t border-white/10 px-5 py-4 bg-slate-900/40 backdrop-blur-xl shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.5)]">
+                    <div id="mobileAgentStatusStrip" class="mobile-agent-status-strip hidden" aria-live="polite"
+                        role="button" tabindex="0" aria-label="Open agent settings" aria-expanded="false">
+                        <span class="mobile-agent-status-strip__item mobile-agent-status-strip__item--strong" title="Provider">
+                            <span class="mobile-agent-status-strip__label">P:</span>
+                            <span id="mobileConfigProvider">-</span>
+                        </span>
+                        <span class="mobile-agent-status-strip__item" title="Model">
+                            <span class="mobile-agent-status-strip__label">M:</span>
+                            <span id="mobileConfigModel">-</span>
+                        </span>
+                        <span class="mobile-agent-status-strip__item" title="Mode">
+                            <span class="mobile-agent-status-strip__label">Md:</span>
+                            <span id="mobileConfigMode">-</span>
+                        </span>
+                        <span class="mobile-agent-status-strip__item" title="Access">
+                            <span class="mobile-agent-status-strip__label">Acc:</span>
+                            <span id="mobileConfigPermissions">-</span>
+                        </span>
+                    </div>
+                    <form id="userMessageForm" class="space-y-3">
+                        <!-- Image Preview Area -->
+                        <div id="imagePreviewArea" class="hidden">
+                            <div class="flex items-center justify-between mb-2">
+                                <span
+                                    class="text-xs text-slate-400 uppercase tracking-wider font-medium">Attachments</span>
+                                <button type="button" id="clearAllImagesBtn"
+                                    class="text-xs text-red-400 hover:text-red-300 transition">
+                                    Clear All
+                                </button>
+                            </div>
+                            <div id="imagePreviewContainer"
+                                class="flex flex-wrap gap-2 p-2 bg-white/5 rounded-lg border border-white/10 max-h-40 overflow-y-auto">
+                                <!-- Image previews will be inserted here dynamically -->
+                            </div>
+                        </div>
+                        <div class="relative">
+                            <textarea id="userMessageInput" rows="3"
+                                class="w-full bg-white/5 border border-white/10 focus:border-emerald-400/70 focus:ring-0 text-sm text-slate-100 rounded-xl p-3 pr-12 placeholder:text-slate-500 transition resize-none"
+                                placeholder="Type your message..." disabled></textarea>
+                            <!-- File Input Button for general attachments -->
+                            <label for="generalFileInput" id="generalFileUploadLabel"
+                                class="absolute right-12 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-sky-500/20 hover:text-sky-400 text-slate-400 cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Attach files (PDF, TXT, etc.)">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                            </label>
+                            <input type="file" id="generalFileInput"
+                                multiple
+                                class="hidden" disabled />
+                            <!-- Image Input Button -->
+                            <label for="imageFileInput" id="imageUploadLabel"
+                                class="absolute right-3 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-400 cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Attach photos or videos">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </label>
+                            <input type="file" id="imageFileInput" accept="image/*,video/*"
+                                multiple class="hidden" disabled />
+                        </div>
+                        <div class="composer-action-row flex justify-between items-center">
+                            <p class="text-[10px] text-slate-500 uppercase tracking-wider hidden md:block">Ctrl+Enter to
+                                send • ESC to select agent</p>
+                            <div class="composer-controls flex items-center gap-2 ml-auto">
+                                <!-- Agent Config Dropdown -->
+                                <div class="relative shrink max-w-[140px] sm:max-w-none" id="agentConfigContainer">
+                                    <button id="agentConfigBtn" type="button"
+                                        class="px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/50 hover:bg-slate-700/80 hover:border-slate-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 group w-full"
+                                        disabled title="Agent Configuration">
+                                        <div
+                                            class="flex items-center gap-1 text-[10px] overflow-hidden whitespace-nowrap">
+                                            <span id="configStatusProvider"
+                                                class="text-emerald-400 font-medium truncate shrink">-</span>
+                                            <span class="text-slate-600 shrink-0 mx-0.5">|</span>
+                                            <span id="configStatusMode"
+                                                class="text-sky-400 font-medium truncate shrink">-</span>
+                                        </div>
+                                        <div class="w-px h-3 bg-slate-700 shrink-0 mx-0.5"></div>
+                                        <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors shrink-0"
+                                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                    </button>
+                                    <!-- Config Dropdown Panel -->
+                                    <div id="agentConfigDropdown"
+                                        class="hidden absolute bottom-full left-0 sm:left-auto sm:right-0 mb-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden text-left">
+                                        <div class="px-4 py-3 border-b border-slate-700/50 bg-slate-900/50">
+                                            <h4 class="text-sm font-semibold text-white">Agent Configuration</h4>
+                                            <p class="text-[10px] text-slate-400">Changes apply at next loop</p>
+                                        </div>
+                                        <div class="p-4 space-y-3">
+                                            <!-- Provider -->
+                                            <div>
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Provider</label>
+                                                <select id="configProvider"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="codex">Codex (Default)</option>
+                                                    <option value="claude">Claude</option>
+                                                    <option value="gemini">Gemini</option>
+                                                    <option value="copilot">Copilot (GitHub)</option>
+                                                    <option value="antigravity">Antigravity</option>
+                                                    <option value="pi">Pi</option>
+                                                    <option value="ollama">Ollama</option>
+                                                    <option value="openrouter">OpenRouter</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Model (populated dynamically) -->
+                                            <div>
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Model</label>
+                                                <select id="configModel"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="default">Default</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Codex-specific options -->
+                                            <div id="codexOptions" class="space-y-2">
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block">Codex
+                                                    Sandbox</label>
+                                                <select id="configCodexSandbox"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="read-only">Read Only</option>
+                                                    <option value="workspace-write">Workspace Write</option>
+                                                    <option value="danger-full-access">Full Access (Danger)</option>
+                                                </select>
+                                                <label
+                                                    class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                    <input type="checkbox" id="configCodexBypass"
+                                                        class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                    Bypass All (--yolo)
+                                                </label>
+                                            </div>
+
+                                            <!-- Claude-specific options -->
+                                            <div id="claudeOptions" class="hidden space-y-2">
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block">Claude
+                                                    Permission Mode</label>
+                                                <select id="configClaudeMode"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="default">Default</option>
+                                                    <option value="acceptEdits">Accept Edits</option>
+                                                    <option value="plan">Plan Only</option>
+                                                    <option value="bypassPermissions" selected>Bypass Permissions
+                                                    </option>
+                                                </select>
+                                                <label
+                                                    class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                    <input type="checkbox" id="configClaudeSkip" checked
+                                                        class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                    Skip All Permissions (Dangerous)
+                                                </label>
+                                                <label class="text-[10px] text-slate-400 uppercase tracking-wider block">Thinking effort</label>
+                                                <select id="configClaudeThinkingEffort"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="medium">Medium</option>
+                                                    <option value="low">Low</option>
+                                                    <option value="high">High</option>
+                                                    <option value="xhigh">Extra High</option>
+                                                    <option value="max">Maximum</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Gemini-specific options -->
+                                            <div id="geminiOptions" class="hidden space-y-2">
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block">Gemini
+                                                    Mode</label>
+                                                <select id="configGeminiMode"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="sandbox">Sandboxed</option>
+                                                    <option value="no-sandbox">No Sandbox</option>
+                                                </select>
+                                                <label
+                                                    class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                    <input type="checkbox" id="configGeminiYolo"
+                                                        class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                    YOLO Mode (Auto-approve all)
+                                                </label>
+                                            </div>
+
+                                            <!-- Copilot-specific options -->
+                                            <div id="copilotOptions" class="hidden space-y-2">
+                                                <label
+                                                    class="text-[10px] text-slate-400 uppercase tracking-wider block">Copilot
+                                                    Permission Mode</label>
+                                                <select id="configCopilotMode"
+                                                    class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                    <option value="default">Default (Manual approve)</option>
+                                                    <option value="allow-all-tools">Allow All Tools</option>
+                                                    <option value="allow-all">Allow All (Full Access)</option>
+                                                </select>
+                                                <label
+                                                    class="flex items-center gap-2 text-[10px] text-slate-400 cursor-pointer">
+                                                    <input type="checkbox" id="configCopilotYolo"
+                                                        class="rounded bg-slate-900 border-slate-600 text-emerald-500 focus:ring-emerald-500/50">
+                                                    YOLO Mode (--allow-all / --yolo)
+                                                </label>
+                                            </div>
+
+                                            <!-- Inter-Agent Communication -->
+                                            <div id="interAgentOptions"
+                                                class="space-y-3 border-t border-slate-700/50 pt-3">
+                                                <div class="flex items-center justify-between">
+                                                    <label
+                                                        class="text-[10px] text-slate-400 uppercase tracking-wider">Inter-Agent
+                                                        Communication</label>
+                                                    <button id="configInterAgentToggle" type="button"
+                                                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-slate-800 bg-slate-600"
+                                                        role="switch" aria-checked="false" data-mode="disabled">
+                                                        <span class="sr-only">Enable inter-agent communication</span>
+                                                        <span
+                                                            class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0"></span>
+                                                    </button>
+                                                </div>
+
+                                                <!-- Status Display -->
+                                                <div id="interAgentStatus"
+                                                    class="flex items-start gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                                                    <div class="flex-shrink-0 mt-0.5">
+                                                        <div id="interAgentStatusIcon"
+                                                            class="w-2 h-2 rounded-full bg-slate-500"></div>
+                                                    </div>
+                                                    <div class="flex-1 min-w-0">
+                                                        <p id="interAgentStatusText" class="text-[10px] text-slate-400">
+                                                            Agent-to-agent communication disabled</p>
+                                                        <p id="interAgentGroupInfo"
+                                                            class="text-[9px] text-slate-500 mt-0.5 hidden"></p>
+                                                    </div>
+                                                </div>
+
+                                                <!-- Mode Selection (hidden by default, shown when enabled) -->
+                                                <div id="interAgentModeSelect" class="hidden">
+                                                    <label class="text-[9px] text-slate-500 block mb-1">Communication
+                                                        Mode</label>
+                                                    <select id="configInterAgentMode"
+                                                        class="w-full bg-slate-900/50 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5">
+                                                        <option value="listen_all">All Agents</option>
+                                                        <option value="groups">Groups Only</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <button id="saveConfigBtn" type="button"
+                                                class="w-full px-3 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition">
+                                                Save Config
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Stop Agent Button -->
+                                <button id="agentStopBtn" type="button"
+                                    class="px-3 py-2 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-xs font-semibold tracking-wide hover:bg-red-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                    disabled title="Stop Agent">
+                                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                                    </svg>
+                                    <span class="hidden sm:inline">Stop</span>
+                                </button>
+                                <button id="userMessageSend" type="submit"
+                                    class="px-4 py-2 rounded-full bg-emerald-400 text-slate-950 font-semibold text-xs tracking-wide uppercase shadow-lg shadow-emerald-500/30 hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none"
+                                    disabled aria-label="Send message" title="Hold to schedule or manage scheduled messages">
+                                    <svg class="send-spaceship-icon" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path class="send-spaceship-flame" d="M4.2 16.2 1.7 21l4.8-2.5" />
+                                        <path d="M6.5 17.5 10.3 21l1.7-5.1" />
+                                        <path d="M6.5 17.5 3 13.7l5.1-1.7" />
+                                        <path d="M8.1 12c3.5-5.2 7.9-8.1 13.4-9.2-.9 5.5-4 9.9-9.2 13.4L8.1 12Z" />
+                                        <circle cx="15.7" cy="8.3" r="1.6" />
+                                    </svg>
+                                    <span class="send-label">Send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </aside>
+
+            <button id="sideChatAddBtn" type="button" class="side-chat-add-btn hidden"
+                aria-label="Add side chat" title="Add side chat">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M12 5v14M5 12h14" />
+                </svg>
+            </button>
+
+            <div id="sideChatPicker" class="side-chat-picker hidden" role="dialog" aria-modal="false"
+                aria-labelledby="sideChatPickerTitle">
+                <div class="side-chat-picker__header">
+                    <div>
+                        <h3 id="sideChatPickerTitle">Open Side Chat</h3>
+                        <p>Choose an agent to pin beside this chat.</p>
+                    </div>
+                    <button id="sideChatPickerCloseBtn" type="button" class="side-chat-picker__close"
+                        aria-label="Close side chat picker">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <input id="sideChatPickerSearch" class="side-chat-picker__search" type="search"
+                    placeholder="Search chats" autocomplete="off" />
+                <div id="sideChatPickerList" class="side-chat-picker__list" role="listbox"></div>
             </div>
-        </aside>
+
+            <!-- Side-panel tiles are injected here by multi-chat.js -->
+        </div>
 
     </div>
 
     <!-- Feedback Widget (Moved to global layout) -->
 
 </div>
+
 
 <!-- Image Lightbox Modal -->
 <div id="imageLightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-label="Image viewer">
@@ -746,6 +1214,43 @@
         </div>
     </div>
     <span class="image-lightbox-hint">Press ESC or click outside to close</span>
+</div>
+
+<!-- Run Command Modal -->
+<div id="runCommandModal"
+    class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4">
+    <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-700/60 bg-slate-800/80 px-6 py-4">
+            <div>
+                <h3 id="runCommandModalTitle" class="text-lg font-semibold text-white">Agent command</h3>
+                <p id="runCommandModalSubtitle" class="mt-1 text-xs text-slate-400">Triggered from this message</p>
+            </div>
+            <button id="runCommandModalCloseBtn" type="button"
+                class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 text-slate-300 transition hover:border-slate-400 hover:text-white"
+                aria-label="Close command preview">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="px-6 py-5">
+            <p class="mb-3 text-xs uppercase tracking-[0.22em] text-cyan-300/80">Exact command before execution</p>
+            <pre id="runCommandModalBody"
+                class="max-h-[60vh] overflow-auto rounded-2xl border border-slate-700 bg-slate-950/90 p-4 text-xs leading-6 text-slate-100 whitespace-pre-wrap break-all"></pre>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 border-t border-slate-700/60 bg-slate-800/60 px-6 py-4">
+            <button id="runCommandModalDismissBtn" type="button"
+                class="rounded-full border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-400 hover:text-white">
+                Close
+            </button>
+            <button id="runCommandModalCopyBtn" type="button"
+                class="rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">
+                Copy command
+            </button>
+        </div>
+    </div>
 </div>
 
 <!-- Decryption Password Modal (for Google OAuth users) -->
@@ -866,15 +1371,15 @@
     </div>
 </div>
 
-<!-- Delete Agent Confirmation Modal -->
+<!-- Delete Confirmation Modal -->
 <div id="deleteConfirmationModal"
     class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
     <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         <!-- Modal Header -->
-        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-red-500/10 to-rose-500/10">
+        <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-amber-500/10 to-orange-500/10">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
-                    <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
@@ -888,11 +1393,24 @@
 
         <!-- Modal Body -->
         <div class="px-6 py-5">
-            <div class="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                <p class="text-xs text-red-300 leading-relaxed">
+            <div class="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <p class="text-xs text-amber-300 leading-relaxed">
                     <span class="font-semibold" id="deleteModalAgentNameLabel">Delete this agent?</span>
                     <br />
-                    This will permanently remove the agent and ALL associated messages. This action cannot be undone.
+                    This will permanently delete the agent and all associated messages. This action cannot be undone.
+                </p>
+            </div>
+
+            <div class="space-y-2">
+                <label for="deleteAgentNameConfirmInput" class="block text-sm font-medium text-slate-300">
+                    Type the agent name to confirm
+                </label>
+                <input type="text" id="deleteAgentNameConfirmInput"
+                    class="w-full bg-slate-900/50 border border-slate-600 focus:border-amber-400 focus:ring-1 focus:ring-amber-400/50 text-white rounded-lg px-4 py-2.5 text-sm placeholder:text-slate-500 transition"
+                    placeholder="Type the agent name exactly" autocomplete="off" />
+                <p class="text-xs text-slate-400">
+                    To confirm, type: <span id="deleteAgentNameConfirmExpected"
+                        class="font-semibold text-slate-200"></span>
                 </p>
             </div>
         </div>
@@ -904,7 +1422,7 @@
                 Cancel
             </button>
             <button id="deleteConfirmBtn" type="button"
-                class="px-6 py-2.5 rounded-full bg-red-500 text-white font-semibold text-sm tracking-wide shadow-lg shadow-red-500/30 hover:bg-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                class="px-6 py-2.5 rounded-full bg-amber-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-amber-500/30 hover:bg-amber-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
                 Delete Agent
             </button>
         </div>
@@ -964,7 +1482,8 @@
         <div class="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-cyan-500/10 to-blue-500/10">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" id="hideMessagesModalIcon">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        id="hideMessagesModalIcon">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                     </svg>
@@ -982,7 +1501,9 @@
                 <p class="text-xs text-cyan-300 leading-relaxed" id="hideMessagesModalDescription">
                     <span class="font-semibold" id="hideModalAgentNameLabel">Hide all messages?</span>
                     <br />
-                    <span id="hideMessagesModalText">The agent will start a fresh conversation. Previous messages will be hidden from the agent's context but can be restored later.</span>
+                    All existing messages will be hidden from the agent's context. The agent will start responding as if
+                    it's a fresh conversation. Messages remain visible to you but won't be included when the agent
+                    processes new messages.
                 </p>
             </div>
         </div>
@@ -995,18 +1516,214 @@
             </button>
             <button id="hideConfirmBtn" type="button"
                 class="px-6 py-2.5 rounded-full bg-cyan-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-cyan-500/30 hover:bg-cyan-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                Hide Messages
+                Hide All Messages
             </button>
         </div>
     </div>
 </div>
+
+<!-- Agent CLI Batch Update Modal -->
+<div id="agentCliUpdateModal" class="hidden fixed inset-0 z-[230] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-700/50">
+            <h3 class="text-lg font-bold text-white">Agent Updates Available</h3>
+            <p id="agentCliUpdateSummary" class="text-xs text-slate-400 mt-1">Select agents to update.</p>
+        </div>
+
+        <div class="px-6 py-4 space-y-3">
+            <label class="inline-flex items-center gap-2 text-xs font-semibold text-cyan-200">
+                <input id="agentCliUpdateSelectAll" type="checkbox"
+                    class="rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50" checked />
+                Select all
+            </label>
+
+            <div id="agentCliUpdateList" class="max-h-72 overflow-y-auto space-y-2">
+                <!-- Populated dynamically -->
+            </div>
+
+            <p class="text-[10px] text-slate-500">
+                <span id="agentCliUpdateSelectedCount">0</span> agents selected
+            </p>
+        </div>
+
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="agentCliUpdateCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Dismiss
+            </button>
+            <button id="agentCliUpdateConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-cyan-500 text-slate-950 font-semibold text-sm tracking-wide shadow-lg shadow-cyan-500/30 hover:bg-cyan-400 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Update Agents
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Group Management FAB -->
+<button id="groupManagementFab"
+    class="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 flex items-center justify-center transition-all duration-200 hover:scale-110 group"
+    title="Group Management"
+    aria-label="Group Management">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+    <span class="absolute right-full mr-3 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-slate-700">Group Management</span>
+</button>
+
+<!-- Group Management Menu -->
+<div id="groupManagementMenu"
+    class="hidden fixed z-[190] w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+    <button id="groupMenuCreateBtn"
+        class="w-full px-4 py-3 text-left text-xs text-violet-200 hover:bg-violet-900/30 transition-colors border-b border-slate-700/60">
+        Create New Group
+    </button>
+    <button id="groupMenuManageMembersBtn"
+        class="w-full px-4 py-3 text-left text-xs text-cyan-200 hover:bg-cyan-900/30 transition-colors border-b border-slate-700/60">
+        Manage Group Members
+    </button>
+    <button id="groupMenuDeleteGroupBtn"
+        class="w-full px-4 py-3 text-left text-xs text-red-200 hover:bg-red-900/30 transition-colors">
+        Delete Group
+    </button>
+</div>
+
+<!-- Create Group Modal -->
+<div id="createGroupModal" class="hidden fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="px-6 py-4 border-b border-slate-700/50">
+            <h3 class="text-lg font-bold text-white">Create Group</h3>
+            <p class="text-xs text-slate-400 mt-1">Organize agents into groups for easier management</p>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="px-6 py-4 space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1" for="groupNameInput">Group Name</label>
+                <input id="groupNameInput" type="text" maxlength="100" placeholder="e.g. Backend Team"
+                    class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500" />
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1" for="groupDescInput">Description (optional)</label>
+                <input id="groupDescInput" type="text" maxlength="500" placeholder="Brief description..."
+                    class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500" />
+            </div>
+
+            <!-- Agent Selection -->
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Select Members</label>
+                <div id="groupAgentSelection" class="max-h-48 overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2 bg-slate-800/50">
+                    <!-- Populated dynamically -->
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1"><span id="groupSelectedCount">0</span> agents selected</p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="createGroupCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="createGroupConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-violet-600 text-white font-semibold text-sm tracking-wide shadow-lg shadow-violet-500/30 hover:bg-violet-500 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Create Group
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Group Members Modal -->
+<div id="editGroupMembersModal" class="hidden fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-700/50">
+            <h3 id="editGroupMembersTitle" class="text-lg font-bold text-white">Manage Group Members</h3>
+            <p id="editGroupMembersSubtitle" class="text-xs text-slate-400 mt-1">Check agents to include in the group, uncheck to remove</p>
+        </div>
+        <div class="px-6 py-4 space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1" for="manageGroupSelect">Group</label>
+                <select id="manageGroupSelect"
+                    class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"></select>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Select Agents</label>
+                <div id="manageGroupAgentSelection" class="max-h-48 overflow-y-auto space-y-1 border border-slate-700 rounded-lg p-2 bg-slate-800/50">
+                    <!-- Populated dynamically -->
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1"><span id="manageGroupSelectedCount">0</span> agents selected</p>
+            </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="editGroupMembersCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="editGroupMembersConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-violet-600 text-white font-semibold text-sm tracking-wide shadow-lg shadow-violet-500/30 hover:bg-violet-500 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Save Members
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Group Modal -->
+<div id="deleteGroupModal" class="hidden fixed inset-0 z-[220] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-700/50">
+            <h3 class="text-lg font-bold text-white">Delete Group</h3>
+            <p class="text-xs text-slate-400 mt-1">This action cannot be undone</p>
+        </div>
+        <div class="px-6 py-4 space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1" for="deleteGroupSelect">Group</label>
+                <select id="deleteGroupSelect"
+                    class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"></select>
+            </div>
+        </div>
+        <div class="px-6 py-4 border-t border-slate-700/50 bg-slate-800/50 flex justify-end items-center gap-3">
+            <button id="deleteGroupCancelBtn" type="button"
+                class="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition">
+                Cancel
+            </button>
+            <button id="deleteGroupConfirmBtn" type="button"
+                class="px-6 py-2.5 rounded-full bg-red-600 text-white font-semibold text-sm tracking-wide shadow-lg shadow-red-500/30 hover:bg-red-500 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Delete Group
+            </button>
+        </div>
+    </div>
+</div>
+
+<script nonce="<%= cspNonce %>">
+    // Initial groups data from server. safeJsonForScript escapes <, >, &,
+    // U+2028, U+2029 so user-supplied group names can't break out of the
+    // <script> tag.
+    window.__initialGroups = <%- safeJsonForScript(groups || []) %>;
+</script>
 
 <script src="/js/encryption.js"></script>
 <script src="/js/marble-generator.js"></script>
 <script src="/js/voice-control.js"></script>
 <script src="/js/vendor/marked.min.js"></script>
 <script src="/js/vendor/dompurify.min.js"></script>
-<script>
+<script nonce="<%= cspNonce %>">
+    // Persisted "agent loop" pause state (polling on dashboard). Read early so dependent modules can respect it.
+    try {
+        window.__dashboardLoopPaused = localStorage.getItem('dashboard_agent_loop_paused') === 'true';
+    } catch (e) {
+        window.__dashboardLoopPaused = false;
+    }
+</script>
+<script src="/js/agentConnections.js"></script>
+<script src="/js/rich-rendering.js?v=<%= Date.now() %>"></script>
+<script nonce="<%= cspNonce %>">
     window.csrfToken = '<%= csrfToken %>';
 </script>
 <script src="/js/dashboard.js?v=<%= Date.now() %>"></script>
+<script src="/js/multi-chat.js?v=<%= Date.now() %>"></script>
+
+<!-- Chief of Staff first-run install modal -->
+<div id="cosFirstRunRoot" hidden></div>
+<%- include('partials/cos-install-modal') %>
+<script src="/js/cos-install.js?v=<%= Date.now() %>"></script>

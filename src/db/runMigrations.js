@@ -9,9 +9,32 @@ const path = require('path');
 const { query, getClient } = require('./connection');
 const { logInfo, logError, logWarn } = require('../utils/logger');
 
+const MIGRATION_RENAMES = Object.freeze({
+  '004a_priority_to_integer.sql': ['004_priority_to_integer.sql'],
+  '004b_add_user_responses_read_tracking.sql': ['004_add_user_responses_read_tracking.sql'],
+  '006a_add_agent_type.sql': ['006_add_agent_type.sql'],
+  '006b_add_google_auth.sql': ['006_add_google_auth.sql'],
+  '024a_add_agent_working_heartbeat.sql': ['024_add_agent_working_heartbeat.sql'],
+  '024b_add_external_bot_connections.sql': ['024_add_external_bot_connections.sql'],
+  '029_add_email_verification.sql': ['add_email_verification.sql'],
+});
+
+function parseMigrationPrefix(filename) {
+  const match = filename.match(/^(\d+)([a-z]?)_/i);
+  if (!match) {
+    return { number: Number.POSITIVE_INFINITY, suffix: '', filename };
+  }
+
+  return {
+    number: parseInt(match[1], 10),
+    suffix: match[2].toLowerCase(),
+    filename,
+  };
+}
+
 /**
  * Get all migration files in order
- * Files are sorted numerically to ensure correct execution order
+ * Files are sorted by numeric prefix and optional alpha suffix (004a, 004b).
  */
 function getMigrationFiles() {
   const migrationsDir = path.join(__dirname, 'migrations');
@@ -23,12 +46,18 @@ function getMigrationFiles() {
   const files = fs.readdirSync(migrationsDir)
     .filter(file => file.endsWith('.sql'))
     .sort((a, b) => {
-      // Extract numeric prefix for proper sorting
-      const aMatch = a.match(/^\d+/);
-      const bMatch = b.match(/^\d+/);
-      const aNum = parseInt((aMatch && aMatch[0]) || '0', 10);
-      const bNum = parseInt((bMatch && bMatch[0]) || '0', 10);
-      return aNum - bNum;
+      const aPrefix = parseMigrationPrefix(a);
+      const bPrefix = parseMigrationPrefix(b);
+
+      if (aPrefix.number !== bPrefix.number) {
+        return aPrefix.number - bPrefix.number;
+      }
+
+      if (aPrefix.suffix !== bPrefix.suffix) {
+        return aPrefix.suffix.localeCompare(bPrefix.suffix);
+      }
+
+      return a.localeCompare(b);
     });
 
   return files;
@@ -67,6 +96,20 @@ async function isMigrationApplied(migrationName) {
     logWarn('migrations.check_failed', { migration: migrationName, error: error.message });
     return false;
   }
+}
+
+async function getAppliedMigrationName(migrationName) {
+  if (await isMigrationApplied(migrationName)) {
+    return migrationName;
+  }
+
+  for (const previousName of MIGRATION_RENAMES[migrationName] || []) {
+    if (await isMigrationApplied(previousName)) {
+      return previousName;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -148,11 +191,21 @@ async function runAllMigrations() {
     console.log(`\nRunning ${migrationFiles.length} migrations...\n`);
 
     for (const filename of migrationFiles) {
-      const applied = await isMigrationApplied(filename);
+      const appliedAs = await getAppliedMigrationName(filename);
 
-      if (applied) {
-        logInfo('migrations.skipped', { migration: filename, reason: 'already_applied' });
-        console.log(`⊘ Migration ${filename} already applied (skipping)`);
+      if (appliedAs) {
+        if (appliedAs !== filename) {
+          await markMigrationApplied(filename);
+          logInfo('migrations.skipped', {
+            migration: filename,
+            reason: 'renamed_migration_already_applied',
+            appliedAs,
+          });
+          console.log(`⊘ Migration ${filename} already applied as ${appliedAs} (recorded rename)`);
+        } else {
+          logInfo('migrations.skipped', { migration: filename, reason: 'already_applied' });
+          console.log(`⊘ Migration ${filename} already applied (skipping)`);
+        }
         skippedCount++;
       } else {
         const success = await runMigration(filename);
@@ -219,6 +272,8 @@ module.exports = {
   runAllMigrations,
   ensureArchiveTables,
   getMigrationFiles,
+  parseMigrationPrefix,
+  MIGRATION_RENAMES,
   runMigration,
   isMigrationApplied
 };

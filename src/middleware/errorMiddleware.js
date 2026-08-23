@@ -23,7 +23,7 @@ function globalErrorHandler(err, req, res, next) {
     url: req.url,
     method: req.method,
     ip: req.ip,
-    userId: req.user?.userId || req.session?.userId || null,
+    userId: (req.user && req.user.userId) || (req.session && req.session.userId) || null,
   });
   
   // If headers already sent, delegate to default Express error handler

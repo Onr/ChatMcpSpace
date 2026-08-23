@@ -29,9 +29,9 @@ describe('Auth Service', () => {
   });
 
   describe('hashPassword', () => {
-    it('should hash password with 10 salt rounds', async () => {
+    it('should hash password with 12 salt rounds', async () => {
       await authService.hashPassword('password123');
-      expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10);
+      expect(bcrypt.hash).toHaveBeenCalledWith('password123', 12);
     });
 
     it('should throw error if hashing fails', async () => {
@@ -67,7 +67,7 @@ describe('Auth Service', () => {
 
       const result = await authService.registerUser(validUser.email, validUser.password);
 
-      expect(bcrypt.hash).toHaveBeenCalledWith(validUser.password, 10);
+      expect(bcrypt.hash).toHaveBeenCalledWith(validUser.password, 12);
       expect(crypto.randomUUID).toHaveBeenCalled();
       expect(generateEncryptionSalt).toHaveBeenCalled();
       expect(query).toHaveBeenCalledWith(
@@ -161,6 +161,20 @@ describe('Auth Service', () => {
         email: email,
         userId: 'user-id'
       });
+    });
+
+    it('should not log raw email addresses when credential lookup fails', async () => {
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      query.mockRejectedValue(new Error('DB connection failed'));
+
+      await expect(authService.validateCredentials(email, password))
+        .rejects.toThrow('DB connection failed');
+
+      const loggedText = consoleSpy.mock.calls.flat().join(' ');
+      expect(loggedText).not.toContain(email);
+      expect(loggedText).toContain('email-sha256:');
+
+      consoleSpy.mockRestore();
     });
   });
 

@@ -14,7 +14,7 @@ function requestLogger(req, res, next) {
       path: req.originalUrl || req.url,
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
-      userId: req.user?.userId || req.session?.userId || null,
+      userId: (req.user && req.user.userId) || (req.session && req.session.userId) || null,
       ip: req.ip,
       contentLength: res.getHeader('content-length') || null,
     });

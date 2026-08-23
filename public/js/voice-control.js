@@ -10,7 +10,7 @@ class VoiceControl {
         this.supportsSpeechRecognition = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
         this.voices = [];
         const storedSetting = localStorage.getItem('voiceEnabled');
-        this.voiceEnabled = storedSetting === null ? true : storedSetting === 'true'; // Default to true if not set
+        this.voiceEnabled = storedSetting === null ? false : storedSetting === 'true'; // Default to false if not set
 
         // Enforce Server TTS (Google Cloud) for all users
         this.useServerTTS = true;
@@ -67,6 +67,9 @@ class VoiceControl {
     toggleVoiceNotifications(enabled) {
         this.voiceEnabled = enabled;
         localStorage.setItem('voiceEnabled', enabled); // Save to storage
+        document.dispatchEvent(new CustomEvent('voice-notifications-changed', {
+            detail: { enabled }
+        }));
 
         if (!enabled) {
             this.synth.cancel(); // Stop speaking immediately
@@ -90,12 +93,10 @@ class VoiceControl {
         // Use Server-side TTS (Google Cloud) if enabled
         if (this.useServerTTS) {
             try {
-                const response = await fetch('/api/user/tts', {
+                const response = await csrfFetch('/api/user/tts', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        // CSRF token might be needed if not handled by cookie/middleware automatically for this path
-                        // Assuming standard session auth covers it or token is available globally
                         'X-CSRF-Token': window.csrfToken
                     },
                     body: JSON.stringify({ text })

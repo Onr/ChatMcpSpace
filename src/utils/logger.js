@@ -1,4 +1,4 @@
-const LEVELS = ['error', 'warn', 'info'];
+const LEVELS = ['error', 'warn', 'info', 'debug'];
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 
 function isEnabled(level) {
@@ -35,8 +35,13 @@ function logError(event, data) {
   log('error', event, data);
 }
 
+function logDebug(event, data) {
+  log('debug', event, data);
+}
+
 module.exports = {
   logInfo,
   logWarn,
   logError,
+  logDebug,
 };

@@ -28,6 +28,10 @@ describe('CSRF middleware', () => {
       res.status(200).json({ ok: true });
     });
 
+    app.post('/api/user/messages', csrfMiddleware.validateCsrfToken, (_req, res) => {
+      res.status(200).json({ ok: true });
+    });
+
     return { app, csrfMiddleware };
   }
 
@@ -77,8 +81,21 @@ describe('CSRF middleware', () => {
     expect(res.body.error.code).toBe('CSRF_TOKEN_INVALID');
   });
 
-  it('skips validation for API paths', async () => {
+  it('skips validation for agent API paths', async () => {
     const { app } = buildApp({ sessionToken: 'token-123' });
     await request(app).post('/api/agent/messages').send({}).expect(200);
+  });
+
+  it('requires validation for session-authenticated user API paths', async () => {
+    jest.doMock('../../src/utils/securityLogger', () => ({ logCsrfViolation: jest.fn() }));
+    const { app } = buildApp({ sessionToken: 'token-123' });
+
+    await request(app).post('/api/user/messages').send({}).expect(403);
+
+    await request(app)
+      .post('/api/user/messages')
+      .set('X-CSRF-Token', 'token-123')
+      .send({})
+      .expect(200);
   });
 });

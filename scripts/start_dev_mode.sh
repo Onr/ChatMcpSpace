@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 cd "$ROOT_DIR"
+ensure_supported_node 16
 
 # Mark that we're in dev mode (prevents _disable_dev_user.sh from running)
 export DEV_MODE_ACTIVE=true

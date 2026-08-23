@@ -8,6 +8,15 @@ cd "$ROOT_DIR"
 
 stopped=false
 
+# If the supervised systemd service is running, stop it first (otherwise it may restart the server).
+if command -v systemctl >/dev/null 2>&1; then
+  if sudo systemctl is-active --quiet agent-messaging-platform.service 2>/dev/null; then
+    echo "[stop-server] Stopping systemd service agent-messaging-platform.service"
+    sudo systemctl stop agent-messaging-platform.service || true
+    stopped=true
+  fi
+fi
+
 # First, try to stop using PID file
 if is_server_running; then
   pid="$(cat "$PID_FILE")"

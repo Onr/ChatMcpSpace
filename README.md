@@ -1,17 +1,17 @@
 # AI Agent Messaging Platform
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org)
-
 <div align="center">
   <img src="public/images/logo.png" alt="ChatMcpSpace Logo" width="200" />
 </div>
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org)
 
 A web-based platform that enables bidirectional communication between users and their AI agents through a chat-like interface.
 
 ## Hosted Version
 
-Live at **[https://chatmcp.space/](https://chatmcp.space/)**
+Live at **[https://chatmcp.space/](https://chatmcp.space/)** without needing to set up your own server.
 
 ## Features
 
@@ -41,7 +41,7 @@ Live at **[https://chatmcp.space/](https://chatmcp.space/)**
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/onr/ChatMcpSpace.git
+   git clone https://github.com/Onr/ChatMcpSpace.git
    cd ChatMcpSpace
    ```
 
@@ -142,9 +142,10 @@ HTTP_REDIRECT_PORT=3000
 TTS_ENABLED=true
 LOG_LEVEL=info
 
-# Image Upload
-MAX_IMAGE_SIZE_MB=20
-MAX_IMAGES_PER_USER=10
+# Attachment Upload
+MAX_ATTACHMENT_SIZE_MB=20
+MAX_ATTACHMENTS_PER_USER=10
+ENABLE_GENERAL_FILE_UPLOADS=true
 ```
 
 ## Running the Application
@@ -364,6 +365,7 @@ User API endpoints use session-based authentication.
 | `GET` | `/api/agent/config` | Get agent configuration |
 | `PUT` | `/api/agent/config` | Update agent configuration |
 | `POST` | `/api/agent/stop` | Signal agent stop |
+| `POST` | `/api/agent/stop/acknowledge` | Clear an honored stop request |
 | `POST` | `/api/agent/attachments` | Upload an attachment |
 | `GET` | `/api/agent/attachments/:id` | Download an attachment |
 | `GET` | `/api/agent/cli-script` | Get CLI setup script |
@@ -472,5 +474,3 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-

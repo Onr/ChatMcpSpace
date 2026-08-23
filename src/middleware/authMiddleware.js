@@ -3,10 +3,75 @@
  * Provides middleware for session-based and API key authentication
  */
 
+const crypto = require('crypto');
 const { getUserByApiKey } = require('../services/authService');
+const { verifyScopedCredential } = require('../services/agentCredentialService');
 const { isEmailVerified } = require('../services/emailService');
 const { logApiKeyUsage } = require('../utils/securityLogger');
 const { query } = require('../db/connection');
+
+const AGENT_SCOPE_RULES = [
+  { method: 'POST', path: /^\/messages$/, scope: 'agent.messages.write' },
+  { method: 'POST', path: /^\/questions$/, scope: 'agent.questions.write' },
+  { method: 'GET', path: /^\/responses$/, scope: 'agent.responses.read' },
+  { method: 'GET', path: /^\/discover$/, scope: 'agent.discover.read' },
+  { method: 'POST', path: /^\/messages\/direct$/, scope: 'agent.dm.write' },
+  { method: 'GET', path: /^\/messages\/direct$/, scope: 'agent.dm.read' },
+  { method: 'GET', path: /^\/groups$/, scope: 'agent.groups.read' },
+  { method: 'POST', path: /^\/groups$/, scope: 'agent.groups.write' },
+  { method: 'POST', path: /^\/groups\/.+\/join$/, scope: 'agent.groups.write' },
+  { method: 'GET', path: /^\/groups\/.+\/salt$/, scope: 'agent.groups.read' },
+  { method: 'POST', path: /^\/spawn$/, scope: 'agent.spawn.write' },
+  { method: 'POST', path: /^\/stop\/acknowledge$/, scope: 'agent.stop.write' },
+  { method: 'POST', path: /^\/stop$/, scope: 'agent.stop.write' },
+  { method: 'POST', path: /^\/self-terminate$/, scope: 'agent.stop.write' },
+  { method: 'GET', path: /^\/lineage$/, scope: 'agent.lineage.read' },
+  { method: 'GET', path: /^\/children$/, scope: 'agent.lineage.read' },
+  { method: 'GET', path: /^\/messages\/history$/, scope: 'agent.history.read' },
+  { method: 'GET', path: /^\/messages\/latest$/, scope: 'agent.history.read' }
+];
+
+function hasScope(scopes, neededScope) {
+  if (!Array.isArray(scopes)) return false;
+  if (scopes.includes('*') || scopes.includes('agent.*')) return true;
+  if (scopes.includes(neededScope)) return true;
+
+  const [prefix] = neededScope.split('.');
+  if (prefix && scopes.includes(`${prefix}.*`)) return true;
+
+  return false;
+}
+
+function requiredScopeForRequest(req) {
+  const method = (req.method || 'GET').toUpperCase();
+  const path = req.path || '/';
+
+  for (const rule of AGENT_SCOPE_RULES) {
+    if (rule.method === method && rule.path.test(path)) {
+      return rule.scope;
+    }
+  }
+
+  return null;
+}
+
+async function logScopedAuthEvent({ agentId, credentialId, eventType, req, metadata = {} }) {
+  try {
+    const ip = req.ip || (req.connection && req.connection.remoteAddress) || '';
+    const userAgent = req.headers['user-agent'] || '';
+    const ipHash = ip ? crypto.createHash('sha256').update(ip).digest('hex') : null;
+    const userAgentHash = userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null;
+
+    await query(
+      `INSERT INTO agent_auth_events
+       (agent_id, credential_id, event_type, ip_hash, user_agent_hash, metadata_json)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [agentId, credentialId || null, eventType, ipHash, userAgentHash, JSON.stringify(metadata)]
+    );
+  } catch (_error) {
+    // Best effort only; auth should not fail due to logging issues.
+  }
+}
 
 // Cache whether the email_verified column exists to avoid repeated failing queries.
 let emailVerificationColumnAvailable = true;
@@ -117,9 +182,102 @@ async function attachUserFromSession(req, res, next) {
  */
 async function requireApiKey(req, res, next) {
   try {
-    // Get API key from header
+    const agentToken = req.headers['x-agent-token'];
     const apiKey = req.headers['x-api-key'];
-    
+
+    // Prefer scoped agent token when provided
+    if (agentToken) {
+      const scopedAuth = await verifyScopedCredential(agentToken);
+      if (!scopedAuth) {
+        return res.status(401).json({
+          error: {
+            code: 'AUTH_INVALID_API_KEY',
+            message: 'Invalid or expired agent token'
+          }
+        });
+      }
+
+      const requiredScope = requiredScopeForRequest(req);
+      if (!requiredScope) {
+        await logScopedAuthEvent({
+          agentId: scopedAuth.agentId,
+          credentialId: scopedAuth.credentialId,
+          eventType: 'auth_scope_unmapped_route',
+          req,
+          metadata: { method: req.method, path: req.path }
+        });
+
+        return res.status(403).json({
+          error: {
+            code: 'FORBIDDEN_RESOURCE',
+            message: 'Scoped agent token is not allowed for this endpoint'
+          }
+        });
+      }
+
+      if (!hasScope(scopedAuth.scopes, requiredScope)) {
+        await logScopedAuthEvent({
+          agentId: scopedAuth.agentId,
+          credentialId: scopedAuth.credentialId,
+          eventType: 'auth_scope_denied',
+          req,
+          metadata: { method: req.method, path: req.path, requiredScope }
+        });
+
+        return res.status(403).json({
+          error: {
+            code: 'FORBIDDEN_RESOURCE',
+            message: `Agent token missing required scope: ${requiredScope}`
+          }
+        });
+      }
+
+      const requestedAgentName = req.headers['x-agent-name'];
+      if (requestedAgentName && requestedAgentName.trim() !== scopedAuth.agentName) {
+        await logScopedAuthEvent({
+          agentId: scopedAuth.agentId,
+          credentialId: scopedAuth.credentialId,
+          eventType: 'auth_agent_mismatch',
+          req,
+          metadata: {
+            requestedAgentName: requestedAgentName.trim(),
+            boundAgentName: scopedAuth.agentName
+          }
+        });
+
+        return res.status(403).json({
+          error: {
+            code: 'FORBIDDEN_RESOURCE',
+            message: 'Scoped agent token can only be used for its bound agent identity'
+          }
+        });
+      }
+
+      if (!requestedAgentName) {
+        req.headers['x-agent-name'] = scopedAuth.agentName;
+      }
+
+      req.user = scopedAuth.user;
+      req.authContext = {
+        type: 'agent_token',
+        agentId: scopedAuth.agentId,
+        agentName: scopedAuth.agentName,
+        credentialId: scopedAuth.credentialId,
+        scopes: scopedAuth.scopes
+      };
+
+      await logScopedAuthEvent({
+        agentId: scopedAuth.agentId,
+        credentialId: scopedAuth.credentialId,
+        eventType: 'auth_success',
+        req,
+        metadata: { method: req.method, path: req.path }
+      });
+
+      next();
+      return;
+    }
+
     if (!apiKey) {
       return res.status(401).json({
         error: {
@@ -143,6 +301,7 @@ async function requireApiKey(req, res, next) {
     
     // Attach user data to request
     req.user = user;
+    req.authContext = { type: 'api_key' };
     
     // Log API key usage
     logApiKeyUsage(req, user.userId, 'API request authenticated');
@@ -190,7 +349,7 @@ function requireEmailVerification(req, res, next) {
   if (!req.user.emailVerified) {
     // Check if this is an API request or a page request
     const isApiRequest = req.path.startsWith('/api/') || 
-                         req.headers['accept']?.includes('application/json') ||
+                         (req.headers['accept'] || '').includes('application/json') ||
                          req.xhr;
 
     if (isApiRequest) {

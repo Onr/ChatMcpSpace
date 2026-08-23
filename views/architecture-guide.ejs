@@ -1,0 +1,195 @@
+<div class="min-h-screen px-4 py-10">
+  <article class="max-w-5xl mx-auto space-y-10">
+    <header class="space-y-4">
+      <a href="/" class="inline-flex items-center gap-2 text-sm text-emerald-300 hover:text-emerald-200">
+        <span aria-hidden="true">&larr;</span>
+        Back to ChatMCPSpace
+      </a>
+      <div class="space-y-3">
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">Architecture Guide</p>
+        <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">How ChatMCPSpace Works</h1>
+        <p class="max-w-3xl text-base sm:text-lg text-slate-300 leading-relaxed">
+          ChatMCPSpace is a control center for local and remote AI agents. The web app stores account, agent,
+          message, attachment, and runtime metadata; generated agent folders run provider CLIs on your machines;
+          and a small helper script carries messages between the two.
+        </p>
+      </div>
+    </header>
+
+    <section class="grid md:grid-cols-3 gap-4">
+      <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+        <h2 class="text-lg font-semibold text-white">Dashboard</h2>
+        <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+          The browser UI shows agents, conversations, pinned side chats, the All Chats feed, files, rich HTML views,
+          priorities, working heartbeats, and stop controls.
+        </p>
+      </div>
+      <div class="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-5">
+        <h2 class="text-lg font-semibold text-white">Backend API</h2>
+        <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+          Express routes validate users and API keys, apply rate limits, store messages in PostgreSQL, and expose
+          polling endpoints for agents and the dashboard.
+        </p>
+      </div>
+      <div class="rounded-xl border border-purple-500/20 bg-purple-500/5 p-5">
+        <h2 class="text-lg font-semibold text-white">Agent Runtime</h2>
+        <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+          A generated folder contains <code class="text-emerald-200">agent-cli.sh</code>,
+          <code class="text-emerald-200">agent-runner.sh</code>, <code class="text-emerald-200">message_helper.py</code>,
+          local state files, instructions, and provider launch settings.
+        </p>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-white/10 bg-slate-900/70 p-6 sm:p-8 space-y-5">
+      <h2 class="text-2xl font-bold text-white">The Core Message Flow</h2>
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div class="space-y-4 text-sm text-slate-300 leading-relaxed">
+          <p>
+            When you send a message in the dashboard, the frontend posts it to
+            <code class="text-emerald-200">POST /api/user/messages</code>. The server validates ownership, stores the
+            message, links any uploaded attachments, and writes an agent wake file in that agent folder:
+            <code class="text-emerald-200">agent_state/.message_pending</code>.
+          </p>
+          <p>
+            The agent runner polls with <code class="text-emerald-200">uv run message_helper.py check-attachments</code>
+            and also checks direct messages, scheduled tasks, and self-wake files. New work is converted into a prompt
+            that includes recent history, local instructions, file references, and the user's latest message.
+          </p>
+          <p>
+            After the provider CLI finishes, the runner sends the final response back through
+            <code class="text-emerald-200">uv run message_helper.py send</code>. The helper calls the agent API, and the
+            dashboard sees the result on its next poll.
+          </p>
+        </div>
+        <ol class="space-y-3 text-sm text-slate-200">
+          <li class="rounded-lg bg-white/5 border border-white/10 p-3"><strong>1.</strong> User writes in dashboard.</li>
+          <li class="rounded-lg bg-white/5 border border-white/10 p-3"><strong>2.</strong> Backend stores the user message and wakes the agent.</li>
+          <li class="rounded-lg bg-white/5 border border-white/10 p-3"><strong>3.</strong> Agent runner polls, builds a prompt, and starts the selected provider CLI.</li>
+          <li class="rounded-lg bg-white/5 border border-white/10 p-3"><strong>4.</strong> Runner streams output, sends working heartbeats, and watches for stop requests.</li>
+          <li class="rounded-lg bg-white/5 border border-white/10 p-3"><strong>5.</strong> Helper posts the answer, files, questions, or rich HTML back to the platform.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="space-y-4">
+      <h2 class="text-2xl font-bold text-white">What Lives Where</h2>
+      <div class="overflow-x-auto rounded-2xl border border-white/10">
+        <table class="min-w-full text-sm text-left">
+          <thead class="bg-slate-800/80 text-slate-200">
+            <tr>
+              <th class="px-4 py-3 font-semibold">Area</th>
+              <th class="px-4 py-3 font-semibold">Important files</th>
+              <th class="px-4 py-3 font-semibold">Purpose</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/10 text-slate-300 bg-slate-900/60">
+            <tr>
+              <td class="px-4 py-3 font-medium text-white">Generated CLI</td>
+              <td class="px-4 py-3"><code>src/utils/apiGuideGenerator.js</code></td>
+              <td class="px-4 py-3">Builds setup scripts, agent folders, provider launch commands, helper scripts, and one-shot instructions.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-white">User API</td>
+              <td class="px-4 py-3"><code>src/routes/userApiRoutes.js</code></td>
+              <td class="px-4 py-3">Dashboard-facing endpoints for agents, messages, responses, attachments, All Chats, and stop requests.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-white">Agent API</td>
+              <td class="px-4 py-3"><code>src/routes/agentApiRoutes.js</code></td>
+              <td class="px-4 py-3">Agent-facing endpoints for sending messages/questions, polling user responses, direct messages, attachments, heartbeats, and stop state.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-white">Dashboard UI</td>
+              <td class="px-4 py-3"><code>views/dashboard.ejs</code>, <code>public/js/dashboard.js</code>, <code>public/js/multi-chat.js</code></td>
+              <td class="px-4 py-3">Main chat, mobile paper menu, pinned side chats, rich HTML rendering, history recall, files, model controls, and voice notifications.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium text-white">Agent state</td>
+              <td class="px-4 py-3"><code>.message_pending</code>, <code>.dm_pending</code>, <code>.scheduled_tasks.json</code>, <code>.self_wakeup.txt</code>, <code>.last_successful_connection</code></td>
+              <td class="px-4 py-3">Small filesystem signals that let the runner wake quickly, schedule future work, and fail safely when backend contact is lost.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid lg:grid-cols-2 gap-6">
+      <div class="rounded-2xl border border-white/10 bg-slate-900/70 p-6 space-y-3">
+        <h2 class="text-2xl font-bold text-white">Provider Launching</h2>
+        <p class="text-sm text-slate-300 leading-relaxed">
+          The generated runner supports Claude, Gemini, Codex/OpenAI-compatible providers, Copilot, Kilo, Ollama,
+          OpenRouter, and LM Studio. Each provider has slightly different command-line behavior, so the generator
+          normalizes as much as possible: prompts are generally passed on stdin to avoid shell argument limits, Claude
+          launches with <code class="text-emerald-200">CLAUDECODE</code> unset to avoid nested sessions, and the runner
+          sends a working heartbeat while the CLI is active.
+        </p>
+        <p class="text-sm text-slate-300 leading-relaxed">
+          Provider settings are stored in the agent folder and can be refreshed from the dashboard or generated script.
+          The model catalog is maintained by <code class="text-emerald-200">src/utils/modelCatalog.js</code> and tests.
+        </p>
+      </div>
+
+      <div class="rounded-2xl border border-white/10 bg-slate-900/70 p-6 space-y-3">
+        <h2 class="text-2xl font-bold text-white">Privacy and Encryption</h2>
+        <p class="text-sm text-slate-300 leading-relaxed">
+          The platform supports client-side encryption. The user's password-derived key stays in the browser or agent
+          runtime; the backend stores ciphertext plus metadata such as agent name, timestamps, message type, priority,
+          and read state. Attachments follow the same ownership checks and can be sent by users or agents within the
+          configured size limit.
+        </p>
+        <p class="text-sm text-slate-300 leading-relaxed">
+          This means the server can route and display encrypted messages, but it should not need the user's password to
+          decrypt message bodies.
+        </p>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-white/10 bg-slate-900/70 p-6 sm:p-8 space-y-4">
+      <h2 class="text-2xl font-bold text-white">Extending the System</h2>
+      <div class="grid md:grid-cols-2 gap-5 text-sm text-slate-300 leading-relaxed">
+        <div>
+          <h3 class="font-semibold text-white mb-2">Add a new provider</h3>
+          <p>
+            Extend the provider selection, permission model, and launch branch in
+            <code class="text-emerald-200">apiGuideGenerator.js</code>. Add regression tests that assert the generated
+            command passes prompts non-interactively and respects permissions.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-white mb-2">Add a new message surface</h3>
+          <p>
+            Treat it as a channel adapter: authenticate the external identity, insert into
+            <code class="text-emerald-200">user_messages</code>, write <code class="text-emerald-200">.message_pending</code>,
+            and deliver new agent messages back to that channel.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-white mb-2">Add richer agent outputs</h3>
+          <p>
+            Use the existing message schema: normal text, questions with options, attachments, and
+            <code class="text-emerald-200">rich_html</code> JSON payloads. Keep HTML scoped and sanitize any untrusted
+            inputs before rendering.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-white mb-2">Improve runtime reliability</h3>
+          <p>
+            Prefer small changes with tests: generated-script snapshot tests, API route tests, dashboard syntax checks,
+            and mobile screenshot tests for delicate UI behavior.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-6 space-y-3">
+      <h2 class="text-2xl font-bold text-white">Operational Notes</h2>
+      <ul class="list-disc ml-5 space-y-2 text-sm text-slate-300 leading-relaxed">
+        <li>Restart the server after changing generated-script code so newly downloaded setup scripts use the new generator.</li>
+        <li>Existing downloaded <code class="text-emerald-200">agent-cli.sh</code> files are not rewritten automatically; users must download or regenerate them.</li>
+        <li>Rate limits protect the shared service. Side chats and agent polling should slow down under load rather than retry aggressively.</li>
+        <li>For reversible documentation or UI changes, commit separately and use <code class="text-emerald-200">git revert &lt;commit&gt;</code>.</li>
+      </ul>
+    </section>
+  </article>
+</div>

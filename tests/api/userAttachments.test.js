@@ -22,6 +22,10 @@ async function applyImageAttachmentsSchema(query) {
       height INTEGER,
       iv_base64 VARCHAR(32),
       auth_tag_base64 VARCHAR(32),
+      sha256 VARCHAR(64),
+      storage_provider VARCHAR(20),
+      storage_key VARCHAR(512),
+      encrypted BOOLEAN,
       agent_id UUID,
       uploaded_by VARCHAR(10),
       created_at TIMESTAMP
@@ -252,7 +256,7 @@ describe('User Attachment Controller', () => {
       await pool.end();
     });
 
-    it('should require contentType field', async () => {
+    it('should default missing contentType to application/octet-stream', async () => {
       const { app, query, pool, userId } = await createAttachmentTestContext();
 
       const agentId = uuidv4();
@@ -269,14 +273,15 @@ describe('User Attachment Controller', () => {
         .field('ivBase64', 'dGVzdGl2MTIzNDU2')
         .field('authTagBase64', 'dGVzdGF1dGh0YWcxMjM0NTY3OA==')
         .attach('file', Buffer.from('fake-encrypted-data'), 'test.png')
-        .expect(400);
+        .expect(201);
 
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-      expect(res.body.error.message).toBe('Content type is required');
+      expect(res.body.attachment.contentType).toBe('application/octet-stream');
+      const dbResult = await query('SELECT content_type FROM attachments WHERE attachment_id = $1', [res.body.attachment.attachmentId]);
+      expect(dbResult.rows[0].content_type).toBe('application/octet-stream');
       await pool.end();
     });
 
-    it('should reject invalid content types', async () => {
+    it('should accept general file content types by default', async () => {
       const { app, query, pool, userId } = await createAttachmentTestContext();
 
       const agentId = uuidv4();
@@ -294,11 +299,47 @@ describe('User Attachment Controller', () => {
         .field('authTagBase64', 'dGVzdGF1dGh0YWcxMjM0NTY3OA==')
         .field('contentType', 'video/mp4')
         .attach('file', Buffer.from('fake-encrypted-data'), 'test.mp4')
-        .expect(400);
+        .expect(201);
 
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-      expect(res.body.error.message).toContain('Content type must be one of');
+      expect(res.body.attachment.contentType).toBe('video/mp4');
       await pool.end();
+    });
+
+    it('should return a clear validation message when uploads are restricted to images', async () => {
+      const originalSetting = process.env.ENABLE_GENERAL_FILE_UPLOADS;
+      process.env.ENABLE_GENERAL_FILE_UPLOADS = 'false';
+
+      try {
+        const { app, query, pool, userId } = await createAttachmentTestContext();
+
+        const agentId = uuidv4();
+        await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
+          agentId,
+          userId,
+          'TestAgent',
+          1,
+        ]);
+
+        const res = await request(app)
+          .post('/api/user/attachments')
+          .field('agentId', agentId)
+          .field('ivBase64', 'dGVzdGl2MTIzNDU2')
+          .field('authTagBase64', 'dGVzdGF1dGh0YWcxMjM0NTY3OA==')
+          .field('contentType', 'text/plain')
+          .attach('file', Buffer.from('plain-text-payload'), 'notes.txt')
+          .expect(400);
+
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(res.body.error.message).toBe('This workspace currently allows image uploads only.');
+
+        await pool.end();
+      } finally {
+        if (originalSetting === undefined) {
+          delete process.env.ENABLE_GENERAL_FILE_UPLOADS;
+        } else {
+          process.env.ENABLE_GENERAL_FILE_UPLOADS = originalSetting;
+        }
+      }
     });
 
     it('should reject access to agents not owned by the user', async () => {
@@ -306,10 +347,12 @@ describe('User Attachment Controller', () => {
 
       // Create another user and their agent
       const otherUserId = uuidv4();
-      await query(
-        'INSERT INTO users (user_id, email, password_hash, api_key, encryption_salt, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE)',
-        [otherUserId, 'other@example.com', 'hash', 'api-key-other', 'salt']
-      );
+      await seedUser(query, {
+        userId: otherUserId,
+        email: 'other@example.com',
+        apiKey: 'api-key-other',
+        encryptionSalt: 'salt',
+      });
 
       const otherAgentId = uuidv4();
       await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
@@ -511,10 +554,12 @@ describe('User Attachment Controller', () => {
 
       // Create another user and their agent
       const otherUserId = uuidv4();
-      await query(
-        'INSERT INTO users (user_id, email, password_hash, api_key, encryption_salt, email_verified) VALUES ($1, $2, $3, $4, $5, TRUE)',
-        [otherUserId, 'other@example.com', 'hash', 'api-key-other', 'salt']
-      );
+      await seedUser(query, {
+        userId: otherUserId,
+        email: 'other@example.com',
+        apiKey: 'api-key-other',
+        encryptionSalt: 'salt',
+      });
 
       const otherAgentId = uuidv4();
       await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [

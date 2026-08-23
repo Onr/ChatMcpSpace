@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 cd "$ROOT_DIR"
+ensure_supported_node 16
 
 if is_server_running; then
   echo "[start-server] Server already running (PID $(cat "$PID_FILE"))"

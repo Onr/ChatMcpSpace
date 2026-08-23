@@ -21,6 +21,13 @@
         <p class="text-slate-400 mb-6">your registered email address</p>
       <% } %>
 
+      <% if (sendError) { %>
+        <div class="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left">
+          <p class="text-sm font-medium text-amber-200">We could not confirm delivery of the first verification email.</p>
+          <p class="mt-1 text-sm text-amber-100/90">Use <strong>Resend Code</strong> below to try again. Error: <%= sendError %></p>
+        </div>
+      <% } %>
+
       <!-- Code Input Form -->
       <form id="verifyCodeForm" class="mb-6">
         <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
@@ -68,7 +75,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
   const codeInputs = [
     document.getElementById('code1'),
     document.getElementById('code2'),
@@ -83,7 +90,7 @@
   const verifyBtn = document.getElementById('verifyBtn');
   const messageArea = document.getElementById('messageArea');
   const messageText = document.getElementById('messageText');
-  const userEmail = "<%- email ? email.replace(/\"/g, '&quot;') : '' %>";
+  const userEmail = <%- safeJsonForScript(email || '') %>;
 
   // Auto-focus and auto-advance code inputs
   codeInputs.forEach((input, index) => {

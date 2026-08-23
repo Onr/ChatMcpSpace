@@ -1,6 +1,7 @@
 module.exports = {
   testEnvironment: 'node',
-  testPathIgnorePatterns: ['/node_modules/', '/tmp/'],
+  testMatch: ['**/?(*.)+(test).[jt]s?(x)'],
+  testPathIgnorePatterns: ['/node_modules/', '/tmp/', '/tests/test-results/'],
   transform: {
     '^.+\\.jsx?$': 'babel-jest'
   },

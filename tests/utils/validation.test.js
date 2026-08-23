@@ -32,31 +32,31 @@ describe('Input Validation Utils', () => {
 
   describe('validatePasswordStrength', () => {
     it('should validate strong passwords', () => {
-      expect(validatePasswordStrength('Password123').valid).toBe(true);
+      expect(validatePasswordStrength('Password12345').valid).toBe(true);
     });
 
     it('should reject short passwords', () => {
       const res = validatePasswordStrength('Pass1');
       expect(res.valid).toBe(false);
-      expect(res.message).toMatch(/at least 8 characters/);
+      expect(res.message).toMatch(/at least 12 characters/);
     });
 
     it('should require letters', () => {
-      const res = validatePasswordStrength('12345678');
+      const res = validatePasswordStrength('123456789012');
       expect(res.valid).toBe(false);
       expect(res.message).toMatch(/contain at least one letter/);
     });
 
     it('should require numbers', () => {
-      const res = validatePasswordStrength('Password');
+      const res = validatePasswordStrength('PasswordLong');
       expect(res.valid).toBe(false);
       expect(res.message).toMatch(/contain at least one number/);
     });
 
     it('should handle special characters', () => {
-      expect(validatePasswordStrength('P@ssw0rd!').valid).toBe(true);
+      expect(validatePasswordStrength('P@ssw0rdL0ng!').valid).toBe(true);
       // Must contain at least one [a-zA-Z] letter
-      expect(validatePasswordStrength('Pass密码123456').valid).toBe(true); 
+      expect(validatePasswordStrength('Pass密码123456').valid).toBe(true);
     });
   });
 
