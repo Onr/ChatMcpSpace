@@ -136,6 +136,7 @@ CREATE TABLE user_messages (
   content TEXT, -- Nullable: allows messages with only attachments
   encrypted BOOLEAN DEFAULT FALSE,
   read_at TIMESTAMP DEFAULT NULL,
+  run_overrides JSONB DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

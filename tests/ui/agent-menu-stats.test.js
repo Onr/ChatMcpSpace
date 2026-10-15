@@ -105,3 +105,14 @@ describe('Agent action menu stats', () => {
     expect(formatter).toHaveBeenCalledTimes(1);
   });
 });
+
+
+test('an idle connected agent reports latest contact rather than a stale working heartbeat', () => {
+  const fs = require('fs'), vm = require('vm');
+  const source = fs.readFileSync(require('path').join(__dirname, '../../public/js/dashboard.js'), 'utf8');
+  const start = source.indexOf('function resolveAgentStatsMetadata(');
+  const end = source.indexOf('function getAgentMenuStatsSections(', start);
+  const scope = { findAgentSeat: () => null, findCachedAgentRecord: () => ({ lastSeenAt: '2026-10-13T03:00:00Z', lastWorkingHeartbeatTime: '2026-10-12T18:00:00Z' }) };
+  vm.runInNewContext(source.slice(start, end), scope);
+  expect(scope.resolveAgentStatsMetadata('agent', { lastHeartbeat: '2026-10-12T18:00:00Z' }).lastHeartbeat).toBe('2026-10-13T03:00:00Z');
+});

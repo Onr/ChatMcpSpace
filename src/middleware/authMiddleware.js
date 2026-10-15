@@ -11,12 +11,20 @@ const { logApiKeyUsage } = require('../utils/securityLogger');
 const { query } = require('../db/connection');
 
 const AGENT_SCOPE_RULES = [
+  { method: 'GET', path: /^\/shared(?:\/.*)?$/, scope: 'agent.responses.read' },
+  { method: 'POST', path: /^\/shared(?:\/.*)?$/, scope: 'agent.messages.write' },
+  { method: 'PUT', path: /^\/shared\/identity$/, scope: 'agent.messages.write' },
+  { method: 'POST', path: /^\/attachments$/, scope: 'agent.attachments.write' },
+  { method: 'GET', path: /^\/attachments\/[^/]+$/, scope: 'agent.attachments.read' },
   { method: 'POST', path: /^\/messages$/, scope: 'agent.messages.write' },
   { method: 'POST', path: /^\/questions$/, scope: 'agent.questions.write' },
   { method: 'GET', path: /^\/responses$/, scope: 'agent.responses.read' },
+  { method: 'POST', path: /^\/responses\/ack$/, scope: 'agent.responses.read' },
+  { method: 'POST', path: /^\/heartbeat$/, scope: 'agent.responses.read' },
   { method: 'GET', path: /^\/discover$/, scope: 'agent.discover.read' },
   { method: 'POST', path: /^\/messages\/direct$/, scope: 'agent.dm.write' },
   { method: 'GET', path: /^\/messages\/direct$/, scope: 'agent.dm.read' },
+  { method: 'POST', path: /^\/messages\/direct\/ack$/, scope: 'agent.dm.read' },
   { method: 'GET', path: /^\/groups$/, scope: 'agent.groups.read' },
   { method: 'POST', path: /^\/groups$/, scope: 'agent.groups.write' },
   { method: 'POST', path: /^\/groups\/.+\/join$/, scope: 'agent.groups.write' },
@@ -28,7 +36,8 @@ const AGENT_SCOPE_RULES = [
   { method: 'GET', path: /^\/lineage$/, scope: 'agent.lineage.read' },
   { method: 'GET', path: /^\/children$/, scope: 'agent.lineage.read' },
   { method: 'GET', path: /^\/messages\/history$/, scope: 'agent.history.read' },
-  { method: 'GET', path: /^\/messages\/latest$/, scope: 'agent.history.read' }
+  { method: 'GET', path: /^\/messages\/latest$/, scope: 'agent.history.read' },
+  { method: 'GET', path: /^\/usage-limits$/, scope: 'agent.usage.read' }
 ];
 
 function hasScope(scopes, neededScope) {
@@ -233,14 +242,16 @@ async function requireApiKey(req, res, next) {
       }
 
       const requestedAgentName = req.headers['x-agent-name'];
-      if (requestedAgentName && requestedAgentName.trim() !== scopedAuth.agentName) {
+      const requestedIdentities = [requestedAgentName, req.body?.agentName, req.query?.agentName]
+        .filter(value => value !== undefined);
+      if (requestedIdentities.some(value => typeof value !== 'string' || value.trim() !== scopedAuth.agentName)) {
         await logScopedAuthEvent({
           agentId: scopedAuth.agentId,
           credentialId: scopedAuth.credentialId,
           eventType: 'auth_agent_mismatch',
           req,
           metadata: {
-            requestedAgentName: requestedAgentName.trim(),
+            requestedAgentName: typeof requestedAgentName === 'string' ? requestedAgentName.trim() : null,
             boundAgentName: scopedAuth.agentName
           }
         });
@@ -255,6 +266,12 @@ async function requireApiKey(req, res, next) {
 
       if (!requestedAgentName) {
         req.headers['x-agent-name'] = scopedAuth.agentName;
+      }
+
+      // Responses without a filter must never return every agent's inbox when
+      // the caller only owns one scoped identity.
+      if (req.method === 'GET' && req.path === '/responses') {
+        req.query.agentName = scopedAuth.agentName;
       }
 
       req.user = scopedAuth.user;

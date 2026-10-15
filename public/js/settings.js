@@ -120,6 +120,28 @@ function copyApiKey() {
     });
 }
 
+async function copyMcpAddress() {
+  const address = document.getElementById('mcpServerAddress');
+  const status = document.getElementById('mcpCopyStatus');
+  if (!address || !status) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(address.textContent.trim());
+    status.textContent = 'Address copied';
+  } catch (_) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(address);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    status.textContent = 'Select and copy the highlighted address';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('copyMcpAddress')?.addEventListener('click', copyMcpAddress);
+});
+
 /**
  * Copy direct setup script to clipboard (legacy)
  */
@@ -778,6 +800,13 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEncryptionSettings();
   initializeOpenClawIntegration();
   startSettingsNewAgentMonitor();
+  const usageDetails = document.getElementById('usageLimitsDetails');
+  if (usageDetails) {
+    let requested = false;
+    usageDetails.addEventListener('toggle', () => {
+      if (usageDetails.open && !requested) { requested = true; void loadUsageLimits(); }
+    });
+  } else loadUsageLimits();
 });
 
 /**
@@ -1389,4 +1418,82 @@ async function confirmDeleteAccount() {
       confirmBtn.textContent = 'Delete My Account';
     }
   }
+}
+
+/**
+ * Fetch and render the "Usage & Limits" card
+ */
+async function loadUsageLimits() {
+  const loadingEl = document.getElementById('usageLimitsLoading');
+  const errorEl = document.getElementById('usageLimitsError');
+  const contentEl = document.getElementById('usageLimitsContent');
+  if (!loadingEl || !errorEl || !contentEl) return;
+
+  try {
+    const response = await fetch('/api/user/usage-limits', {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch usage limits: ${response.status}`);
+    }
+
+    const data = await response.json();
+    renderUsageLimits(data);
+
+    loadingEl.classList.add('hidden');
+    contentEl.classList.remove('hidden');
+  } catch (error) {
+    console.error('Usage limits fetch error:', error);
+    loadingEl.classList.add('hidden');
+    errorEl.classList.remove('hidden');
+  }
+}
+
+function usageLimitBarColor(remaining, limit) {
+  const ratio = limit > 0 ? remaining / limit : 1;
+  if (ratio <= 0.15) return 'bg-red-500';
+  if (ratio <= 0.4) return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
+
+function renderUsageLimitRow(item) {
+  const limit = Number(item.limit) || 0;
+  const used = Number(item.used) || 0;
+  const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const barColor = usageLimitBarColor(item.remaining, limit);
+
+  return `
+    <div>
+      <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+        <span>${escapeHtml(item.label || item.scope)}</span>
+        <span>${used} / ${limit} per minute</span>
+      </div>
+      <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+        <div class="h-full ${barColor}" style="width: ${percent}%"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderUsageLimits(data) {
+  const accountEl = document.getElementById('usageLimitsAccount');
+  const agentsEl = document.getElementById('usageLimitsAgents');
+  if (!accountEl || !agentsEl) return;
+
+  const accountLimits = Array.isArray(data?.account?.limits) ? data.account.limits : [];
+  accountEl.innerHTML = accountLimits.length
+    ? accountLimits.map(renderUsageLimitRow).join('')
+    : '<p class="text-xs text-slate-500">No account-wide limits to show.</p>';
+
+  const agents = Array.isArray(data?.agents) ? data.agents : [];
+  agentsEl.innerHTML = agents.length
+    ? agents.map((agent) => `
+        <details class="rounded-xl bg-slate-800/50 p-4 settings-agent-usage">
+          <summary class="text-sm font-medium text-slate-200 cursor-pointer">${escapeHtml(agent.agentName)}</summary>
+          <div class="mt-3 space-y-3">${(agent.limits || []).map(renderUsageLimitRow).join('')}</div>
+        </details>
+      `).join('')
+    : '<p class="text-xs text-slate-500">No agents yet.</p>';
 }

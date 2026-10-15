@@ -411,6 +411,11 @@ body::before {
   filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.45));
 }
 
+.message-tts-btn.is-paused {
+  color: #7dd3fc;
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.35));
+}
+
 .message-tts-btn.is-playing::before,
 .message-tts-btn.is-playing::after {
   content: '';
@@ -429,6 +434,162 @@ body::before {
 .message-tts-btn.is-playing::after {
   animation-delay: 0.3s;
   border-color: rgba(191, 219, 254, 0.5);
+}
+
+.message-tts-player {
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.55rem;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 0.7rem;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.message-tts-player[hidden],
+.message-tts-transcript[hidden] {
+  display: none !important;
+}
+
+.message-tts-controls {
+  display: grid;
+  grid-template-columns: auto auto minmax(5rem, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.message-tts-control {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.55rem;
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.message-tts-control:hover,
+.message-tts-control:focus-visible {
+  border-color: rgba(125, 211, 252, 0.72);
+  color: #f8fafc;
+  outline: none;
+}
+
+.message-tts-progress-label {
+  display: flex;
+  min-width: 0;
+}
+
+.message-tts-progress {
+  width: 100%;
+  min-width: 4rem;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.message-tts-progress-text {
+  min-width: 2.5rem;
+  color: #bae6fd;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.message-tts-transcript {
+  max-height: min(12rem, 35vh);
+  margin-top: 0.55rem;
+  padding: 0.65rem;
+  overflow-y: auto;
+  border-radius: 0.55rem;
+  background: rgba(2, 6, 23, 0.58);
+  color: #cbd5e1;
+  font-size: 0.86rem;
+  line-height: 1.75;
+  overscroll-behavior: contain;
+}
+
+.message-tts-word {
+  display: inline;
+  margin: 0;
+  padding: 0.08rem 0.12rem;
+  border: 0;
+  border-radius: 0.22rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.message-tts-word.is-read {
+  color: #94a3b8;
+}
+
+.message-tts-word.is-current {
+  background: rgba(56, 189, 248, 0.28);
+  color: #f0f9ff;
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.4);
+}
+
+.message-tts-word:hover,
+.message-tts-word:focus-visible {
+  background: rgba(125, 211, 252, 0.2);
+  color: #f8fafc;
+  outline: 2px solid rgba(125, 211, 252, 0.5);
+  outline-offset: 1px;
+}
+
+@media (max-width: 767px), (pointer: coarse) and (max-width: 1180px) {
+  .message-tts-player {
+    padding: 0.5rem;
+  }
+
+  .message-tts-controls {
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+  }
+
+  .message-tts-control {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .message-tts-progress-label {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-height: 2.75rem;
+    align-items: center;
+    padding-right: 3rem;
+  }
+
+  .message-tts-progress-text {
+    grid-column: 4;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .message-tts-transcript-toggle {
+    grid-column: 4;
+    grid-row: 1;
+    min-width: 5.8rem;
+  }
+
+  .message-tts-rate {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .message-tts-word {
+    min-height: 2.2rem;
+    padding: 0.3rem 0.16rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-tts-btn.is-playing,
+  .message-tts-btn.is-playing::before,
+  .message-tts-btn.is-playing::after {
+    animation: none;
+  }
 }
 
 .message-copy-btn {
@@ -459,6 +620,10 @@ body::before {
 
 .message-read-indicator--pending {
   color: #475569;
+}
+
+.message-read-indicator--delivered {
+  color: #94a3b8;
 }
 
 .message-read-indicator--failed {
@@ -881,6 +1046,29 @@ body::before {
   box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
   animation: tile-working-pulse 1.5s ease-in-out infinite;
 }
+
+.shared-participants-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 6px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid rgba(52, 211, 153, .25);
+    border-radius: 12px;
+    background: rgba(16, 185, 129, .07);
+    color: #a7f3d0;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+.shared-participants-button[hidden] { display: none; }
+.shared-participants-button:hover { background: rgba(16, 185, 129, .15); border-color: rgba(52, 211, 153, .5); }
+.shared-participants-button:focus-visible { outline: 2px solid #6ee7b7; outline-offset: 3px; }
 
 .chat-header__pin-btn {
   display: inline-flex;
@@ -1837,6 +2025,9 @@ body.orbit-dragging .agent-seat {
 
 /* Message Panel Enhancements */
 #agentPanelHeader {
+  /* Keep the header menu above the conversation. The generic glass-panel
+     child rule overrides the Tailwind z-20 utility loaded before this file. */
+  z-index: 20;
   background: rgba(2, 6, 23, 0.6);
   backdrop-filter: blur(10px);
 }
@@ -1950,11 +2141,34 @@ body.dashboard-fast-mode .dock-position-indicator,
 body.dashboard-fast-mode .dock-interaction-hints,
 body.dashboard-fast-mode .dock-swipe-hint,
 body.dashboard-fast-mode .council-orbit,
-body.dashboard-fast-mode #mainInteractiveSpace,
 body.dashboard-fast-mode #interAgentStatsInline,
-body.dashboard-fast-mode .message-tts-btn,
 body.dashboard-fast-mode .message-info-btn {
   display: none !important;
+}
+
+/* Fast Mode: the Agent Space (HTML message viewer) stays available on mobile.
+   It is suppressed only on the "select an agent" placeholder and in the All
+   Chats view — the same gate #messageInputArea uses below — so it costs no
+   vertical space until a real chat is open. Inside a chat it behaves exactly
+   as in normal mode: collapsed header, per-agent open/closed state, and
+   auto-expand when the agent sends new rich content. */
+body.dashboard-fast-mode:not([data-agent-selected="true"]) #mainInteractiveSpace,
+body.dashboard-fast-mode[data-all-chats-view="true"] #mainInteractiveSpace {
+  display: none !important;
+}
+
+/* Cap the viewer in Fast Mode so it can never squeeze the conversation out,
+   including on short touch-landscape screens that fall outside the 767px
+   mobile block where this cap is otherwise defined. */
+body.dashboard-fast-mode #mainInteractiveSpace {
+  max-height: 30vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.dashboard-fast-mode #mainInteractiveContent {
+  max-height: 25vh !important;
+  min-height: 0;
 }
 
 body.dashboard-fast-mode #mobileAgentDock {
@@ -5155,6 +5369,11 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
     z-index: 50;
   }
 
+  /* The expanded agent list is positioned just below the council card. */
+  .council-chamber.mobile-agent-list-open {
+    overflow: visible !important;
+  }
+
   .agent-list-panel.mobile-expanded {
     max-height: min(52vh, calc(var(--vh, 100dvh) - var(--mobile-composer-height, 92px) - 7rem));
     min-height: 120px;
@@ -6526,64 +6745,14 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
   color: #60a5fa;
 }
 
-/* ==================== Navigation Bar Morphing ==================== */
-
-/* Settings button wrapper - enable smooth layout transitions */
+/* Dashboard/settings navigation uses ordinary links. */
 #settingsButtonWrapper {
-  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-    flex 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: inline-flex;
   align-items: center;
 }
 
-/* Nav button morphing - double text technique */
 #navToggleButton {
-  position: relative;
-  overflow: hidden;
-  display: inline-block;
-  min-width: fit-content;
-  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   white-space: nowrap;
-}
-
-/* Hidden next text that measures width */
-#navToggleButton[data-next-text]::after {
-  content: attr(data-next-text);
-  position: absolute;
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-/* Current text */
-#navToggleButton .button-text {
-  display: inline-block;
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-#navToggleButton.morphing .button-text {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
-/* Next text that comes in */
-#navToggleButton .button-text-next {
-  position: absolute;
-  display: inline-block;
-  opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 0.3s ease 0.1s, transform 0.3s ease 0.1s;
-  left: 0;
-  top: 0;
-  width: 100%;
-  text-align: center;
-  white-space: nowrap;
-}
-
-#navToggleButton.morphing .button-text-next {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 /* Navigation stays smooth during page transitions */
@@ -6661,19 +6830,6 @@ main {
   }
 }
 
-/* Page exit animation - slide down with fade */
-@keyframes pageExit {
-  0% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-}
-
 /* Add scale transition for a more dynamic feel */
 @keyframes pageEnterScale {
   0% {
@@ -6687,54 +6843,9 @@ main {
   }
 }
 
-/* Transition state for exiting page */
-main.page-exiting {
-  animation: pageExit 0.4s cubic-bezier(0.7, 0, 0.84, 0);
-  animation-fill-mode: forwards;
-}
-
-/* Navigation links that trigger transitions */
-a[data-transition],
-button[data-transition] {
-  position: relative;
-}
-
-/* Ripple effect overlay for links */
-a[data-transition]::before,
-button[data-transition]::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  transition: width 0.6s, height 0.6s;
-}
-
-a[data-transition]:active::before,
-button[data-transition]:active::before {
-  width: 300px;
-  height: 300px;
-}
-
-/* Loading state for navigation during transition */
-.nav-loading {
-  opacity: 0.7;
-  pointer-events: none;
-}
-
 /* Smooth transition for nav elements */
 nav {
   transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-/* Optional: Add a subtle scale to nav during transition */
-nav.transitioning {
-  opacity: 0.8;
 }
 
 /* Settings/Dashboard specific transitions */
@@ -6772,23 +6883,6 @@ main>*:nth-child(3) {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* Smooth page transition with blur effect - optional premium feel */
-@keyframes pageBlurExit {
-  0% {
-    opacity: 1;
-    filter: blur(0px);
-  }
-
-  100% {
-    opacity: 0;
-    filter: blur(3px);
-  }
-}
-
-main.page-exiting-blur {
-  animation: pageBlurExit 0.4s ease-in forwards;
 }
 
 /* =============================================================================
@@ -7284,8 +7378,17 @@ main.page-exiting-blur {
 /* Touch tablets and wide/rotated phones can sit above the narrow mobile
    breakpoint while still using mobile browser chrome. Give that band an
    explicit viewport-bound app shell so the page itself does not grow with the
-   message history; only the conversation pane should scroll. */
-@media (pointer: coarse) and (min-width: 768px) and (max-width: 1180px) {
+   message history; only the conversation pane should scroll.
+   Narrow desktop/mouse windows hit the same problem: dashboard.js already
+   switches to the single-column mobile list/chat layout below 1024px
+   (MOBILE_LIST_ONLY_MEDIA_QUERY, pointer-agnostic), but this app shell used
+   to require pointer:coarse, so a resized desktop window between 768px and
+   1023px got the mobile DOM/JS behavior without the matching height
+   constraints — the page grew taller than the viewport and required
+   scrolling the whole window to reach the composer. Cover that width band
+   for any pointer type; keep the coarse-only extension up to 1180px for
+   touch tablets that stay in landscape two-pane mode past 1024px. */
+@media (min-width: 768px) and (max-width: 1023px), (pointer: coarse) and (min-width: 768px) and (max-width: 1180px) {
   html:has(#dashboardRoot),
   body:has(#dashboardRoot) {
     height: 100vh;
@@ -8617,3 +8720,133 @@ main.page-exiting-blur {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
   white-space: nowrap;
 }
+
+/* ===== Button polish: softer edges, tactile feedback ===== */
+/* Hairline borders read as hard boxes on the dark glass panels. Replace them
+   with a faint inset ring and let hover/press carry the affordance. Only
+   transform, box-shadow and colours change, so these stay cheap to animate. */
+#groupBackBtn {
+  border-color: transparent;
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.1);
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+#groupBackBtn svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+button.rounded-full.border-white\/10:not([class*="border-emerald"]):not([class*="border-amber"]):not([class*="border-violet"]),
+a.rounded-full.border-white\/10:not([class*="border-emerald"]):not([class*="border-amber"]):not([class*="border-violet"]) {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+/* Hover lift only where a real pointer can hover, so it does not stick after a tap. */
+@media (hover: hover) and (pointer: fine) {
+  #groupBackBtn:hover {
+    background: rgba(148, 163, 184, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16), 0 6px 18px -10px rgba(16, 185, 129, 0.55);
+  }
+
+  #groupBackBtn:hover svg {
+    transform: translateX(-2px);
+  }
+
+  button.rounded-full.border-white\/10:not([class*="border-emerald"]):not([class*="border-amber"]):not([class*="border-violet"]):hover,
+  a.rounded-full.border-white\/10:not([class*="border-emerald"]):not([class*="border-amber"]):not([class*="border-violet"]):hover {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 6px 16px -10px rgba(16, 185, 129, 0.5);
+    transform: translateY(-1px);
+  }
+
+  #userMessageSend:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px -10px rgba(52, 211, 153, 0.75);
+  }
+
+  #userMessageSend:not(:disabled):hover .send-spaceship-icon {
+    transform: rotate(18deg) translate(1px, -1px);
+  }
+}
+
+#groupBackBtn:active,
+button.rounded-full.border-white\/10:active,
+a.rounded-full.border-white\/10:active {
+  transform: translateY(0) scale(0.97);
+}
+
+#userMessageSend {
+  transition: background-color 160ms ease, box-shadow 200ms ease, transform 160ms ease, opacity 160ms ease;
+}
+
+#userMessageSend .send-spaceship-icon {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#userMessageSend:not(:disabled):active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* Send animation: the draft copy that glides into the conversation
+   (see playSendFlight in dashboard.js). */
+.send-flight {
+  position: fixed;
+  z-index: 300;
+  max-height: 7.5rem;
+  overflow: hidden;
+  padding: 0.55rem 0.8rem;
+  border-radius: 1rem 1rem 0.35rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: rgb(226, 232, 240);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  background-color: rgba(30, 41, 59, 0.92);
+  box-shadow: 0 10px 30px -12px rgba(2, 6, 23, 0.8);
+  transform-origin: right bottom;
+  will-change: transform, opacity;
+  transition: background-color 380ms ease, color 380ms ease;
+}
+
+.send-flight--sent {
+  background-color: rgba(16, 185, 129, 0.88);
+  color: rgb(2, 6, 23);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-flight {
+    display: none;
+  }
+
+  #groupBackBtn,
+  #groupBackBtn svg,
+  #userMessageSend,
+  #userMessageSend .send-spaceship-icon,
+  button.rounded-full.border-white\/10,
+  a.rounded-full.border-white\/10 {
+    transition: none;
+  }
+
+  #groupBackBtn:hover svg,
+  #userMessageSend:not(:disabled):hover,
+  button.rounded-full.border-white\/10:hover,
+  a.rounded-full.border-white\/10:hover {
+    transform: none;
+  }
+}
+/* Compact settings disclosures and conversation replies. */
+.settings-usage-details > summary { list-style-position: inside; color: #94a3b8; }
+.settings-usage-details > summary h2 { display: inline; margin-inline-start: .4rem; }
+.settings-usage-list { max-height: min(26rem, 60vh); overflow-y: auto; overscroll-behavior: contain; padding: 1rem .25rem .25rem; }
+.settings-copy-button { border: 0; border-radius: 999px; padding: .6rem 1rem; color: #a7f3d0; background: rgba(16,185,129,.12); cursor: pointer; }
+.settings-copy-button:hover { background: rgba(16,185,129,.22); }
+.settings-copy-button:focus-visible, .message-reply-quote:focus-visible { outline: 2px solid #34d399; outline-offset: 3px; }
+.council-group-drop-target { outline: 2px solid #34d399; outline-offset: 5px; border-radius: 1rem; background-color: rgba(16,185,129,.16); }
+.message-reply-quote { display: flex; flex-direction: column; gap: .2rem; width: 100%; min-width: 0; max-width: 34rem; padding: .5rem .75rem; margin-bottom: .5rem; border: 0; border-inline-start: 3px solid #34d399; border-radius: .5rem; background: rgba(15,23,42,.4); text-align: start; color: #cbd5e1; font: inherit; cursor: pointer; }
+.message-reply-quote strong { font-size: .75rem; color: #6ee7b7; }
+.message-reply-quote span { font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.message-reply-draft { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+.message-reply-draft .message-reply-quote { margin: 0; cursor: default; }
+.message-reply-highlight { outline: 2px solid rgba(52,211,153,.65); outline-offset: 3px; border-radius: .75rem; }

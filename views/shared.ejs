@@ -1,0 +1,65 @@
+<link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
+<link rel="stylesheet" href="/css/shared.css?v=20261009">
+<section id="sharedApp" class="chat-shell" data-csrf="<%= csrfToken || '' %>" aria-label="Shared conversations">
+  <header class="chat-page-header">
+    <div><p class="chat-eyebrow">Your workspace, together</p><h1>Shared conversations<span class="chat-heading-dot" aria-hidden="true">.</span></h1><p>A place for your team and agent to think, build and move work forward.</p></div>
+    <% if (process.env.FEATURE_GUEST_SHARING === 'true') { %><a class="chat-link-button" href="/guest-sharing">Share with guests <span aria-hidden="true">↗</span></a><% } %>
+  </header>
+  <p id="sharedError" class="chat-alert" role="alert"></p>
+  <form id="sharedUnlock" class="chat-unlock-card">
+    <span class="chat-large-icon" aria-hidden="true">◎</span><p class="chat-eyebrow">Your shared space</p><h2>Pick up the conversation</h2><p>Unlock your shared chats with your account encryption key.</p>
+    <label>Your name in shared chats <input name="displayName" maxlength="80" required autocomplete="name" placeholder="What should we call you?"></label>
+    <button class="chat-primary">Unlock shared chats</button><p class="chat-help">Open your private dashboard to unlock your account encryption first.</p>
+  </form>
+  <details class="chat-recovery"><summary>Recover shared encryption access</summary><p>If your account key changed, first try signing in with the correct key. Recovery replaces your shared identity and pauses access until another manager approves each chat. If you are the only member, restore your old key from backup.</p><button id="sharedRecover" type="button">Request key recovery</button></details>
+  <div id="sharedWorkspace" class="chat-workspace" data-chat-workspace data-view="rooms" hidden>
+    <aside class="chat-sidebar" aria-label="Shared chat list">
+      <div class="chat-sidebar-heading"><div><p class="chat-eyebrow">Conversations</p><h2>Your shared chats</h2></div><span class="chat-sidebar-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 11a8 8 0 0 1-8 8H5l-3 3V11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8Z"/><path d="M7 8h9M7 12h6"/></svg></span></div>
+      <div id="sharedRooms" class="chat-rooms"></div>
+      <details class="chat-new-room"><summary><span aria-hidden="true">＋</span><span>Start shared chat</span></summary>
+        <form id="sharedCreate">
+          <label>Choose your agent <select name="agentId" required disabled aria-describedby="sharedAgentStatus"><option value="">Loading agents…</option></select></label>
+          <label>Conversation title <input name="title" maxlength="120" required placeholder="What are we working on?"></label>
+          <button type="submit" class="chat-primary" disabled>Create shared chat <span aria-hidden="true">→</span></button>
+          <p id="sharedAgentStatus" class="chat-help" role="status">Loading your agents…</p>
+          <div class="chat-agent-links"><button id="sharedRefreshAgents" type="button">Refresh agents</button><a href="/dashboard">Manage agents <span aria-hidden="true">↗</span></a></div>
+        </form>
+      </details>
+      <div class="chat-sidebar-footer"><span class="chat-secure-dot" aria-hidden="true"></span> Encrypted conversations<p>Shared history stays separate from your private chats.</p></div>
+    </aside>
+    <div id="sharedEmpty" class="chat-empty-state"><span class="chat-large-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M21 11a8 8 0 0 1-8 8H5l-3 3V11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8Z"/><path d="M7 8h9M7 12h6"/></svg></span><h2>Start something together</h2><p>Choose a conversation or create a shared chat with your agent. Invite your team when you’re ready.</p><span class="chat-empty-pill">Your agent. Your people. One space.</span></div>
+    <section id="sharedConversation" class="chat-conversation" hidden>
+      <header class="chat-conversation-header">
+        <button class="chat-mobile-back" type="button" aria-label="Back to shared chats"><span aria-hidden="true">←</span> Chats</button>
+        <span id="sharedAgentAvatar" class="chat-avatar chat-avatar-agent" aria-hidden="true">✧</span>
+        <div class="chat-conversation-heading"><h2 id="sharedTitle"></h2><p id="sharedStatus" class="chat-status" role="status"></p></div>
+        <span id="sharedRoleBadge" class="chat-badge">Shared chat</span>
+      </header>
+      <details class="chat-controls"><summary><span>Participants and controls</span><span class="chat-summary-note">See who’s here</span></summary><div class="chat-controls-body"><div id="sharedMembers"></div>
+        <form id="sharedInvite"><label>Registered email <input name="email" type="email" required placeholder="name@example.com"></label><label>Role <select name="role"><option value="participant">Collaborator (default)</option><option value="manager">Manager</option></select></label><button class="chat-primary">Invite</button><p class="chat-help">Collaborators can request work using this agent's existing capabilities. Managers control this shared room.</p></form>
+        <form id="sharedProfile"><label>Agent-wide provider/model <select name="profile"></select></label><button>Apply to agent</button></form>
+        <div class="chat-control-actions"><button id="sharedStop" class="chat-danger" type="button">Stop agent in all conversations</button><button id="sharedRetry" type="button">Retry uncertain work</button><button id="sharedSkip" type="button">Skip uncertain work</button></div>
+      </div></details>
+      <details id="sharedTasks" class="chat-task-panel" hidden><summary>Agent activity</summary><div data-chat-tasks></div><p data-task-error role="alert"></p></details>
+      <div id="sharedTimeline" class="chat-timeline" role="log" aria-label="Conversation messages" aria-live="polite"></div>
+      <form id="sharedComposer" class="chat-composer" data-chat-composer>
+        <p id="sharedReply" class="chat-reply-state"></p>
+        <label class="chat-sr-only" for="sharedMessage">Message</label><textarea id="sharedMessage" name="text" rows="2" maxlength="60000" placeholder="Ask your agent, or share a thought…"></textarea>
+        <div class="chat-selected-files" data-chat-files role="status" aria-live="polite"></div>
+        <div class="chat-composer-toolbar">
+          <label class="chat-attach"><span aria-hidden="true">＋</span><span>Images or files</span><input name="files" type="file" multiple class="chat-sr-only"></label>
+          <label class="chat-address"><span>Address to</span><select name="address"><option value="">Everyone</option></select></label>
+          <button type="submit" class="chat-primary chat-send" aria-label="Send to shared chat"><span class="chat-send-label">Send to shared chat</span><span aria-hidden="true">↑</span></button>
+        </div>
+        <button id="sharedCancelReply" type="button" hidden>Cancel reply</button>
+        <p class="chat-composer-hint">Everyone in this chat can see messages and addressed replies. <span>⌘ / Ctrl + Enter to send</span></p>
+      </form>
+    </section>
+  </div>
+</section>
+<script src="/js/encryption.js"></script>
+<script src="/js/shared-crypto.js"></script>
+<script src="/js/vendor/dompurify.min.js"></script>
+<script src="/js/rich-rendering.js"></script>
+<script src="/js/sharing-ui.js?v=20261009"></script>
+<script src="/js/shared-chat.js?v=20261009"></script>

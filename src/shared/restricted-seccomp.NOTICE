@@ -1,0 +1,13 @@
+restricted-seccomp.json and the retained sharedSeccompBaseline.json fixture
+derive from the effective Podman 4.9.3 zero-capability OCI seccomp policy observed
+on the verification VM. The upstream containers/common profile is distributed
+under the Apache License, Version 2.0:
+https://github.com/containers/common/tree/v0.57.4/pkg/seccomp
+https://github.com/containers/common/blob/v0.57.4/LICENSE
+
+Modifications: retain only the native x86_64 ABI; remove multiplexed socketcall
+permission; narrow socket creation to AF_INET/AF_INET6/AF_NETLINK, preserving
+NETLINK_AUDIT denial; explicitly deny AF_UNIX. Default and other syscall rules
+remain unchanged. The unmodified effective baseline is retained for review.
+
+The Apache License, Version 2.0 text is adjacent in restricted-seccomp.LICENSE.

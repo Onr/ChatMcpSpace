@@ -53,7 +53,15 @@ function parseFeedbackImage(req, res, next) {
 }
 const router = express.Router();
 const { attachUserFromSession } = require('../middleware/authMiddleware');
-const { userPollingRateLimiter, feedbackRateLimiter } = require('../middleware/rateLimitMiddleware');
+const {
+  userPollingRateLimiter,
+  feedbackRateLimiter,
+  agentApiRateLimiter,
+  agentPollingRateLimiter,
+  agentMessageIngressRateLimiter,
+  getUsageStatus,
+  resolveClientIdentifier
+} = require('../middleware/rateLimitMiddleware');
 const { query, getClient } = require('../db/connection');
 const { validateTimestamp, isValidUUID, formatTimestampForDatabase, validateMessageContent, validateAttachmentIds } = require('../utils/validation');
 const { validationError, forbiddenError, handleDatabaseError, internalError } = require('../utils/errorHandler');
@@ -69,6 +77,14 @@ const { issueScopedCredential, revokeActiveCredentials } = require('../services/
 const { AGENT_CLI_VERSION, isCliVersionOutdated } = require('../utils/agentCliVersion');
 const { readPidFromFile, terminateProcessWithEscalation } = require('../utils/agentStopUtils');
 const { loadAgentRuntimeState } = require('../services/agentRuntimeConfigService');
+const { validateRunOverrides } = require('../utils/runOverrides');
+const chatThreadService = require('../shared/chatThreadService');
+
+async function resolveRunOverrides(agentId, agentName, input) {
+  if (input === undefined || input === null) return { valid: true, value: null };
+  const { allowedPermissions } = await loadAgentRuntimeState({ agentId, agentName });
+  return validateRunOverrides(input, allowedPermissions);
+}
 
 const OPENCLAW_FEATURE_FLAG = process.env.FEATURE_OPENCLAW_EXTERNAL_BOTS !== 'false';
 const VALID_INTER_AGENT_MODES = new Set(['disabled', 'listen_all', 'groups']);
@@ -166,6 +182,8 @@ function getDefaultScopedScopes({ canSpawn }) {
     'agent.groups.write',
     'agent.stop.write',
     'agent.lineage.read',
+    'agent.attachments.read',
+    'agent.attachments.write',
     'agent.history.read'
   ];
 
@@ -484,23 +502,52 @@ router.use(attachUserFromSession);
 
 // Apply rate limiting to all user API routes (generous for dashboard UI)
 router.use(userPollingRateLimiter);
+router.use('/chat-threads', require('../shared/chatThreadRoutes'));
+router.use('/shared', require('../shared/routes').users);
 
 // ─── Chief of Staff install ────────────────────────────────────────────────
 const chiefOfStaffService = require('../services/chiefOfStaffService');
 
 /**
+ * Commands the install modal shows so a user can put the Chief of Staff on
+ * their OWN computer: download the CLI, then run its --local-cos action.
+ *
+ * The base URL is resolved the same way GET /setup resolves it
+ * (see pageRoutes.js) so the command always points at the server the browser
+ * is actually talking to.
+ *
+ * Both commands run in the same folder on purpose. agent-cli.sh derives
+ * CHATSPACE_DIR from its own location ("$SCRIPT_DIR/.chatspace"), so the
+ * folder the user runs the installer in becomes the home for the Chief of
+ * Staff and every agent it spawns. `/setup` also drops a copy in ~/.chatmcp/,
+ * but invoking that copy would bury the agents in a hidden directory.
+ */
+function buildChiefOfStaffSetupCommands(req) {
+  const webBase = (process.env.BASE_URL || `${req.protocol}://${req.get('host')}`)
+    .replace(/\/+$/, '');
+  return {
+    setupCommand: `curl -sL ${webBase}/setup | bash`,
+    localCosCommand: 'bash agent-cli.sh --local-cos',
+    apiKeyUrl: `${webBase}/settings`
+  };
+}
+
+/**
  * GET /api/user/install-chief-of-staff/status
- * Returns whether the user already has a Chief of Staff installed.
+ * Returns whether the user already has a Chief of Staff installed, plus the
+ * terminal commands for installing one on the user's own machine.
  */
 router.get('/install-chief-of-staff/status', async (req, res) => {
   try {
+    const setup = buildChiefOfStaffSetupCommands(req);
     const agents = await chiefOfStaffService.listChiefsOfStaffForUser(req.user.userId);
     if (agents.length === 0) {
-      return res.json({ installed: false });
+      return res.json({ installed: false, setup });
     }
     const agent = agents[0];
     res.json({
       installed: true,
+      setup,
       installed_at: agent.created_at,
       count: agents.length,
       agent: {
@@ -940,6 +987,64 @@ router.put('/agents/positions', async (req, res) => {
     if (client) {
       client.release();
     }
+  }
+});
+
+/**
+ * GET /api/user/usage-limits
+ * Lets the signed-in user check how close their account and each of their
+ * agents are to the API rate limits, so the dashboard/settings UI can
+ * surface it without them having to inspect response headers.
+ */
+router.get('/usage-limits', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const clientIdentifier = resolveClientIdentifier(req);
+
+    const agentsQuery = createArchiveAwareQuery(
+      () => `
+        SELECT a.agent_name
+        FROM agents a
+        LEFT JOIN archived_agents aa ON a.agent_id = aa.agent_id
+        WHERE a.user_id = $1 AND aa.archived_agent_id IS NULL
+        ORDER BY a.agent_name`,
+      () => `
+        SELECT a.agent_name
+        FROM agents a
+        WHERE a.user_id = $1
+        ORDER BY a.agent_name`,
+      'usage_limits_agents'
+    );
+    const agentsResult = await agentsQuery([userId]);
+
+    const [apiAggregate, perAgent] = await Promise.all([
+      getUsageStatus(agentApiRateLimiter, { clientIdentifier }),
+      Promise.all(agentsResult.rows.map(async (row) => {
+        const agentName = row.agent_name;
+        const [polling, messageIngress] = await Promise.all([
+          getUsageStatus(agentPollingRateLimiter, { clientIdentifier, agentName }),
+          getUsageStatus(agentMessageIngressRateLimiter, { clientIdentifier, agentName })
+        ]);
+        return {
+          agentName,
+          limits: [
+            { ...polling, label: 'Polling requests' },
+            { ...messageIngress, label: 'Messages sent' }
+          ]
+        };
+      }))
+    ]);
+
+    return res.status(200).json({
+      account: {
+        limits: [
+          { ...apiAggregate, label: 'Total API requests (all your agents)' }
+        ]
+      },
+      agents: perAgent
+    });
+  } catch (error) {
+    return handleDatabaseError(res, error, 'fetching usage limits');
   }
 });
 
@@ -1936,7 +2041,7 @@ router.post('/messages', async (req, res) => {
 
   try {
     const userId = req.user.userId;
-    const { agentId, content, encrypted, attachmentIds } = req.body;
+    const { agentId, content, encrypted, attachmentIds, runOverrides } = req.body;
     const isEncrypted = encrypted === true;
 
     if (!agentId) {
@@ -1976,7 +2081,7 @@ router.post('/messages', async (req, res) => {
     await client.query('BEGIN');
 
     const agentResult = await client.query(
-      'SELECT agent_id, agent_name FROM agents WHERE agent_id = $1 AND user_id = $2',
+      `SELECT agent_id, agent_name FROM agents WHERE agent_id = $1 AND user_id = $2${process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true' ? ' FOR UPDATE' : ''}`,
       [agentId, userId]
     );
 
@@ -1988,6 +2093,18 @@ router.post('/messages', async (req, res) => {
     }
 
     const agentName = agentResult.rows[0].agent_name;
+
+    if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') {
+      await chatThreadService.assertPrivateThreadWritable(client, agentId, userId);
+    }
+
+    const overridesCheck = await resolveRunOverrides(agentId, agentName, runOverrides);
+    if (!overridesCheck.valid) {
+      await client.query('ROLLBACK');
+      client.release();
+      return validationError(res, overridesCheck.message);
+    }
+    const validatedOverrides = overridesCheck.value ? JSON.stringify(overridesCheck.value) : null;
 
     // Verify attachments exist, belong to this agent, and are not already attached to another message
     if (hasAttachments) {
@@ -2022,10 +2139,10 @@ router.post('/messages', async (req, res) => {
     // Content can be null if only attachments are provided
     const finalContent = hasContent ? content.trim() : null;
     const insertResult = await client.query(
-      `INSERT INTO user_messages (agent_id, content, encrypted)
-       VALUES ($1, $2, $3)
+      `INSERT INTO user_messages (agent_id, content, encrypted, run_overrides)
+       VALUES ($1, $2, $3, $4::jsonb)
        RETURNING user_message_id, created_at`,
-      [agentId, finalContent, isEncrypted]
+      [agentId, finalContent, isEncrypted, validatedOverrides]
     );
 
     const userMessageId = insertResult.rows[0].user_message_id;
@@ -2062,6 +2179,9 @@ router.post('/messages', async (req, res) => {
   } catch (error) {
     // Rollback transaction on error
     await client.query('ROLLBACK');
+    if (error instanceof chatThreadService.ChatThreadError) {
+      return res.status(error.status).json({ error: { message: error.message } });
+    }
     return handleDatabaseError(res, error, 'creating user message');
   } finally {
     // Release client back to pool
@@ -2076,9 +2196,10 @@ router.post('/messages', async (req, res) => {
  */
 router.post('/messages/schedule', async (req, res) => {
   const client = await getClient();
+  let privateFenceTransaction = false;
   try {
     const userId = req.user.userId;
-    const { agentId, content, encrypted, scheduledFor } = req.body;
+    const { agentId, content, encrypted, scheduledFor, runOverrides } = req.body;
     if (!isValidUUID(agentId)) return validationError(res, 'Invalid agent ID format');
 
     const contentValidation = validateMessageContent(content);
@@ -2094,25 +2215,37 @@ router.post('/messages/schedule', async (req, res) => {
     }
 
     const agent = await client.query(
-      'SELECT agent_id FROM agents WHERE agent_id = $1 AND user_id = $2',
+      'SELECT agent_id, agent_name FROM agents WHERE agent_id = $1 AND user_id = $2',
       [agentId, userId]
     );
     if (agent.rows.length === 0) {
       logUnauthorizedAccess(req, 'agent', agentId, 'User does not own this agent');
       return forbiddenError(res, 'You do not have access to this agent');
     }
+    const overridesCheck = await resolveRunOverrides(agentId, agent.rows[0].agent_name, runOverrides);
+    if (!overridesCheck.valid) return validationError(res, overridesCheck.message);
+
+    if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') {
+      await client.query('BEGIN');
+      privateFenceTransaction = true;
+      await client.query('SELECT agent_id FROM agents WHERE agent_id=$1 AND user_id=$2 FOR UPDATE',[agentId,userId]);
+      await chatThreadService.assertPrivateThreadWritable(client,agentId,userId);
+    }
 
     const result = await client.query(
-      `INSERT INTO scheduled_user_messages (user_id, agent_id, content, encrypted, scheduled_for)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO scheduled_user_messages (user_id, agent_id, content, encrypted, scheduled_for, run_overrides)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
        RETURNING scheduled_message_id, scheduled_for`,
-      [userId, agentId, content.trim(), encrypted === true, when]
+      [userId, agentId, content.trim(), encrypted === true, when, overridesCheck.value ? JSON.stringify(overridesCheck.value) : null]
     );
+    if (privateFenceTransaction) { await client.query('COMMIT'); privateFenceTransaction = false; }
     return res.status(201).json({
       scheduledMessageId: result.rows[0].scheduled_message_id,
       scheduledFor: result.rows[0].scheduled_for.toISOString()
     });
   } catch (error) {
+    if (privateFenceTransaction) await client.query('ROLLBACK').catch(() => {});
+    if (error.status) return res.status(error.status).json({ error:{ message:error.message } });
     return handleDatabaseError(res, error, 'scheduling user message');
   } finally {
     client.release();
@@ -2126,14 +2259,15 @@ router.get('/messages/scheduled', async (req, res) => {
     const agentId = typeof req.query.agentId === 'string' ? req.query.agentId : null;
     if (agentId && !isValidUUID(agentId)) return validationError(res, 'Invalid agent ID format');
     const result = await query(
-      `SELECT sm.scheduled_message_id, sm.agent_id, sm.content, sm.encrypted, sm.scheduled_for, a.agent_name
+      `SELECT sm.scheduled_message_id, sm.agent_id, sm.content, sm.encrypted, sm.scheduled_for, sm.run_overrides, a.agent_name
        FROM scheduled_user_messages sm JOIN agents a ON a.agent_id = sm.agent_id
        WHERE sm.user_id = $1 AND sm.delivered_at IS NULL AND ($2 IS NULL OR sm.agent_id = $2)
        ORDER BY sm.scheduled_for ASC`, [userId, agentId]
     );
     return res.json({ scheduledMessages: result.rows.map((row) => ({
       scheduledMessageId: row.scheduled_message_id, agentId: row.agent_id, agentName: row.agent_name,
-      content: row.content, encrypted: row.encrypted, scheduledFor: row.scheduled_for.toISOString()
+      content: row.content, encrypted: row.encrypted, scheduledFor: row.scheduled_for.toISOString(),
+      runOverrides: row.run_overrides || null
     })) });
   } catch (error) { return handleDatabaseError(res, error, 'loading scheduled messages'); }
 });
@@ -2142,9 +2276,9 @@ router.patch('/messages/scheduled/:scheduledMessageId', async (req, res) => {
   try {
     const userId = req.user.userId;
     const { scheduledMessageId } = req.params;
-    const { content, encrypted, scheduledFor } = req.body;
+    const { content, encrypted, scheduledFor, runOverrides } = req.body;
     if (!isValidUUID(scheduledMessageId)) return validationError(res, 'Invalid scheduled message ID format');
-    if (content === undefined && scheduledFor === undefined) return validationError(res, 'Provide a message or a new delivery time');
+    if (content === undefined && scheduledFor === undefined && runOverrides === undefined) return validationError(res, 'Provide a message or a new delivery time');
     const fields = [], params = [];
     if (content !== undefined) {
       const contentValidation = validateMessageContent(content);
@@ -2158,15 +2292,25 @@ router.patch('/messages/scheduled/:scheduledMessageId', async (req, res) => {
       if (when.getTime() - Date.now() > 365 * 24 * 60 * 60 * 1000) return validationError(res, 'Scheduled messages can be up to one year ahead');
       params.push(when); fields.push(`scheduled_for = $${params.length}`);
     }
+    if (runOverrides !== undefined) {
+      const owner = await query(
+        `SELECT a.agent_id, a.agent_name FROM scheduled_user_messages sm JOIN agents a ON a.agent_id = sm.agent_id
+         WHERE sm.scheduled_message_id = $1 AND sm.user_id = $2 AND sm.delivered_at IS NULL`, [scheduledMessageId, userId]);
+      if (owner.rows.length === 0) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Scheduled message was not found or has already been sent' } });
+      const overridesCheck = await resolveRunOverrides(owner.rows[0].agent_id, owner.rows[0].agent_name, runOverrides);
+      if (!overridesCheck.valid) return validationError(res, overridesCheck.message);
+      params.push(overridesCheck.value ? JSON.stringify(overridesCheck.value) : null);
+      fields.push(`run_overrides = $${params.length}::jsonb`);
+    }
     params.push(scheduledMessageId, userId);
     const result = await query(
       `UPDATE scheduled_user_messages SET ${fields.join(', ')}
        WHERE scheduled_message_id = $${params.length - 1} AND user_id = $${params.length} AND delivered_at IS NULL
-       RETURNING scheduled_message_id, agent_id, content, encrypted, scheduled_for`, params
+       RETURNING scheduled_message_id, agent_id, content, encrypted, scheduled_for, run_overrides`, params
     );
     if (result.rows.length === 0) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Scheduled message was not found or has already been sent' } });
     const row = result.rows[0];
-    return res.json({ scheduledMessageId: row.scheduled_message_id, agentId: row.agent_id, content: row.content, encrypted: row.encrypted, scheduledFor: row.scheduled_for.toISOString() });
+    return res.json({ scheduledMessageId: row.scheduled_message_id, agentId: row.agent_id, content: row.content, encrypted: row.encrypted, scheduledFor: row.scheduled_for.toISOString(), runOverrides: row.run_overrides || null });
   } catch (error) { return handleDatabaseError(res, error, 'updating scheduled message'); }
 });
 
@@ -2251,6 +2395,17 @@ router.post('/responses', async (req, res) => {
 
     // Get the agent_id for creating a user_message and validating attachments
     const agentId = questionResult.rows[0].agent_id;
+    if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') {
+      try {
+        await client.query('SELECT agent_id FROM agents WHERE agent_id=$1 AND user_id=$2 FOR UPDATE', [agentId,userId]);
+        await chatThreadService.assertPrivateThreadWritable(client,agentId,userId);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        client.release();
+        if (error.status) return res.status(error.status).json({ error:{ message:error.message } });
+        throw error;
+      }
+    }
 
     let validatedOptionId = null;
     let trimmedFreeResponse = null;
@@ -2867,7 +3022,7 @@ router.get('/agents/:agentId/lineage', async (req, res) => {
     }
 
     // Verify agent belongs to user and get its own metadata
-    const agentRow = await pool.query(
+    const agentRow = await query(
       `SELECT agent_id, agent_name, parent_agent_id, spawn_depth, last_seen_at
        FROM agents WHERE agent_id = $1 AND user_id = $2`,
       [agentId, userId]
@@ -2882,7 +3037,7 @@ router.get('/agents/:agentId/lineage', async (req, res) => {
     // Fetch parent agent info if exists
     let parent = null;
     if (agent.parent_agent_id) {
-      const parentRow = await pool.query(
+      const parentRow = await query(
         `SELECT agent_id, agent_name FROM agents WHERE agent_id = $1 AND user_id = $2`,
         [agent.parent_agent_id, userId]
       );
@@ -2892,7 +3047,7 @@ router.get('/agents/:agentId/lineage', async (req, res) => {
     }
 
     // Fetch direct children
-    const childrenRows = await pool.query(
+    const childrenRows = await query(
       `SELECT agent_id, agent_name FROM agents WHERE parent_agent_id = $1 AND user_id = $2 ORDER BY agent_name`,
       [agentId, userId]
     );

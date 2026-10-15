@@ -87,6 +87,88 @@ function incrementFallback(key, windowMs) {
   return { count: data.count, ttl: windowMs - (now - data.resetTime) };
 }
 
+async function peekWithRedis(key) {
+  if (!rateLimitRedisClient || !rateLimitRedisClient.isReady) {
+    return null;
+  }
+
+  try {
+    const [countStr, ttl] = await Promise.all([
+      rateLimitRedisClient.get(key),
+      rateLimitRedisClient.pTTL(key)
+    ]);
+    return { count: countStr ? parseInt(countStr, 10) || 0 : 0, ttl };
+  } catch (error) {
+    console.error('[RateLimit] Redis peek error:', error.message);
+    return null;
+  }
+}
+
+function peekFallback(key, windowMs) {
+  const now = Date.now();
+  const data = fallbackStore.get(key);
+  if (!data || now - data.resetTime > windowMs) {
+    return { count: 0, ttl: windowMs };
+  }
+  return { count: data.count, ttl: windowMs - (now - data.resetTime) };
+}
+
+/**
+ * Resolve the same client identifier the middleware itself keys on, so
+ * status-check endpoints read the exact counter a request would increment.
+ */
+function resolveClientIdentifier(req) {
+  // Only authenticated middleware may establish a user identity. Public
+  // callers must not be able to mint fresh quotas by rotating an arbitrary
+  // credential-looking header.
+  return (req.user && req.user.userId) || req.ip || 'unknown';
+}
+
+function resolveAgentName(req) {
+  return (req.query && req.query.agentName)
+    || (req.body && req.body.agentName)
+    || req.headers['x-agent-name']
+    || 'unknown';
+}
+
+/**
+ * Read the current usage for a limiter without incrementing its counter or
+ * registering the caller as "active" for adaptive fair-share purposes.
+ * @param {Function} limiter - a middleware created by createRateLimiter
+ */
+async function getUsageStatus(limiter, { clientIdentifier, agentName } = {}) {
+  const { windowMs, max, keyPrefix, perAgent, adaptive } = limiter.config;
+  const identifier = clientIdentifier || 'unknown';
+  const effectiveAgentName = perAgent ? (agentName || 'unknown') : null;
+  const key = perAgent
+    ? `${keyPrefix}:${identifier}:${effectiveAgentName}`
+    : `${keyPrefix}:${identifier}`;
+
+  const adaptiveState = await resolveAdaptiveLimit({
+    keyPrefix,
+    clientIdentifier: identifier,
+    agentName: effectiveAgentName,
+    max,
+    adaptive,
+    readOnly: true
+  });
+  const effectiveMax = adaptiveState.limit;
+
+  const redisResult = await peekWithRedis(key);
+  const result = redisResult || peekFallback(key, windowMs);
+  const ttlMs = typeof result.ttl === 'number' && result.ttl > 0 ? result.ttl : windowMs;
+
+  return {
+    scope: keyPrefix,
+    limit: effectiveMax,
+    used: result.count,
+    remaining: Math.max(0, effectiveMax - result.count),
+    resetAt: new Date(Date.now() + ttlMs).toISOString(),
+    windowMs,
+    policy: adaptiveState.policy
+  };
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -132,15 +214,19 @@ function buildPollAdvice({ remaining, limit, retryAfterSeconds, minMs, maxMs, ji
   };
 }
 
-async function markActiveWithRedis(key, member, now) {
+async function markActiveWithRedis(key, member, now, { readOnly = false } = {}) {
   if (!rateLimitRedisClient || !rateLimitRedisClient.isReady || !member) {
     return null;
   }
 
   try {
-    await rateLimitRedisClient.zAdd(key, [{ score: now, value: member }]);
+    if (!readOnly) {
+      await rateLimitRedisClient.zAdd(key, [{ score: now, value: member }]);
+    }
     await rateLimitRedisClient.zRemRangeByScore(key, 0, now - ACTIVE_WINDOW_MS);
-    await rateLimitRedisClient.pExpire(key, ACTIVE_WINDOW_MS * 2);
+    if (!readOnly) {
+      await rateLimitRedisClient.pExpire(key, ACTIVE_WINDOW_MS * 2);
+    }
     return await rateLimitRedisClient.zCard(key);
   } catch (error) {
     console.error('[RateLimit] Redis active-set error:', error.message);
@@ -148,28 +234,31 @@ async function markActiveWithRedis(key, member, now) {
   }
 }
 
-function markActiveFallback(key, member, now) {
+function markActiveFallback(key, member, now, { readOnly = false } = {}) {
   if (!member) return 1;
   let members = fallbackActiveSets.get(key);
   if (!members) {
+    if (readOnly) return 0;
     members = new Map();
     fallbackActiveSets.set(key, members);
   }
-  members.set(member, now);
+  if (!readOnly) {
+    members.set(member, now);
+  }
   for (const [existingMember, lastSeen] of members.entries()) {
     if (now - lastSeen > ACTIVE_WINDOW_MS) {
       members.delete(existingMember);
     }
   }
-  return Math.max(1, members.size);
+  return Math.max(readOnly ? 0 : 1, members.size);
 }
 
-async function getActiveCount(key, member, now) {
-  const redisCount = await markActiveWithRedis(key, member, now);
+async function getActiveCount(key, member, now, options = {}) {
+  const redisCount = await markActiveWithRedis(key, member, now, options);
   if (typeof redisCount === 'number' && redisCount > 0) {
     return redisCount;
   }
-  return markActiveFallback(key, member, now);
+  return markActiveFallback(key, member, now, options);
 }
 
 async function resolveAdaptiveLimit({
@@ -177,7 +266,8 @@ async function resolveAdaptiveLimit({
   clientIdentifier,
   agentName,
   max,
-  adaptive
+  adaptive,
+  readOnly = false
 }) {
   if (!adaptive) {
     return {
@@ -194,9 +284,11 @@ async function resolveAdaptiveLimit({
   const min = parsePositiveInt(adaptive.min, Math.max(3, Math.floor(max * 0.25)));
   const burstMax = parsePositiveInt(adaptive.max, Math.max(max, Math.ceil(max * 2)));
   const globalBase = parsePositiveInt(adaptive.globalMax, max);
-  const globalLimit = clamp(Math.floor(globalBase * capacityFactor), min, burstMax);
+  // Split the server's capacity first. burstMax caps each caller, not the
+  // whole server; capping before division starves otherwise idle agents.
+  const globalLimit = Math.max(min, Math.floor(globalBase * capacityFactor));
   const activeScope = adaptive.scope || keyPrefix;
-  const activeUsers = await getActiveCount(`rl-active:${activeScope}:users`, String(clientIdentifier), now);
+  const activeUsers = await getActiveCount(`rl-active:${activeScope}:users`, String(clientIdentifier), now, { readOnly });
   let fairUserLimit = Math.max(min, Math.floor(globalLimit / Math.max(1, activeUsers)));
   let activeAgents = 0;
 
@@ -204,7 +296,8 @@ async function resolveAdaptiveLimit({
     activeAgents = await getActiveCount(
       `rl-active:${activeScope}:agents:${clientIdentifier}`,
       String(agentName),
-      now
+      now,
+      { readOnly }
     );
     const minPerAgent = parsePositiveInt(adaptive.minPerAgent, Math.min(min, max));
     fairUserLimit = Math.max(minPerAgent, Math.floor(fairUserLimit / Math.max(1, activeAgents)));
@@ -243,23 +336,18 @@ function createRateLimiter(options) {
     pollJitterMs = DEFAULT_POLL_JITTER_MS
   } = options;
 
-  return async function rateLimitMiddleware(req, res, next) {
+  const middleware = async function rateLimitMiddleware(req, res, next) {
     try {
-      const clientIdentifier = (req.user && req.user.userId) || req.headers['x-api-key'] || req.ip || 'unknown';
-      
+      const clientIdentifier = resolveClientIdentifier(req);
+
       // For per-agent rate limiting, include agent name in the key
       let key = `${keyPrefix}:${clientIdentifier}`;
       if (perAgent) {
-        const agentName = (req.query && req.query.agentName)
-          || (req.body && req.body.agentName)
-          || req.headers['x-agent-name']
-          || 'unknown';
+        const agentName = resolveAgentName(req);
         key = `${keyPrefix}:${clientIdentifier}:${agentName}`;
       }
 
-      const agentNameForFairShare = perAgent
-        ? ((req.query && req.query.agentName) || (req.body && req.body.agentName) || req.headers['x-agent-name'] || 'unknown')
-        : null;
+      const agentNameForFairShare = perAgent ? resolveAgentName(req) : null;
       const adaptiveState = await resolveAdaptiveLimit({
         keyPrefix,
         clientIdentifier,
@@ -337,6 +425,9 @@ function createRateLimiter(options) {
       next();
     }
   };
+
+  middleware.config = { windowMs, max, keyPrefix, perAgent, adaptive };
+  return middleware;
 }
 
 /**
@@ -457,5 +548,8 @@ module.exports = {
   pollingRateLimiter,
   agentApiRateLimiter,
   agentMessageIngressRateLimiter,
-  feedbackRateLimiter
+  feedbackRateLimiter,
+  getUsageStatus,
+  resolveClientIdentifier,
+  resolveAgentName
 };

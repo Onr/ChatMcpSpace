@@ -53,6 +53,14 @@ describe('Rate limit middleware', () => {
     expect(third.headers['retry-after']).toBeTruthy();
   });
 
+  it('does not let unauthenticated callers bypass limits by rotating X-API-Key', async () => {
+    const { app } = buildApp();
+
+    await request(app).get('/ping').set('X-API-Key', 'attacker-key-1').expect(200);
+    await request(app).get('/ping').set('X-API-Key', 'attacker-key-2').expect(200);
+    await request(app).get('/ping').set('X-API-Key', 'attacker-key-3').expect(429);
+  });
+
   it('resets the quota after the window elapses', async () => {
     const dateNowSpy = jest.spyOn(Date, 'now');
     let nowMs = 1_000_000;
@@ -196,5 +204,90 @@ describe('Rate limit middleware', () => {
     expect(Number(oneAgent.headers['x-ratelimit-limit']))
       .toBeGreaterThan(Number(afterSecondAgent.headers['x-ratelimit-limit']));
     expect(Number(afterSecondAgent.headers['x-ratelimit-active-agents'])).toBe(2);
+  });
+
+  it('divides the global polling capacity before applying the per-agent cap', async () => {
+    jest.doMock('../../src/utils/redisClient', () => ({ rateLimitRedisClient: null }));
+    jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
+    const { createRateLimiter } = require('../../src/middleware/rateLimitMiddleware');
+    const limiter = createRateLimiter({ windowMs: 60000, max: 36, keyPrefix: 'multi-account-poll', perAgent: true,
+      adaptive: { scope: 'multi-account-poll', globalMax: 1800, min: 24, minPerAgent: 6, max: 72 } });
+    const app = express();
+    app.use((req, _res, next) => { req.user = { userId: req.get('x-test-user') }; next(); });
+    app.get('/ping', limiter, (_req, res) => res.json({ ok: true }));
+    for (let user = 0; user < 3; user++) {
+      for (let agent = 0; agent < 6; agent++) {
+        await request(app).get('/ping').set('x-test-user', `u${user}`).query({ agentName: `a${agent}` }).expect(200);
+      }
+    }
+    for (let poll = 0; poll < 18; poll++) {
+      const res = await request(app).get('/ping').set('x-test-user', 'u0').query({ agentName: 'a0' }).expect(200);
+      expect(Number(res.headers['x-ratelimit-limit'])).toBeGreaterThanOrEqual(24);
+      expect(Number(res.headers['x-ratelimit-limit'])).toBeLessThanOrEqual(72);
+    }
+  });
+
+  describe('getUsageStatus', () => {
+    it('reports real usage without incrementing the counter it reads', async () => {
+      jest.doMock('../../src/utils/redisClient', () => ({ rateLimitRedisClient: null }));
+      jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
+
+      const { createRateLimiter, getUsageStatus } = require('../../src/middleware/rateLimitMiddleware');
+      const limiter = createRateLimiter({
+        windowMs: 60000,
+        max: 5,
+        keyPrefix: 'usage-status-test',
+      });
+
+      const app = express();
+      app.use((req, _res, next) => {
+        req.user = { userId: 'peek-user' };
+        next();
+      });
+      app.get('/ping', limiter, (_req, res) => res.status(200).json({ ok: true }));
+
+      await request(app).get('/ping').expect(200);
+      await request(app).get('/ping').expect(200);
+
+      const first = await getUsageStatus(limiter, { clientIdentifier: 'peek-user' });
+      expect(first).toMatchObject({ scope: 'usage-status-test', limit: 5, used: 2, remaining: 3 });
+
+      // Checking status again must not itself count as a request.
+      const second = await getUsageStatus(limiter, { clientIdentifier: 'peek-user' });
+      expect(second.used).toBe(2);
+
+      // A real request after peeking should only add one more to the real count.
+      await request(app).get('/ping').expect(200);
+      const third = await getUsageStatus(limiter, { clientIdentifier: 'peek-user' });
+      expect(third.used).toBe(3);
+    });
+
+    it('does not register the checking caller as active for adaptive fair-share', async () => {
+      jest.doMock('../../src/utils/redisClient', () => ({ rateLimitRedisClient: null }));
+      jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
+
+      const { createRateLimiter, getUsageStatus } = require('../../src/middleware/rateLimitMiddleware');
+      const limiter = createRateLimiter({
+        windowMs: 60000,
+        max: 10,
+        keyPrefix: 'usage-status-adaptive-test',
+        adaptive: { scope: 'usage-status-adaptive-scope', globalMax: 100, min: 1, max: 100 },
+      });
+
+      const app = express();
+      app.use((req, _res, next) => {
+        req.user = { userId: 'solo-user' };
+        next();
+      });
+      app.get('/ping', limiter, (_req, res) => res.status(200).json({ ok: true }));
+
+      // Peeking (repeatedly, as a status page might) before any real traffic must not
+      // shrink the fair share once a real request comes in.
+      await getUsageStatus(limiter, { clientIdentifier: 'someone-else' });
+      await getUsageStatus(limiter, { clientIdentifier: 'someone-else' });
+
+      const res = await request(app).get('/ping').expect(200);
+      expect(Number(res.headers['x-ratelimit-active-users'])).toBe(1);
+    });
   });
 });

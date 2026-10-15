@@ -47,43 +47,111 @@
           <li>Optional heartbeat: wakes itself to audit the team and surface notifications.</li>
         </ul>
 
-        <div id="cosInstallPasswordWrap" class="rounded-xl bg-slate-800/60 border border-slate-700/60 p-4 space-y-3">
-          <div>
-            <label for="cosInstallName" class="block text-xs font-medium text-slate-300 mb-1">
-              Chief of Staff name
-            </label>
-            <input id="cosInstallName" type="text" autocomplete="off"
-              class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-              placeholder="Local Chief of Staff - laptop" />
-            <p class="mt-1 text-[11px] text-slate-500">Use a distinct name for each computer so you can tell them apart.</p>
+        <!--
+          Primary path: put the agent on the user's OWN computer. This is a
+          two-step terminal flow — download the CLI, then run its --local-cos
+          action, which registers the agent and writes its folder locally.
+          cos-install.js fills the two <code> blocks from
+          /api/user/install-chief-of-staff/status so the URL matches this server.
+        -->
+        <div class="rounded-xl bg-slate-800/60 border border-slate-700/60 p-4 space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-semibold text-slate-100">Install it on your computer</h3>
+            <span class="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              Recommended
+            </span>
           </div>
-          <label for="cosInstallPassword" class="block text-xs font-medium text-slate-300 mb-1">
-            Your account password (used to decrypt messages locally)
-          </label>
-          <input id="cosInstallPassword" type="password" autocomplete="current-password"
-            class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-            placeholder="Required so the local agent can decrypt your messages" />
-          <p class="mt-1 text-[11px] text-slate-500">Sent only to write your CoS <code>.env</code>; never stored on the server.</p>
+          <p class="text-xs text-slate-400">
+            Run both commands in a terminal on the machine where you want the agent to live,
+            <strong class="text-slate-300">from the same folder</strong> — that folder becomes the
+            home for your Chief of Staff and every agent it spawns.
+          </p>
+
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-slate-300">1. Download and install the CLI</p>
+            <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosSetupCommand">curl -sL /setup | bash</code></pre>
+            <button type="button" id="cosCopySetupCommand"
+              class="text-[11px] px-2 py-1 rounded-md bg-slate-700/60 hover:bg-slate-700 border border-slate-600 text-slate-200">
+              Copy command
+            </button>
+            <p class="text-[11px] text-slate-500">
+              The installer asks for your API key — copy it from
+              <a id="cosApiKeyLink" href="/settings" target="_blank" rel="noopener"
+                class="text-emerald-300 hover:text-emerald-200 underline">Settings</a>.
+              It saves <code>agent-cli.sh</code> into the folder you run it from.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-slate-300">2. Install the Chief of Staff</p>
+            <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosLocalCosCommand">bash agent-cli.sh --local-cos</code></pre>
+            <button type="button" id="cosCopyLocalCosCommand"
+              class="text-[11px] px-2 py-1 rounded-md bg-slate-700/60 hover:bg-slate-700 border border-slate-600 text-slate-200">
+              Copy command
+            </button>
+            <p class="text-[11px] text-slate-500">
+              Asks for a name and your account password, registers the agent, writes its folder
+              on that machine, and offers to start it.
+            </p>
+          </div>
         </div>
 
-        <div id="cosInstallError" class="hidden rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-300"></div>
+        <!--
+          Secondary path: the browser asks the SERVER to write the agent folder
+          on its own filesystem. Only useful when you host the server yourself
+          and have shell access to it, so it lives behind a disclosure.
+        -->
+        <details id="cosServerInstallDetails" class="rounded-xl bg-slate-800/40 border border-slate-700/60">
+          <summary class="cursor-pointer px-4 py-3 text-xs font-medium text-slate-300 hover:text-slate-100">
+            Advanced: install on the machine running this server
+          </summary>
+          <div class="px-4 pb-4 space-y-3">
+            <p class="text-[11px] text-amber-300/90">
+              Only useful if you host this server yourself and have shell access to it. The
+              command you get back points at a folder on the <strong>server's</strong>
+              filesystem — not your laptop.
+            </p>
 
-        <div id="cosInstallSuccess" class="hidden rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-3 text-xs text-emerald-200 space-y-2">
-          <p class="font-medium text-emerald-100">Local Chief of Staff installed.</p>
-          <p>Paste this in a terminal on your machine to start it:</p>
-          <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosInstallBootstrap"></code></pre>
-          <button type="button" id="cosInstallCopyBootstrap"
-            class="text-[11px] px-2 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-100">
-            Copy command
-          </button>
-        </div>
+            <div id="cosInstallPasswordWrap" class="rounded-xl bg-slate-800/60 border border-slate-700/60 p-4 space-y-3">
+              <div>
+                <label for="cosInstallName" class="block text-xs font-medium text-slate-300 mb-1">
+                  Chief of Staff name
+                </label>
+                <input id="cosInstallName" type="text" autocomplete="off"
+                  class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="Local Chief of Staff - laptop" />
+                <p class="mt-1 text-[11px] text-slate-500">Use a distinct name for each computer so you can tell them apart.</p>
+              </div>
+              <label for="cosInstallPassword" class="block text-xs font-medium text-slate-300 mb-1">
+                Your account password (used to decrypt messages locally)
+              </label>
+              <input id="cosInstallPassword" type="password" autocomplete="current-password"
+                class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="Required so the local agent can decrypt your messages" />
+              <p class="mt-1 text-[11px] text-slate-500">Sent only to write your CoS <code>.env</code>; never stored on the server.</p>
+            </div>
+
+            <div id="cosInstallError" class="hidden rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-300"></div>
+
+            <div id="cosInstallSuccess" class="hidden rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-3 text-xs text-emerald-200 space-y-2">
+              <p class="font-medium text-emerald-100">Local Chief of Staff installed.</p>
+              <p>Paste this in a terminal on the machine running this server to start it:</p>
+              <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosInstallBootstrap"></code></pre>
+              <button type="button" id="cosInstallCopyBootstrap"
+                class="text-[11px] px-2 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-100">
+                Copy command
+              </button>
+            </div>
+
+            <button type="button" id="cosInstallSubmit"
+              class="inline-flex justify-center rounded-lg px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
+              Install on the server host
+            </button>
+          </div>
+        </details>
       </div>
 
       <div class="px-6 py-4 bg-slate-950/40 border-t border-slate-700/60 flex flex-col sm:flex-row-reverse gap-3">
-        <button type="button" id="cosInstallSubmit"
-          class="inline-flex justify-center rounded-lg px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
-          Install Local Chief of Staff
-        </button>
         <button type="button" data-cos-dismiss
           class="inline-flex justify-center rounded-lg px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium border border-slate-700">
           Maybe later

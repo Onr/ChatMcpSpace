@@ -4,11 +4,14 @@
  * What it verifies:
  *   1. Modal renders hidden by default.
  *   2. On a fresh user (status.installed = false), the auto-show logic opens it.
- *   3. The submit button is wired and POSTs to /api/user/install-chief-of-staff
- *      with { confirm:true, userPassword }.
- *   4. On a 201 success response, the bootstrap command is rendered inside
+ *   3. The primary "install on your computer" path shows both terminal commands,
+ *      filled in from `status.setup` so the URL matches the serving host.
+ *   4. The server-host install lives behind the advanced disclosure, and its
+ *      submit button POSTs to /api/user/install-chief-of-staff with
+ *      { confirm:true, userPassword }.
+ *   5. On a 201 success response, the bootstrap command is rendered inside
  *      `#cosInstallBootstrap` and `#cosInstallSuccess` becomes visible.
- *   5. The "Maybe later" dismiss persists `cos_modal_dismissed_at` in localStorage.
+ *   6. The "Maybe later" dismiss persists `cos_modal_dismissed_at` in localStorage.
  *
  * Run:
  *   node tests/e2e/cos-install-wizard.js
@@ -102,7 +105,14 @@ async function shoot(page, name) {
       res.end(pageBody);
     } else if (req.url === '/api/user/install-chief-of-staff/status') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ installed: false }));
+      res.end(JSON.stringify({
+        installed: false,
+        setup: {
+          setupCommand: 'curl -sL https://example.test/setup | bash',
+          localCosCommand: 'bash agent-cli.sh --local-cos',
+          apiKeyUrl: 'https://example.test/settings'
+        }
+      }));
     } else if (req.url === '/api/user/install-chief-of-staff' && req.method === 'POST') {
       let body = '';
       req.on('data', (c) => { body += c.toString(); });
@@ -130,7 +140,10 @@ async function shoot(page, name) {
 
   const browser = await chromium.launch();
   const context = await browser.newContext({
-    viewport: { width: 900, height: 800 }
+    // Tall on purpose: this harness page ships only a stub stylesheet, so the
+    // modal cannot scroll the way it does under Tailwind. Everything has to fit
+    // on screen for clicks to land.
+    viewport: { width: 900, height: 1800 }
   });
   const page = await context.newPage();
   page.on('console', (msg) => console.log(`[page:${msg.type()}]`, msg.text()));
@@ -153,7 +166,30 @@ async function shoot(page, name) {
 
   await shoot(page, '01_initial');
 
-  // ── 3. Fill password + submit ──────────────────────────────────────────
+  // ── 3. Primary path: the two terminal commands, resolved from status.setup ──
+  const setupCmd = await page.textContent('#cosSetupCommand');
+  record('Setup (download CLI) command is shown', setupCmd === 'curl -sL https://example.test/setup | bash', setupCmd);
+
+  const localCosCmd = await page.textContent('#cosLocalCosCommand');
+  record('--local-cos install command is shown', localCosCmd === 'bash agent-cli.sh --local-cos', localCosCmd);
+
+  const apiKeyHref = await page.getAttribute('#cosApiKeyLink', 'href');
+  record('API key link points at settings', apiKeyHref === 'https://example.test/settings', apiKeyHref);
+
+  // Both commands are readable without expanding anything.
+  record('Both commands are visible without interaction',
+    (await page.isVisible('#cosSetupCommand')) && (await page.isVisible('#cosLocalCosCommand')));
+
+  // ── 4. Server-host install sits behind the advanced disclosure ─────────
+  const pwdHiddenWhileCollapsed = !(await page.isVisible('#cosInstallPassword'));
+  record('Server-host form is collapsed by default', pwdHiddenWhileCollapsed);
+
+  // force: same reason the submit click below uses it — this harness page has
+  // no Tailwind, so the modal renders taller than the viewport.
+  await page.locator('#cosServerInstallDetails summary').click({ force: true });
+  await page.waitForSelector('#cosInstallPassword', { state: 'visible', timeout: 5000 });
+
+  // ── 5. Fill password + submit ──────────────────────────────────────────
   await page.fill('#cosInstallPassword', 'test-password');
   await page.locator('#cosInstallSubmit').scrollIntoViewIfNeeded();
   await page.click('#cosInstallSubmit', { force: true });
@@ -168,7 +204,7 @@ async function shoot(page, name) {
 
   await shoot(page, '02_after_submit');
 
-  // ── 4. Reload the page to test the dismiss flow ────────────────────────
+  // ── 6. Reload the page to test the dismiss flow ────────────────────────
   await page.evaluate(() => localStorage.removeItem('cos_modal_dismissed_at'));
   await page.goto(baseUrl + '/?reload=1', { waitUntil: 'load' });
   await page.waitForTimeout(300);

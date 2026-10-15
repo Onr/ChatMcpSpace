@@ -128,6 +128,75 @@ describe('agentSpawnService', () => {
       expect(dbRow.rows[0].inter_agent_mode).toBe('listen_all');
     });
 
+    it('inherits the creating agent groups by default', async () => {
+      const parent = await createAgent('grouped-coordinator', { canSpawn: true });
+      const group = await queryFn(
+        `INSERT INTO agent_groups (user_id, group_name) VALUES ($1, $2)
+         RETURNING group_id, group_name`,
+        [userId, 'Engineering']
+      );
+      await queryFn(
+        'INSERT INTO agent_group_members (group_id, agent_id) VALUES ($1, $2)',
+        [group.rows[0].group_id, parent.agent_id]
+      );
+
+      const { spawnAgent } = require('../../src/services/agentSpawnService');
+      const child = await spawnAgent({
+        userId,
+        parentAgentId: parent.agent_id,
+        childAgentName: 'same-team-child',
+        initialInstructions: 'Stay with the team.'
+      });
+
+      expect(child.groups).toEqual([{
+        groupId: group.rows[0].group_id,
+        groupName: 'Engineering'
+      }]);
+      const membership = await queryFn(
+        'SELECT group_id FROM agent_group_members WHERE agent_id = $1',
+        [child.agentId]
+      );
+      expect(membership.rows.map(row => row.group_id)).toEqual([group.rows[0].group_id]);
+    });
+
+    it('supports explicit group selection and an explicit ungrouped child', async () => {
+      const parent = await createAgent('group-selector', { canSpawn: true });
+      const groups = await Promise.all(['Engineering', 'Research'].map(name => queryFn(
+        `INSERT INTO agent_groups (user_id, group_name) VALUES ($1, $2)
+         RETURNING group_id, group_name`,
+        [userId, name]
+      )));
+      await queryFn(
+        'INSERT INTO agent_group_members (group_id, agent_id) VALUES ($1, $2)',
+        [groups[0].rows[0].group_id, parent.agent_id]
+      );
+
+      const { spawnAgent } = require('../../src/services/agentSpawnService');
+      const selected = await spawnAgent({
+        userId,
+        parentAgentId: parent.agent_id,
+        childAgentName: 'research-child',
+        initialInstructions: '',
+        groupSelectors: [groups[1].rows[0].group_id]
+      });
+      expect(selected.groups.map(group => group.groupName)).toEqual(['Research']);
+
+      const ungroupedParent = await createAgent('ungrouped-selector', { canSpawn: true });
+      const ungrouped = await spawnAgent({
+        userId,
+        parentAgentId: ungroupedParent.agent_id,
+        childAgentName: 'ungrouped-child',
+        initialInstructions: '',
+        groupSelectors: []
+      });
+      expect(ungrouped.groups).toEqual([]);
+      const membership = await queryFn(
+        'SELECT group_id FROM agent_group_members WHERE agent_id = $1',
+        [ungrouped.agentId]
+      );
+      expect(membership.rows).toHaveLength(0);
+    });
+
     it('should not create a server-side child folder and should persist runtime state in DB', async () => {
       const parent = await createAgent('coordinator', { canSpawn: true });
       const { spawnAgent, sanitizeFolderName } = require('../../src/services/agentSpawnService');

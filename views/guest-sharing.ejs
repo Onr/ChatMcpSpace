@@ -1,0 +1,99 @@
+<link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
+<link rel="stylesheet" href="/css/guest-sharing.css?v=20261009">
+<section id="guestSharingApp" class="chat-shell" data-csrf="<%= csrfToken || '' %>" data-user-id="<%= userId || '' %>" aria-labelledby="guestSharingTitle">
+  <header class="guest-sharing-header">
+    <div>
+      <p class="guest-sharing-eyebrow">Invite someone in</p>
+      <h1 id="guestSharingTitle">Share agents with guests</h1>
+      <p>Invite people you trust to work with your agents using their existing tools and permissions. Choose which agents they can use and when access expires.</p>
+    </div>
+    <p id="guestOwnerKeyStatus" class="guest-sharing-status" role="status" aria-live="polite">Checking owner encryption status…</p>
+  </header>
+
+  <p id="guestSharingError" class="guest-sharing-error" role="alert" aria-live="assertive"></p>
+  <p id="guestSharingStatus" class="guest-sharing-success" role="status" aria-live="polite"></p>
+
+  <div class="guest-sharing-grid">
+    <form id="guestShareForm" class="guest-sharing-card" novalidate>
+      <div class="guest-sharing-card-heading">
+        <div>
+          <p class="guest-sharing-eyebrow">New share</p>
+          <h2>Create a shared workspace</h2>
+        </div>
+        <span id="guestSelectionPreview" class="guest-sharing-count">0 agents selected</span>
+      </div>
+
+      <fieldset>
+        <legend>Agents</legend>
+        <p class="guest-sharing-help">Guests can use only the agents you select. Your agent keeps the provider, model and permissions you choose.</p>
+        <div id="guestAgentSelection" class="guest-agent-selection"></div>
+      </fieldset>
+
+      <div class="guest-sharing-fields">
+        <label>Share title
+          <input name="title" maxlength="120" autocomplete="off" placeholder="Guest shared work">
+        </label>
+        <label>Conversation rooms
+          <select name="roomMode">
+            <option value="separate">Separate room per agent</option>
+            <option value="common">One common room</option>
+          </select>
+        </label>
+        <label>Expires at (optional)
+          <input name="expiresAt" type="datetime-local">
+        </label>
+      </div>
+
+      <label class="guest-sharing-checkline">
+        <input id="guestPasswordEnabled" name="passwordEnabled" type="checkbox">
+        <span>Require a password in addition to the link</span>
+      </label>
+      <label id="guestPasswordField" class="guest-password-field" hidden>Guest password
+        <input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password" aria-describedby="guestPasswordHelp">
+        <span id="guestPasswordHelp" class="guest-sharing-help">Use 12–72 UTF-8 bytes. The password is never shown again after this form is submitted.</span>
+      </label>
+
+      <div class="guest-sharing-actions">
+        <button id="guestCreateShare" class="guest-primary" type="submit">Share selected agents</button>
+        <span class="guest-sharing-help">The link appears once after creation. Save it before leaving this page.</span>
+      </div>
+    </form>
+
+    <aside class="guest-sharing-card guest-sharing-guide" aria-label="How sharing works">
+      <span class="chat-large-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></svg></span>
+      <h2>A little more together</h2>
+      <p>Give someone you trust a place to work with your agent.</p>
+      <ol class="guest-guide-steps">
+        <li><span><strong>Choose your agents</strong><small>Share one agent or bring a few into the same workspace.</small></span></li>
+        <li><span><strong>Send your invite link</strong><small>Your guest chooses a name and requests access. You approve who joins.</small></span></li>
+        <li><span><strong>Start the conversation</strong><small>Work together using the agent’s current provider and tools.</small></span></li>
+      </ol>
+      <p class="guest-guide-note"><span class="chat-secure-dot" aria-hidden="true"></span>Shared conversations have their own history. Your private chats stay private.</p>
+    </aside>
+    <aside id="guestCreatedLink" class="guest-sharing-card guest-created-link" hidden aria-labelledby="guestCreatedLinkTitle">
+      <p class="guest-sharing-eyebrow">New link</p>
+      <h2 id="guestCreatedLinkTitle">Share link created</h2>
+      <p>Anyone with this link can request access. A password is required when you selected one.</p>
+      <label for="guestCreatedLinkValue">Guest link</label>
+      <div class="guest-copy-row">
+        <input id="guestCreatedLinkValue" type="text" readonly spellcheck="false" aria-describedby="guestCopyStatus">
+        <button id="guestCopyLink" type="button">Copy</button>
+      </div>
+      <p id="guestCopyStatus" class="guest-sharing-help" role="status" aria-live="polite"></p>
+    </aside>
+  </div>
+
+  <section class="guest-sharing-card guest-share-list" aria-labelledby="guestSharesTitle">
+    <div class="guest-sharing-card-heading">
+      <div>
+        <p class="guest-sharing-eyebrow">Access review</p>
+        <h2 id="guestSharesTitle">Active shares and guests</h2>
+      </div>
+      <button id="guestRefreshShares" type="button">Refresh</button>
+    </div>
+    <div id="guestShares" class="guest-shares" aria-live="polite"></div>
+  </section>
+</section>
+<script src="/js/encryption.js"></script>
+<script src="/js/shared-crypto.js"></script>
+<script src="/js/guest-sharing.js?v=20261009"></script>

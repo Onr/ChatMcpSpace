@@ -184,6 +184,15 @@ describe('Chief of Staff sub-router (/api/agent/cos/*)', () => {
   it('POST /cos/spawn-child creates a child with parent=CoS and writes the folder', async () => {
     const { app, query, pool, userId, mockChatspaceDir } = await makeCtx();
     const cosId = await insertAgent(query, userId, { name: 'Chief of Staff', isCos: true, position: 1 });
+    const group = await query(
+      `INSERT INTO agent_groups (user_id, group_name) VALUES ($1, $2)
+       RETURNING group_id`,
+      [userId, 'Operations']
+    );
+    await query(
+      'INSERT INTO agent_group_members (group_id, agent_id) VALUES ($1, $2)',
+      [group.rows[0].group_id, cosId]
+    );
 
     const res = await request(app)
       .post('/api/agent/cos/spawn-child')
@@ -195,6 +204,10 @@ describe('Chief of Staff sub-router (/api/agent/cos/*)', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.childAgent.agentName).toBe('research-agent');
     expect(res.body.childAgent.parentAgentId).toBe(cosId);
+    expect(res.body.childAgent.groups).toEqual([{
+      groupId: group.rows[0].group_id,
+      groupName: 'Operations'
+    }]);
     expect(res.body.childAgent.tmuxLaunchCommand).toMatch(/tmux new-session/);
 
     // DB row exists with the right parent
@@ -349,6 +362,56 @@ describe('Chief of Staff sub-router (/api/agent/cos/*)', () => {
       .send({ confirmation: 'WRONG' })
       .expect(400);
     expect(res.body.error.code).toBe('COS_CONFIRMATION_REQUIRED');
+
+    await pool.end();
+  });
+
+  it('archives, clears, and reorders agents the CoS created, but not other agents', async () => {
+    const { app, query, pool, userId } = await makeCtx();
+    const cosId = await insertAgent(query, userId, { name: 'Chief of Staff', isCos: true, position: 1 });
+    const childId = await insertAgent(query, userId, { name: 'child', position: 2, parentId: cosId, spawnDepth: 1 });
+    const grandchildId = await insertAgent(query, userId, { name: 'grandchild', position: 3, parentId: childId, spawnDepth: 2 });
+    const manualId = await insertAgent(query, userId, { name: 'manual', position: 4 });
+    await query(
+      `INSERT INTO user_messages (agent_id, content) VALUES ($1, 'hello')`,
+      [grandchildId]
+    );
+
+    const cleared = await request(app)
+      .delete(`/api/agent/cos/agents/${grandchildId}/messages`)
+      .set('X-Agent-Name', 'Chief of Staff')
+      .expect(200);
+    expect(cleared.body.deletedCount).toBe(1);
+
+    await request(app)
+      .put('/api/agent/cos/agents/positions')
+      .set('X-Agent-Name', 'Chief of Staff')
+      .send({ updates: [{ agentId: childId, position: 7 }] })
+      .expect(200);
+    const moved = await query('SELECT position FROM agents WHERE agent_id = $1', [childId]);
+    expect(moved.rows[0].position).toBe(7);
+
+    const denied = await request(app)
+      .post(`/api/agent/cos/agents/${manualId}/archive`)
+      .set('X-Agent-Name', 'Chief of Staff')
+      .expect(403);
+    expect(denied.body.error.code).toBe('COS_NOT_CREATOR');
+    await request(app)
+      .put('/api/agent/cos/agents/positions')
+      .set('X-Agent-Name', 'Chief of Staff')
+      .send({ updates: [{ agentId: manualId, position: 1 }] })
+      .expect(403);
+
+    const archived = await request(app)
+      .post(`/api/agent/cos/agents/${childId}/archive`)
+      .set('X-Agent-Name', 'Chief of Staff')
+      .send({ reason: 'done' })
+      .expect(200);
+    expect(archived.body.archived).toBe(true);
+    const { archiveAgent } = require('../../src/services/archiveService');
+    expect(archiveAgent).toHaveBeenCalledWith(userId, childId, 'done');
+    const reparented = await query('SELECT parent_agent_id FROM agents WHERE agent_id = $1', [grandchildId]);
+    expect(reparented.rows[0].parent_agent_id).toBe(cosId);
 
     await pool.end();
   });

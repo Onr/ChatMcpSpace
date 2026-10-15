@@ -113,4 +113,30 @@ describe('Multi-chat delete after optimistic send', () => {
     expect(deleteCalls[0][0]).toBe('/api/user/messages/real-123');
     expect(window.showError).not.toHaveBeenCalled();
   });
+
+  it('uses one check while sending and two gray checks immediately after server acceptance', async () => {
+    let accept;
+    const baseFetch = global.csrfFetch;
+    global.csrfFetch = jest.fn((url, options) => url === '/api/user/messages' && options?.method === 'POST'
+      ? new Promise(resolve => { accept = () => resolve({ ok: true, json: async () => ({ messageId: 'receipt-123' }) }); })
+      : baseFetch(url, options));
+    window.MultiChatManager.openSidePanel('agent-1', 'Agent One', {});
+    await waitFor(() => document.querySelector('.chat-tile[data-agent-id="agent-1"]'));
+    const tile = document.querySelector('.chat-tile[data-agent-id="agent-1"]');
+    const textarea = tile.querySelector('.chat-tile__textarea');
+    const send = tile.querySelector('.chat-tile__send-btn');
+    textarea.value = 'Receipt verification';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await waitFor(() => !send.disabled);
+    send.click();
+    await waitFor(() => Boolean(accept));
+    const indicator = tile.querySelector('.message-read-indicator');
+    expect(indicator.textContent).toBe('✓');
+    expect(indicator.classList.contains('message-read-indicator--pending')).toBe(true);
+    accept();
+    await waitFor(() => document.querySelector('[data-tile-msg-id="receipt-123"]'));
+    expect(tile.querySelector('.message-read-indicator')).toBe(indicator);
+    expect(indicator.textContent).toBe('✓✓');
+    expect(indicator.classList.contains('message-read-indicator--delivered')).toBe(true);
+  });
 });

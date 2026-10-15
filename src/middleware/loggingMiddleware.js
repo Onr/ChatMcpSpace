@@ -11,7 +11,7 @@ function requestLogger(req, res, next) {
     const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
     logInfo('http_request', {
       method: req.method,
-      path: req.originalUrl || req.url,
+      path: safeRequestPath(req),
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
       userId: (req.user && req.user.userId) || (req.session && req.session.userId) || null,
@@ -23,6 +23,16 @@ function requestLogger(req, res, next) {
   next();
 }
 
+function safeRequestPath(req) {
+  const raw = req.originalUrl || req.url || req.path || '/';
+  const pathOnly = String(raw).split('?')[0];
+  // OAuth authorization URLs carry state and PKCE challenges in the query.
+  // Keep the useful endpoint path while ensuring credentials never reach logs.
+  if (pathOnly.startsWith('/oauth/')) return pathOnly;
+  return raw;
+}
+
 module.exports = {
   requestLogger,
+  safeRequestPath,
 };

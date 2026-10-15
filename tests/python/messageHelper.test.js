@@ -543,6 +543,8 @@ mod.sys.argv = [
     "--provider", "codex-cli",
     "--model", "gpt-5-mini",
     "--project-path", "/tmp/workspace",
+    "--group", "Engineering",
+    "--group", "research-group-id",
     "--can-spawn"
 ]
 mod.main()
@@ -558,7 +560,36 @@ print(json.dumps(captured["spawnPayload"]))
       modelProvider: 'codex-cli',
       model: 'gpt-5-mini',
       projectPath: '/tmp/workspace',
+      groups: ['Engineering', 'research-group-id'],
       canSpawn: true
+    });
+  });
+
+  it('spawn CLI can explicitly leave a child ungrouped', () => {
+    const fixture = createHelperFixture({ encryptionEnabled: false, agentName: 'Parent Agent' });
+    const result = runHelper(
+      fixture.helperPath,
+      `
+captured = {}
+def fake_api(method, path, data=None):
+    if method == "POST" and path == "/agent/spawn":
+        captured["spawnPayload"] = data
+        return {"success": True, "childAgent": {"agentId": "child-none", "agentName": "SoloChild", "spawnDepth": 1}}
+    return {}
+mod._api_request = fake_api
+mod.time.sleep = lambda _seconds: None
+mod.sys.argv = ["message_helper.py", "spawn", "SoloChild", "Work", "alone", "--no-inherit-groups"]
+mod.main()
+print(json.dumps(captured["spawnPayload"]))
+`
+    );
+
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout.trim().split('\n').pop());
+    expect(payload).toMatchObject({
+      childAgentName: 'SoloChild',
+      initialInstructions: 'Work alone',
+      groups: []
     });
   });
 

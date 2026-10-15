@@ -511,3 +511,9 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Conversation and settings updates
+
+Quoted replies, Council Chamber group drops, compact usage details, Pi onboarding,
+MCP address copying, explicit owner permission grants, and automatic model discovery
+are described in [the October 15 release notes](docs/FEATURE_CATCHUP_2026-10-15.md).

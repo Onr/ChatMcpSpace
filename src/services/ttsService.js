@@ -110,15 +110,19 @@ function scheduleCacheCleanup() {
     return cleanupPromise;
 }
 
-// Ensure cache directory exists
-(async () => {
-    try {
-        await mkdir(CACHE_DIR, { recursive: true });
-        await scheduleCacheCleanup();
-    } catch (err) {
-        console.error('Failed to create TTS cache directory:', err);
-    }
-})();
+// Ensure the runtime cache exists. Jest tests invoke cleanupTtsCache directly;
+// starting background I/O merely by importing this module makes suite results
+// race with teardown and can turn passing assertions into a failed run.
+if (process.env.NODE_ENV !== 'test') {
+    void (async () => {
+        try {
+            await mkdir(CACHE_DIR, { recursive: true });
+            await scheduleCacheCleanup();
+        } catch (err) {
+            console.error('Failed to create TTS cache directory:', err);
+        }
+    })();
+}
 
 /**
  * Get audio URL for the given text

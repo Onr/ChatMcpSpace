@@ -1,0 +1,97 @@
+<!-- Global Floating Context Menu for Agents -->
+<div id="floatingAgentMenu"
+    class="agent-actions-menu hidden fixed z-[100]" role="dialog" aria-label="Agent actions">
+    <div class="agent-actions-header">
+        <div class="agent-actions-heading"><strong id="floatingAgentName">Agent</strong><span>Actions and sharing</span></div>
+        <button id="floatingCloseAgentMenu" class="agent-actions-close" type="button" aria-label="Close agent actions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true') { %>
+    <button id="floatingShareAgentBtn" class="agent-actions-share" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></svg>
+        <span>Share agent</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+    </button>
+    <% } %>
+    <button id="floatingClearConversationBtn"
+        class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Clear Conversation
+    </button>
+    <button id="floatingHideAllMessagesBtn"
+        class="w-full px-4 py-3 text-left text-xs text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+        </svg>
+        Hide All Messages
+    </button>
+    <button id="floatingRemoveFromGroupBtn"
+        class="hidden w-full px-4 py-3 text-left text-xs text-violet-300 hover:bg-violet-900/30 hover:text-violet-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        Remove from Group
+    </button>
+    <button id="floatingArchiveAgentBtn"
+        class="w-full px-4 py-3 text-left text-xs text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
+        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+        </svg>
+        Archive Agent
+    </button>
+    <button id="floatingDeleteAgentBtn"
+        class="w-full px-4 py-3 text-left text-xs text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete Agent
+    </button>
+    <details><summary>Agent details<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div class="agent-menu-stats px-3 py-2 border-b border-slate-700/50 bg-slate-900/40 text-[10px] space-y-1">
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Messages</span><span class="font-mono" data-agent-stat="message-count">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last heartbeat</span><span class="font-mono" data-agent-stat="last-heartbeat">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Visible chars</span><span class="font-mono" data-agent-stat="visible-chars">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Last poll</span><span class="font-mono" data-agent-stat="last-poll">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Parent</span><span class="font-mono truncate max-w-[90px]" data-agent-stat="parent">—</span></div>
+        <div class="flex items-center justify-between text-slate-300"><span class="text-slate-400">Children</span><span class="font-mono" data-agent-stat="children">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Computer</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-name">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">IP</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="machine-ip">—</span></div>
+        <div class="flex items-center justify-between gap-2 text-slate-300"><span class="text-slate-400">Folder</span><span class="font-mono truncate max-w-[120px]" data-agent-stat="folder-name">—</span></div>
+        <div class="space-y-0.5 text-slate-300">
+            <span class="text-slate-400 block">Project path</span>
+            <span class="font-mono text-[9px] block break-all" data-agent-stat="project-path">—</span>
+        </div>
+        <div class="space-y-0.5 text-slate-300">
+            <span class="text-slate-400 block">Folder path</span>
+            <span class="font-mono text-[9px] block break-all" data-agent-stat="folder-path">—</span>
+        </div>
+    </div>
+    </details>
+</div>
+
+<% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && !(typeof inPlaceSharingEnabled === 'boolean' ? inPlaceSharingEnabled : process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true')) { %>
+<dialog id="agentShareDialog" class="agent-share-dialog" aria-labelledby="agentShareTitle" aria-describedby="agentShareDescription">
+    <button id="agentShareClose" class="agent-actions-close" type="button" aria-label="Close sharing"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    <span id="agentShareAvatar" class="agent-share-avatar" aria-hidden="true">AG</span>
+    <h2 id="agentShareTitle">Share <span id="agentShareName">your agent</span></h2>
+    <p id="agentShareDescription">Bring someone you trust into a conversation with your agent.</p>
+    <div class="agent-share-options">
+        <a id="agentShareChatLink" class="agent-share-option" href="/shared">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5A8.5 8.5 0 0 1 10.5 3h2A8.5 8.5 0 0 1 21 11.5Z"/><path d="M7 9h9M7 13h6"/></svg>
+            <span><strong>Invite to a shared chat</strong><small>Collaborate with someone who has an account.</small></span><span aria-hidden="true">↗</span>
+        </a>
+        <% if (process.env.FEATURE_GUEST_SHARING === 'true') { %>
+        <a id="agentShareGuestLink" class="agent-share-option" href="/guest-sharing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m10 13 4-4m-6 6-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m0 10a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-2 2"/></svg>
+            <span><strong>Create a guest link</strong><small>Share access without requiring an account.</small></span><span aria-hidden="true">↗</span>
+        </a>
+        <% } %>
+    </div>
+    <p class="agent-share-note">Your agent keeps its current provider, tools and permissions. Shared chats have their own history.</p>
+</dialog>
+<% } %>

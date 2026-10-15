@@ -1,0 +1,17 @@
+{
+  "workspace": "/home/ubuntu/agent-sharing-projects/notes-onro-1-compat",
+  "uid": 1000,
+  "gid": 1000,
+  "files": [
+    {
+      "name": "example-garden.md",
+      "bytes": 214,
+      "sha256": "cf7e8efd4184854438a9f76eaf6c389a1565cb992fa3cf569c91be3aa044d1d2"
+    },
+    {
+      "name": "example-observatory.md",
+      "bytes": 218,
+      "sha256": "e680c724cf3c3321898891313b0bffc75fc6f79b734c7dd2331b5ba15074b627"
+    }
+  ]
+}

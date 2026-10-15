@@ -15,7 +15,13 @@ RESTART_WINDOW_SECONDS="${RESTART_WINDOW_SECONDS:-600}"
 STATE_FILE="$ROOT_DIR/tmp/server_supervisor_state"
 
 mkdir -p "$ROOT_DIR/tmp"
-touch "$SERVICE_LOG" "$CRASH_LOG" "$ALERT_FILE"
+touch "$SERVICE_LOG" "$CRASH_LOG"
+# Preserve the alert timestamp: the health check uses it to distinguish a new
+# crash from an old acknowledged one. Touching it on every clean restart makes
+# historical alerts look current and causes a false failed deployment.
+if [ ! -e "$ALERT_FILE" ]; then
+  : >"$ALERT_FILE"
+fi
 
 log_line() {
   local msg="$1"

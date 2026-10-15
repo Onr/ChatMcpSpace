@@ -28,6 +28,7 @@ function setMobileListExpanded(expanded) {
   if (agentListPanel) {
     agentListPanel.classList.toggle('mobile-expanded', expanded);
   }
+  document.querySelector('.council-chamber')?.classList.toggle('mobile-agent-list-open', expanded);
   document.body.classList.toggle('mobile-list-expanded', expanded);
   if (expanded) {
     setMobileChromeCollapsed(false);
@@ -140,6 +141,7 @@ describe('Mobile Agent List Toggle', () => {
     const panel = document.getElementById('agentListPanel');
     setMobileListExpanded(true);
     expect(panel.classList.contains('mobile-expanded')).toBe(true);
+    expect(document.querySelector('.council-chamber').classList.contains('mobile-agent-list-open')).toBe(true);
   });
 
   it('setMobileListExpanded(false) removes mobile-expanded class', () => {
@@ -147,6 +149,7 @@ describe('Mobile Agent List Toggle', () => {
     setMobileListExpanded(false);
     const panel = document.getElementById('agentListPanel');
     expect(panel.classList.contains('mobile-expanded')).toBe(false);
+    expect(document.querySelector('.council-chamber').classList.contains('mobile-agent-list-open')).toBe(false);
   });
 
   it('toggleMobileListExpanded toggles the expanded state', () => {

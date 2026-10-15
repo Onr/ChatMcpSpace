@@ -204,8 +204,9 @@ async function createVerificationCode(userId) {
     [userId]
   );
 
-  // Create new code entry (store code hash, not plain code)
-  const debugToken = `CODE-${code}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  // Keep the required diagnostic token opaque. The verification code itself
+  // must never be recoverable from the database; only its hash is persisted.
+  const debugToken = `CODE-${Date.now()}-${crypto.randomBytes(16).toString('hex')}`;
   await query(
     `INSERT INTO email_verification_tokens (user_id, token, token_hash, expires_at)
      VALUES ($1, $2, $3, $4)`,
@@ -307,11 +308,6 @@ async function verifyEmailCode(email, code) {
 
   const user = userResult.rows[0];
 
-  // Check if already verified
-  if (user.email_verified) {
-    return { success: true, alreadyVerified: true, userId: user.user_id, email: user.email };
-  }
-
   // Find valid code
   const result = await query(
     `SELECT evt.token_id
@@ -334,20 +330,36 @@ async function verifyEmailCode(email, code) {
   try {
     await client.query('BEGIN');
 
-    await client.query(
-      `UPDATE users SET email_verified = TRUE, email_verified_at = NOW()::timestamp, updated_at = NOW()::timestamp WHERE user_id = $1`,
-      [user.user_id]
-    );
-
-    await client.query(
-      `UPDATE email_verification_tokens SET used_at = NOW()::timestamp WHERE token_id = $1`,
+    const consumeResult = await client.query(
+      `UPDATE email_verification_tokens
+       SET used_at = NOW()::timestamp
+       WHERE token_id = $1 AND used_at IS NULL
+       RETURNING token_id`,
       [tokenData.token_id]
     );
+
+    // Prevent concurrent requests from replaying the same one-time code.
+    if (consumeResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, error: 'Invalid or expired verification code. Please request a new code.' };
+    }
+
+    if (!user.email_verified) {
+      await client.query(
+        `UPDATE users SET email_verified = TRUE, email_verified_at = NOW()::timestamp, updated_at = NOW()::timestamp WHERE user_id = $1`,
+        [user.user_id]
+      );
+    }
 
     await client.query('COMMIT');
 
     console.log('Email verified successfully for:', email);
-    return { success: true, userId: user.user_id, email: user.email };
+    return {
+      success: true,
+      alreadyVerified: user.email_verified === true,
+      userId: user.user_id,
+      email: user.email
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -694,6 +706,43 @@ async function sendVerificationEmail(userId, email, metadata = {}) {
   }
 }
 
+function escapeEmailHtml(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function sendConversationInvitationEmail({ to, agentName, joinUrl, expiresAt }, { transport: injectedTransport } = {}) {
+  const transport = injectedTransport || getTransporter();
+  if (!transport) return { success: false, skipped: true, error: 'Email service not configured' };
+  // App integration tests use a disposable database and must never deliver real mail.
+  if (!injectedTransport && (process.env.NODE_ENV === 'test' || process.env.SHARED_TEST_DATABASE_URL)) {
+    return { success: false, skipped: true, error: 'Email delivery disabled in test mode' };
+  }
+  try {
+    const parsedUrl = new URL(joinUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Invitation link must use HTTP or HTTPS');
+    const safeName = String(agentName || 'an agent conversation');
+    const safeUrl = parsedUrl.toString();
+    const expiry = expiresAt ? new Date(expiresAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC' : 'in seven days';
+    const subject = `You’re invited to collaborate on ${safeName}`;
+    const text = `You’ve been invited to join the shared conversation for ${safeName}.\n\nOpen this link to sign in or create an account and join:\n${safeUrl}\n\nThis invitation expires ${expiry}. Verify the email address it was sent to to accept.`;
+    const html = `<div style="font-family:Arial,sans-serif;color:#172033;line-height:1.5"><h2>You’re invited to collaborate</h2><p>You’ve been invited to join the shared conversation for <strong>${escapeEmailHtml(safeName)}</strong>.</p><p><a href="${escapeEmailHtml(safeUrl)}">Join this conversation</a></p><p>This invitation expires ${escapeEmailHtml(expiry)}. Sign in or create an account, then verify the email address this invitation was sent to.</p></div>`;
+    const info = await transport.sendMail({
+      from: `"${EMAIL_CONFIG.fromName}" <${EMAIL_CONFIG.from}>`,
+      replyTo: process.env.EMAIL_REPLY_TO || EMAIL_CONFIG.from,
+      to,
+      subject,
+      text,
+      html,
+      headers: { 'X-Email-Type': 'shared-conversation-invitation' }
+    });
+    return { success: true, messageId: info.messageId || null };
+  } catch (error) {
+    console.error('Failed to send shared conversation invitation:', error.message);
+    return { success: false, error: 'Email delivery failed' };
+  }
+}
+
 /**
  * Resend verification email
  * @param {string} email - User's email
@@ -863,6 +912,7 @@ async function verifyEmailConnection() {
 
 module.exports = {
   sendVerificationEmail,
+  sendConversationInvitationEmail,
   resendVerificationEmail,
   verifyEmailToken,
   verifyEmailCode,

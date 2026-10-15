@@ -1,7 +1,7 @@
 const express = require('express');
 const request = require('supertest');
 
-function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
+function buildApp({ sendVerificationEmailResult = { success: true }, verifyEmailCodeResult = { success: false, error: 'Invalid code' } } = {}) {
   jest.resetModules();
 
   const session = {};
@@ -10,6 +10,8 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
     email: 'new@example.com',
   });
   const sendVerificationEmail = jest.fn().mockResolvedValue(sendVerificationEmailResult);
+  const verifyEmailCode = jest.fn().mockResolvedValue(verifyEmailCodeResult);
+  const query = jest.fn().mockResolvedValue({ rows: [{ user_id: 'user-123', email: 'new@example.com', api_key: null }] });
   const createSession = jest.fn().mockResolvedValue(undefined);
 
   jest.doMock('passport', () => ({
@@ -37,7 +39,7 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
   jest.doMock('../../src/services/emailService', () => ({
     sendVerificationEmail,
     verifyEmailToken: jest.fn(),
-    verifyEmailCode: jest.fn(),
+    verifyEmailCode,
     resendVerificationEmail: jest.fn(),
     isEmailVerified: jest.fn().mockResolvedValue(false),
   }));
@@ -55,7 +57,7 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
     logAuthenticationFailure: jest.fn(),
   }));
   jest.doMock('../../src/db/connection', () => ({
-    query: jest.fn(),
+    query,
   }));
   jest.doMock('../../src/utils/validation', () => ({
     isValidEmail: jest.fn().mockReturnValue(true),
@@ -99,13 +101,39 @@ function buildApp({ sendVerificationEmailResult = { success: true } } = {}) {
   });
   app.use(pageRoutes);
 
-  return { app, session, registerUser, sendVerificationEmail, createSession };
+  return { app, session, registerUser, sendVerificationEmail, verifyEmailCode, createSession };
 }
 
 describe('pageRoutes registration email flow', () => {
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+  });
+
+  it('lets an external-agent owner choose collaboration access without script injection', async () => {
+    const { app } = buildApp();
+    const maliciousName = '</script><script>window.injected=true</script>';
+    const res = await request(app).get('/settings/external-agents/approve')
+      .query({ provider: 'hermes', agentName: maliciousName }).expect(200);
+    expect(res.text).toContain('Who may it collaborate with?');
+    expect(res.text).toContain('value="disabled"');
+    expect(res.text).toContain('value="groups" selected');
+    expect(res.text).toContain('value="listen_all"');
+    const { JSDOM } = require('jsdom');
+    const dom = new JSDOM(res.text, { runScripts: 'dangerously' });
+    try {
+      expect(dom.window.injected).toBeUndefined();
+      dom.window.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ pairingCode: 'ABCDE-FGHJK', expiresAt: new Date().toISOString() }) });
+      dom.window.document.getElementById('collaborationMode').value = 'groups';
+      dom.window.document.getElementById('collaborationGroups').value = ' Project, Operations ';
+      dom.window.document.getElementById('approveButton').click();
+      await new Promise(resolve => setImmediate(resolve));
+      const [route, options] = dom.window.fetch.mock.calls[0];
+      expect(route).toBe('/api/user/external-agents/pairing-codes');
+      expect(options.headers['x-csrf-token']).toBe('csrf-token');
+      expect(JSON.parse(options.body)).toMatchObject({ provider: 'hermes', agentName: maliciousName,
+        interAgentMode: 'groups', groupNames: ['Project', 'Operations'], canSpawn: false });
+    } finally { dom.window.close(); }
   });
 
   it('redirects to verify-email-sent after successful registration and send', async () => {
@@ -133,6 +161,34 @@ describe('pageRoutes registration email flow', () => {
         ip: expect.any(String),
       })
     );
+  });
+
+  it('carries a valid invitation through signup and rejects malformed continuation IDs', async () => {
+    const { app, session } = buildApp();
+    const invitationId = 'd91ee648-e242-4db7-a82a-0f9cad64dd93';
+    await request(app).get(`/join/invitation/${invitationId}`).expect(302).expect('Location', '/register');
+    expect(session.pendingSharingInvitationId).toBe(invitationId);
+    const registration = await request(app).get('/register').expect(200);
+    expect(registration.body).toMatchObject({ view: 'register', invitationId });
+    await request(app).post('/register').type('form').send({
+      email: 'new@example.com', password: 'Password123!', confirmPassword: 'Password123!', invitationId
+    }).expect(302);
+    expect(session.pendingSharingInvitationId).toBe(invitationId);
+    expect(session.pendingVerificationEmail).toBe('new@example.com');
+
+    const other = buildApp();
+    await request(other.app).get('/join/invitation/not-a-uuid').expect(302).expect('Location', '/register');
+    expect(other.session.pendingSharingInvitationId).toBeUndefined();
+  });
+
+  it('redirects a newly verified invitee to the invited chat and consumes the continuation', async () => {
+    const invitationId = 'd91ee648-e242-4db7-a82a-0f9cad64dd93';
+    const { app, session } = buildApp({ verifyEmailCodeResult: { success: true, userId: 'user-123', alreadyVerified: false } });
+    session.pendingVerificationEmail = 'new@example.com';
+    session.pendingSharingInvitationId = invitationId;
+    const response = await request(app).post('/verify-code').send({ email: 'new@example.com', code: '123456' }).expect(200);
+    expect(response.body.redirectTo).toBe(`/dashboard?invitationId=${invitationId}`);
+    expect(session.pendingSharingInvitationId).toBeUndefined();
   });
 
   it('surfaces the initial send failure on verify-email-sent so the user can retry', async () => {

@@ -19,6 +19,10 @@
   // Cached DOM references — populated by init() after DOMContentLoaded.
   const dom = {};
 
+  // Set once the terminal commands have been written into the modal, so
+  // opening it repeatedly does not re-fetch the status endpoint.
+  let setupCommandsApplied = false;
+
   function showError(message) {
     if (!dom.error) return;
     dom.error.textContent = message;
@@ -42,9 +46,38 @@
     if (dom.modal) dom.modal.classList.add('hidden');
   }
 
+  /**
+   * Fill in the "install on your computer" commands. The server resolves the
+   * base URL, so the curl line always points at the host the browser is
+   * talking to rather than a hardcoded domain. Older responses omit `setup`;
+   * in that case the markup's generic placeholders stay as-is.
+   */
+  function applySetupCommands(status) {
+    const setup = status && status.setup;
+    if (!setup) return;
+    if (dom.setupCommand && setup.setupCommand) {
+      dom.setupCommand.textContent = setup.setupCommand;
+    }
+    if (dom.localCosCommand && setup.localCosCommand) {
+      dom.localCosCommand.textContent = setup.localCosCommand;
+    }
+    if (dom.apiKeyLink && setup.apiKeyUrl) {
+      dom.apiKeyLink.href = setup.apiKeyUrl;
+    }
+    setupCommandsApplied = true;
+  }
+
+  async function ensureSetupCommands() {
+    if (setupCommandsApplied) return;
+    applySetupCommands(await fetchStatus());
+  }
+
   function openModal() {
     clearError();
     if (dom.modal) dom.modal.classList.remove('hidden');
+    // Fire-and-forget: the placeholders are already readable, this just
+    // swaps in the URL for this specific server.
+    ensureSetupCommands();
   }
 
   function attachDismissHandlers() {
@@ -71,13 +104,26 @@
     }
   }
 
-  function copyBootstrapCommand() {
-    const cmd = dom.bootstrap ? dom.bootstrap.textContent : '';
-    if (navigator.clipboard && cmd && dom.copyBtn) {
+  /**
+   * Wire a "Copy command" button to the <code> block it sits under.
+   * Restores the original label so a second copy still reads as an action.
+   */
+  function attachCopyButton(button, source) {
+    if (!button || !source) return;
+    const originalLabel = button.textContent;
+    button.addEventListener('click', () => {
+      const cmd = source.textContent || '';
+      if (!navigator.clipboard || !cmd) return;
       navigator.clipboard.writeText(cmd).then(() => {
-        dom.copyBtn.textContent = 'Copied';
+        button.textContent = 'Copied';
+        setTimeout(() => { button.textContent = originalLabel; }, 2000);
+      }).catch(() => {
+        // Clipboard permission can be denied (insecure origin, locked-down
+        // browser). The command is selectable on screen either way.
+        button.textContent = 'Copy failed — select and copy';
+        setTimeout(() => { button.textContent = originalLabel; }, 3000);
       });
-    }
+    });
   }
 
   async function submitInstall() {
@@ -126,6 +172,7 @@
     try { dismissedAt = localStorage.getItem(DISMISS_KEY); } catch (_) { /* ignore */ }
     if (dismissedAt) return;
     const status = await fetchStatus();
+    applySetupCommands(status);
     if (!status || status.installed) return;
     openModal();
   }
@@ -133,6 +180,7 @@
   async function refreshSettingsStatus() {
     if (!dom.settingsStatus) return;
     const status = await fetchStatus();
+    applySetupCommands(status);
     if (status && status.installed) {
       dom.settingsStatus.textContent = status.count > 1 ? `${status.count} installed` : 'Installed';
       dom.settingsStatus.classList.remove('text-slate-400');
@@ -154,13 +202,20 @@
     dom.bootstrap = g('cosInstallBootstrap');
     dom.submit = g('cosInstallSubmit');
     dom.copyBtn = g('cosInstallCopyBootstrap');
+    dom.setupCommand = g('cosSetupCommand');
+    dom.localCosCommand = g('cosLocalCosCommand');
+    dom.apiKeyLink = g('cosApiKeyLink');
+    dom.copySetupBtn = g('cosCopySetupCommand');
+    dom.copyLocalCosBtn = g('cosCopyLocalCosCommand');
     dom.firstRunRoot = g('cosFirstRunRoot');
     dom.settingsStatus = g('cosSettingsStatus');
     dom.settingsInstallBtn = g('cosSettingsInstallBtn');
 
     attachDismissHandlers();
     if (dom.submit) dom.submit.addEventListener('click', submitInstall);
-    if (dom.copyBtn) dom.copyBtn.addEventListener('click', copyBootstrapCommand);
+    attachCopyButton(dom.copyBtn, dom.bootstrap);
+    attachCopyButton(dom.copySetupBtn, dom.setupCommand);
+    attachCopyButton(dom.copyLocalCosBtn, dom.localCosCommand);
     if (dom.settingsInstallBtn) dom.settingsInstallBtn.addEventListener('click', openModal);
 
     if (dom.name && !dom.name.value) {

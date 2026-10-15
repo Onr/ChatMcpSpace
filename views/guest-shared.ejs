@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" type="image/png" href="/images/favicon.png">
+  <link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
+  <link rel="stylesheet" href="/css/guest-workspace.css?v=20261013.4">
+  <link rel="stylesheet" href="/css/rich-rendering.css">
+  <title>Shared chat · Chat MCP Space</title>
+</head>
+<body class="guest-chat-page">
+  <main id="guestShell" class="chat-shell">
+    <header class="guest-app-bar">
+      <a class="chat-brand" href="/" aria-label="Chat MCP Space home"><span class="chat-brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor"><circle cx="16" cy="16" r="12"/><circle cx="16" cy="16" r="9" stroke-dasharray="3 3"/><circle cx="16" cy="16" r="5"/></svg></span> Chat MCP Space</a>
+      <div class="guest-app-actions"><span class="chat-brand-tag">Guest access</span><button id="guestLogout" class="guest-secondary" type="button" hidden>Log out <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 5H5v14h4m5-14 7 7-7 7m-4-7h11"/></svg></button></div>
+    </header>
+    <section id="guestUnlockPanel" class="chat-unlock-card" aria-labelledby="guestUnlockTitle">
+      <span class="chat-large-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 10 10 0 0 1-4-.8L3 21l1.7-4.8A8.1 8.1 0 0 1 3 11.5a9 9 0 0 1 18 0Z"/><path d="M8 11h8m-8 4h5"/></svg></span><p class="guest-eyebrow chat-eyebrow">You’re invited</p>
+      <h1 id="guestUnlockTitle">Join the conversation</h1>
+      <p>Choose a name to chat with the shared agent. No account needed.</p>
+      <form id="guestUnlockForm" autocomplete="off">
+        <label for="guestDisplayName">Display name</label><input id="guestDisplayName" name="displayName" maxlength="80" required autocomplete="name" placeholder="What should we call you?">
+        <label for="guestPassword">Guest access code <span class="chat-help">(if required)</span></label><input id="guestPassword" name="password" type="password" maxlength="72" autocomplete="current-password" placeholder="Code provided by the person who shared this chat">
+        <button type="submit" class="chat-primary">Join chat <span aria-hidden="true">→</span></button>
+      </form>
+      <p id="guestStatus" class="guest-status chat-status" role="status" aria-live="polite"></p>
+      <p class="chat-help">The owner can see activity in your shared conversations.</p>
+    </section>
+    <section id="guestWorkspace" data-chat-workspace data-view="rooms" hidden aria-labelledby="guestWorkspaceTitle">
+      <h1 id="guestWorkspaceTitle" class="chat-sr-only">Your shared conversations</h1>
+      <p id="guestWorkspaceStatus" class="guest-status chat-status" role="status" aria-live="polite"></p>
+      <div class="guest-workspace-grid chat-workspace">
+        <aside class="guest-room-list chat-sidebar" aria-labelledby="guestRoomsTitle">
+          <div class="chat-sidebar-heading"><h2 id="guestRoomsTitle">Chats</h2><span class="guest-sidebar-label">Shared with you</span></div>
+          <div id="guestRooms" class="chat-rooms"></div>
+          <div class="chat-sidebar-footer"><span class="chat-secure-dot" aria-hidden="true"></span> Guest session<p id="guestWorkspaceAudience"></p></div>
+        </aside>
+        <section id="guestConversation" class="guest-conversation chat-conversation" hidden aria-labelledby="guestConversationTitle">
+          <header class="chat-conversation-header">
+            <button class="chat-mobile-back" type="button" aria-label="Back to shared agents" title="Open chats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+            <span class="chat-avatar chat-avatar-agent" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="7" width="14" height="12" rx="4"/><path d="M12 3v4M2 11v4m20-4v4M9 15h6"/><circle cx="9" cy="11" r=".6"/><circle cx="15" cy="11" r=".6"/></svg></span>
+            <div class="chat-conversation-heading"><h2 id="guestConversationTitle"></h2><p id="guestConversationStatus" class="guest-status chat-status" role="status" aria-live="polite"></p></div>
+            <button id="guestPeopleButton" class="guest-people-button" type="button" aria-label="View people in this chat" title="People in this chat" aria-haspopup="dialog" aria-controls="guestAudienceDialog" aria-expanded="false" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2m6 0v-2a4 4 0 0 0-3-3.9M15 3.1a4 4 0 0 1 0 7.8"/></svg><span data-guest-people-count aria-hidden="true">…</span></button>
+          </header>
+          <dialog id="guestAudienceDialog" class="guest-people-dialog" aria-labelledby="guestAudienceTitle"><header><div><h2 id="guestAudienceTitle">People in this chat</h2><p>The owner always receives agent replies.</p></div><button id="guestPeopleClose" type="button" aria-label="Close people" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></header><div id="guestAudience" class="guest-audience" aria-label="Conversation audience"></div></dialog>
+          <details id="guestTasks" class="chat-task-panel" hidden><summary>Agent activity</summary><div data-chat-tasks></div><p data-task-error role="alert"></p></details>
+          <p id="guestHistoryStatus" hidden role="status" aria-live="polite" class="guest-conversation-status"></p>
+          <div id="guestTimeline" class="guest-timeline chat-timeline" role="log" aria-live="polite" aria-label="Guest conversation messages"></div>
+          <form id="guestComposer" class="guest-composer chat-composer" data-chat-composer>
+            <p id="guestReplyState" class="chat-reply-state"></p>
+            <label for="guestMessage" class="chat-sr-only">Message</label><textarea id="guestMessage" name="text" rows="2" maxlength="60000" placeholder="Write a message…"></textarea>
+            <div class="chat-selected-files" data-chat-files role="status" aria-live="polite"></div>
+            <div class="chat-composer-toolbar">
+              <label class="chat-attach" for="guestFiles" title="Attach photos or files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9m-6 12 9-9"/></svg><span class="guest-attach-desktop">Attach</span><span class="guest-attach-mobile chat-sr-only">Photos and files</span><input id="guestFiles" name="files" type="file" multiple class="chat-sr-only" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.txt,.csv,.json,.md,.doc,.docx,.xls,.xlsx,.zip"></label>
+              <label for="guestAddress" class="chat-address"><span>Mention</span><select id="guestAddress" name="address"><option value="">Everyone</option></select></label>
+              <p class="guest-composer__mention-note">Mentions notify people; everyone in this conversation can still read your message.</p>
+              <button class="guest-primary chat-primary chat-send" type="submit" aria-label="Send message"><span class="chat-send-label">Send</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m21 3-7 18-4-7-7-4 18-7ZM10 14 21 3"/></svg></button>
+            </div>
+            <button id="guestCancelReply" class="guest-secondary" type="button" hidden>Cancel reply</button>
+            <p class="guest-help chat-composer-hint">Your messages are shared with everyone in this chat. <span>⌘ / Ctrl + Enter to send</span></p>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/js/shared-crypto.js"></script>
+  <script src="/js/guest-crypto.js"></script>
+  <script src="/js/vendor/dompurify.min.js"></script>
+  <script src="/js/rich-rendering.js"></script>
+  <script src="/js/sharing-ui.js?v=20261009"></script>
+  <script src="/js/guest-workspace.js?v=20261013.4"></script>
+  <script src="/js/guest-shared.js?v=20261010.2"></script>
+</body>
+</html>

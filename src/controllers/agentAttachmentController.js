@@ -118,6 +118,12 @@ async function uploadAttachment(req, res) {
       // Validate required fields from form data
       const { agentName, ivBase64, authTagBase64, contentType, width, height, sha256 } = req.body;
 
+      // Multipart fields are parsed after authentication middleware runs.
+      // Bind the parsed identity here as well, before storing any bytes.
+      if (req.authContext?.type === 'agent_token' && agentName !== req.authContext.agentName) {
+        return forbiddenError(res, 'Attachment uploads must use the paired agent identity');
+      }
+
       // Validate agentName (agents identify themselves by name)
       if (!agentName) {
         return validationError(res, 'Agent name is required');
@@ -352,12 +358,12 @@ async function downloadAttachment(req, res) {
       LEFT JOIN agents ag3 ON um.agent_id = ag3.agent_id
       WHERE a.attachment_id = $1
         AND (
-          ag.user_id = $2
-          OR ag2.user_id = $2
-          OR ag3.user_id = $2
+          (ag.user_id = $2 AND ($3::uuid IS NULL OR ag.agent_id = $3))
+          OR (ag2.user_id = $2 AND ($3::uuid IS NULL OR ag2.agent_id = $3))
+          OR (ag3.user_id = $2 AND ($3::uuid IS NULL OR ag3.agent_id = $3))
         )
       LIMIT 1
-    `, [attachmentId, userId]);
+    `, [attachmentId, userId, req.authContext?.type === 'agent_token' ? req.authContext.agentId : null]);
 
     if (accessResult.rows.length === 0) {
       // Return 404 for both missing and unauthorized to avoid leaking existence

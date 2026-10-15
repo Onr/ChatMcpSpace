@@ -34,6 +34,10 @@ async function createEmailApiTestContext({ emailVerified = false } = {}) {
     requireEmailVerification: (_req, _res, next) => next(),
   }));
 
+  jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
+    authRateLimiter: (_req, _res, next) => next(),
+  }));
+
   const emailApiRoutes = require('../../src/routes/emailApiRoutes');
 
   const app = express();
@@ -144,11 +148,44 @@ describe('Email API routes', () => {
     expect(logRow.rows[0].subject).toMatch(/^\d{6} is your ChatMCP\.Space verification code$/);
 
     const code = logRow.rows[0].subject.split(' ')[0];
+    const storedCode = await query(
+      'SELECT token, token_hash FROM email_verification_tokens WHERE user_id = $1 AND used_at IS NULL',
+      [userId]
+    );
+    expect(storedCode.rows).toHaveLength(1);
+    expect(storedCode.rows[0].token).not.toContain(code);
+
     const verify = await request(app).post('/api/email/verify-code').send({ email, code }).expect(200);
     expect(verify.body).toMatchObject({ success: true, userId, email });
 
     const userAfter = await query('SELECT email_verified FROM users WHERE user_id = $1', [userId]);
     expect(userAfter.rows[0].email_verified).toBe(true);
+
+    const replay = await request(app).post('/api/email/verify-code').send({ email, code }).expect(400);
+    expect(replay.body).toMatchObject({ success: false });
+    expect(replay.body.error).toMatch(/Invalid|expired/i);
+
+    await pool.end();
+  });
+
+  it('does not accept an arbitrary code for an already-verified account', async () => {
+    const { app, pool, userId, email } = await createEmailApiTestContext({ emailVerified: true });
+
+    const res = await request(app)
+      .post('/api/email/verify-code')
+      .send({ email, code: '123456' })
+      .expect(400);
+
+    expect(res.body).toMatchObject({ success: false });
+    expect(res.body.error).toMatch(/Invalid|expired/i);
+    expect(res.body.userId).toBeUndefined();
+    expect(res.body.email).toBeUndefined();
+
+    const tokens = await require('../../src/db/connection').query(
+      'SELECT token_id FROM email_verification_tokens WHERE user_id = $1',
+      [userId]
+    );
+    expect(tokens.rows).toHaveLength(0);
 
     await pool.end();
   });

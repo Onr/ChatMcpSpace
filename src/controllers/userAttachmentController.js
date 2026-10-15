@@ -10,7 +10,8 @@
 
 const crypto = require('crypto');
 const multer = require('multer');
-const { query } = require('../db/connection');
+const { query, getClient } = require('../db/connection');
+const chatThreadService = require('../shared/chatThreadService');
 const { isValidUUID } = require('../utils/validation');
 const {
   validationError,
@@ -265,6 +266,7 @@ async function cleanupOldestUserImages(userId, storage) {
 async function uploadAttachment(req, res) {
   // Wrap multer in a promise for better error handling
   uploadMiddleware(req, res, async (multerErr) => {
+    let fenceClient = null;
     try {
       // Handle multer errors
       if (multerErr) {
@@ -327,7 +329,6 @@ async function uploadAttachment(req, res) {
         logUnauthorizedAccess(req, 'agent', agentId, 'User does not own this agent');
         return forbiddenError(res, 'You do not have access to this agent');
       }
-
       // Validate optional numeric fields
       let parsedWidth = null;
       let parsedHeight = null;
@@ -362,6 +363,13 @@ async function uploadAttachment(req, res) {
       // Generate attachment ID
       const attachmentId = crypto.randomUUID();
 
+      if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') {
+        fenceClient = await getClient();
+        await fenceClient.query('BEGIN');
+        await fenceClient.query('SELECT agent_id FROM agents WHERE agent_id=$1 AND user_id=$2 FOR UPDATE',[agentId,userId]);
+        await chatThreadService.assertPrivateThreadWritable(fenceClient,agentId,userId);
+      }
+
       // Get storage provider and store the encrypted bytes
       const storage = await initializeStorage();
 
@@ -377,8 +385,7 @@ async function uploadAttachment(req, res) {
 
 
       // Insert attachment record into database
-      const insertResult = await query(
-        `INSERT INTO attachments (
+      const insertSql = `INSERT INTO attachments (
           attachment_id,
           content_type,
           file_name,
@@ -394,8 +401,8 @@ async function uploadAttachment(req, res) {
           agent_id,
           uploaded_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        RETURNING attachment_id, created_at`,
-        [
+        RETURNING attachment_id, created_at`;
+      const insertParams = [
           attachmentId,
           normalizedContentType,
           sanitizedFilename,
@@ -410,8 +417,15 @@ async function uploadAttachment(req, res) {
           authTagBase64,
           agentId,
           'user' // uploaded_by
-        ]
-      );
+        ];
+      const insertResult = fenceClient
+        ? await fenceClient.query(insertSql, insertParams)
+        : await query(insertSql, insertParams);
+      if (fenceClient) {
+        await fenceClient.query('COMMIT');
+        fenceClient.release();
+        fenceClient = null;
+      }
 
       logInfo('attachment_uploaded', {
         attachmentId,
@@ -439,6 +453,10 @@ async function uploadAttachment(req, res) {
       });
 
     } catch (error) {
+      if (fenceClient) {
+        await fenceClient.query('ROLLBACK').catch(() => {});
+        fenceClient.release();
+      }
       logError('attachment_upload_error', {
         error: error.message,
         code: error.code,
@@ -454,6 +472,7 @@ async function uploadAttachment(req, res) {
         return internalError(res, error.message);
       }
 
+      if (error.status) return res.status(error.status).json({ error: { message: error.message } });
       return handleDatabaseError(res, error, 'uploading attachment');
     }
   });

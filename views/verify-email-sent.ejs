@@ -190,7 +190,7 @@
       if (data.success) {
         showMessage('Email verified successfully! Redirecting...', 'success');
         setTimeout(() => {
-          window.location.href = '/dashboard';
+          window.location.href = data.redirectTo || '/dashboard';
         }, 1500);
       } else {
         showMessage(data.error || 'Invalid code. Please try again.', 'error');

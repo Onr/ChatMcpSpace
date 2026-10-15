@@ -127,31 +127,35 @@ class VoiceControl {
 
         // 1. Try specific preferred voice if provided
         if (preferredVoice) {
-            voice = this.voices.find(v => v.name.includes(preferredVoice));
+            voice = this.voices.find(v => v.name.includes(preferredVoice)
+                && (v.lang || '').toLowerCase() === 'en-us');
         }
 
-        // 2. Try to find a high-quality female voice
+        // 2. Prefer a US English voice. Chrome mobile often exposes regional
+        // English voices, which can sound unexpectedly non-US.
         if (!voice) {
-            const preferredNames = ['Google US English', 'Microsoft Zira', 'Samantha', 'Karen', 'Rishi'];
+            const preferredNames = ['Google US English', 'Microsoft Zira', 'Samantha'];
             for (const name of preferredNames) {
-                voice = this.voices.find(v => v.name.includes(name));
+                voice = this.voices.find(v => v.name.includes(name)
+                    && (v.lang || '').toLowerCase() === 'en-us');
                 if (voice) break;
             }
         }
 
-        // 3. Try any female voice
+        // 3. Try any US English voice
         if (!voice) {
-            voice = this.voices.find(v => v.name.toLowerCase().includes('female'));
+            voice = this.voices.find(v => (v.lang || '').toLowerCase() === 'en-us');
         }
 
-        // 4. Fallback to a decent English voice
+        // 4. Fallback to another English voice only if the device has no US voice
         if (!voice) {
-            voice = this.voices.find(v => v.lang === 'en-US' && !v.name.includes('Google')) || this.voices[0];
+            voice = this.voices.find(v => (v.lang || '').toLowerCase().startsWith('en-')) || null;
         }
 
         if (voice) {
             utterance.voice = voice;
         }
+        utterance.lang = 'en-US';
 
         utterance.rate = 1.0;
         utterance.pitch = 1.0;

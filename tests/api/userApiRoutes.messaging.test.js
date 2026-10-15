@@ -171,6 +171,48 @@ describe('User API routes (messaging)', () => {
     await pool.end();
   });
 
+  it('stores validated per-message run overrides on queued and scheduled messages', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [agentId, userId, 'Alpha', 1]);
+    const overrides = { model_provider: 'claude', model: 'claude-sonnet-5', thinking_effort: 'high', approval_mode: 'full-auto', sandbox_mode: 'read-only' };
+
+    const sent = await request(app).post('/api/user/messages').send({ agentId, content: 'hi', runOverrides: overrides }).expect(201);
+    const plain = await request(app).post('/api/user/messages').send({ agentId, content: 'plain' }).expect(201);
+    const rows = await query('SELECT user_message_id, run_overrides FROM user_messages WHERE agent_id = $1', [agentId]);
+    const byId = Object.fromEntries(rows.rows.map((r) => [r.user_message_id, r.run_overrides]));
+    expect(byId[sent.body.messageId]).toEqual(overrides);
+    expect(byId[plain.body.messageId]).toBeNull();
+
+    const scheduledFor = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const created = await request(app).post('/api/user/messages/schedule').send({ agentId, content: 'later', scheduledFor, runOverrides: overrides }).expect(201);
+    const listed = await request(app).get(`/api/user/messages/scheduled?agentId=${agentId}`).expect(200);
+    expect(listed.body.scheduledMessages[0].runOverrides).toEqual(overrides);
+    const patched = await request(app).patch(`/api/user/messages/scheduled/${created.body.scheduledMessageId}`).send({ runOverrides: { model_provider: 'codex', model: 'gpt-5.6-terra' } }).expect(200);
+    expect(patched.body.runOverrides).toEqual({ model_provider: 'codex', model: 'gpt-5.6-terra' });
+    await pool.end();
+  });
+
+  it('rejects invalid run overrides and providers blocked by agent permissions', async () => {
+    const { app, query, pool, userId } = await createUserApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position, allowed_permissions) VALUES ($1, $2, $3, $4, $5::jsonb)', [agentId, userId, 'Alpha', 1, JSON.stringify({ codex: { sandbox_modes: ['workspace-write'] } })]);
+    for (const bad of [
+      { model_provider: 'nope', model: 'x' },
+      { model_provider: 'codex', thinking_effort: 'ludicrous' },
+      { sandbox_mode: 'rm -rf' },
+      { model_provider: 'codex', model: 'bad model; rm' },
+      { surprise: 'x' },
+      { model_provider: 'claude', model: 'claude-sonnet-5' },
+      'string',
+    ]) {
+      await request(app).post('/api/user/messages').send({ agentId, content: 'x', runOverrides: bad }).expect(400);
+    }
+    const count = await query('SELECT count(*)::int AS c FROM user_messages WHERE agent_id = $1', [agentId]);
+    expect(count.rows[0].c).toBe(0);
+    await pool.end();
+  });
+
   it('POST /api/user/messages forbids sending to agents not owned by the user', async () => {
     const { app, query, pool } = await createUserApiTestContext();
 

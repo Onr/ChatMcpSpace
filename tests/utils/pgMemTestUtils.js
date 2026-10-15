@@ -16,6 +16,16 @@ function createTestDatabase() {
   const db = newDb({ autoCreateForeignKeyIndices: true });
   loadSchema(db);
   const pg = db.adapters.createPg();
+  // pg-mem accepts our partial unique index, but not its inference predicate
+  // in INSERT ... ON CONFLICT. Keep this adaptation in the emulator only.
+  const originalQuery = pg.Pool.prototype.query;
+  pg.Pool.prototype.query = function (statement, ...args) {
+    const normalize = text => text.replace(/ON CONFLICT \(agent_id, client_message_id\) WHERE client_message_id IS NOT NULL/g,
+      'ON CONFLICT (agent_id, client_message_id)');
+    const adapted = typeof statement === 'string' ? normalize(statement)
+      : statement?.text ? { ...statement, text: normalize(statement.text) } : statement;
+    return originalQuery.call(this, adapted, ...args);
+  };
   const pool = new pg.Pool();
   const query = (text, params = []) => {
     let sql = text;
@@ -55,6 +65,7 @@ async function applyRuntimeUserColumns(query) {
 
 async function applyEmailVerificationSchema(query) {
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE');
+  await query('ALTER TABLE user_messages ADD COLUMN IF NOT EXISTS run_overrides JSONB DEFAULT NULL');
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP');
 
   await query(`
@@ -158,6 +169,7 @@ async function applyArchiveSchema(query) {
       encrypted BOOLEAN NOT NULL DEFAULT FALSE,
       scheduled_for TIMESTAMP NOT NULL,
       delivered_at TIMESTAMP DEFAULT NULL,
+      run_overrides JSONB DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);

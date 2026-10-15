@@ -251,14 +251,22 @@ describe('generateMainCLIScript - agent runner fixes', () => {
     });
 
     it('resets failure counter on success', () => {
-      // After successful run_agent, counter resets
-      const lines = cliScript.split('\n');
-      const runAgentLine = lines.findIndex(l => l.includes('if run_agent "$prompt"'));
-      expect(runAgentLine).toBeGreaterThan(-1);
-
-      // Next line after should reset counter
-      const resetLine = lines.findIndex((l, i) => i > runAgentLine && l.includes('CONSECUTIVE_FAILURES=0'));
-      expect(resetLine).toBeGreaterThan(runAgentLine);
+      const success = cliScript.match(/if (run_agent "\$prompt"|\[ "\$agent_rc" -eq 0 \]); then\n([\s\S]*?)\n\s*else/);
+      expect(success).not.toBeNull();
+      const { spawnSync } = require('child_process');
+      for (const [code, expected] of [[0, '0:1'], [3, '2:0']]) {
+        const result = spawnSync('bash', ['-c', `CONSECUTIVE_FAILURES=2
+run_success=0
+agent_rc=${code}
+prompt=fixture
+run_agent() { return "$agent_rc"; }
+if ${success[1]}; then
+${success[2]}
+fi
+printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', timeout: 5000 });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(expected);
+      }
     });
 
     it('sends warning message after repeated failures', () => {
@@ -501,6 +509,13 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       expect(cliScript).toContain('Project path: ');
       expect(cliScript).toContain('sameMachineAsParent');
     });
+
+    it('supports child group selection with same-group inheritance as the default', () => {
+      expect(cliScript).toContain('--group <id-or-name>');
+      expect(cliScript).toContain('--no-inherit-groups');
+      expect(cliScript).toContain('payload["groups"] = groups');
+      expect(cliScript).toContain("None inherits the parent's groups (recommended)");
+    });
   });
 
   describe('Bug 10: Spawned agents must be stoppable from generated CLI', () => {
@@ -509,7 +524,50 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       expect(cliScript).toContain('--stop <name>');
       expect(cliScript).toContain('stop_agent_control()');
       expect(cliScript).toContain('⏹️  Stop Running Agent');
-      expect(cliScript).toContain('--create, --continue, --stop, --delete, --list, or --news-feed');
+      expect(cliScript).toContain('--create, --continue, --start, --restart, --shutdown, --status, --stop, --delete, --list, or --news-feed');
+    });
+  });
+
+  describe('Local agent start/restart control and global launcher', () => {
+    it('headless --continue preserves an existing agent config unless permission flags are passed', () => {
+      expect(cliScript).toContain('run_agent_headless "$ARG_CONTINUE" preserve');
+      expect(cliScript).toContain('if [ "$run_mode" = "preserve" ] && [ "$ARG_PERMS_EXPLICIT" != "true" ]');
+      expect(cliScript).toMatch(/--allow-all\|--safe-defaults\|--setup-profile\|--providers/);
+    });
+
+    it('provides background start/restart/shutdown/status controls backed by one tmux session per agent', () => {
+      for (const flag of ['--start <name>', '--restart <name>', '--shutdown <name>', '--status']) {
+        expect(cliScript).toContain(flag);
+      }
+      expect(cliScript).toContain("printf '%s-local-agent'");
+      expect(cliScript).toContain('tmux has-session -t "=$1"');
+      // Supervisor loop restarts the runner after a crash, stops after a clean exit.
+      expect(cliScript).toContain('[ "$code" -eq 0 ] && break');
+    });
+
+    it('detects orphaned runners/listeners and clears their lock on restart', () => {
+      expect(cliScript).toContain('agent_runner_pids() {');
+      expect(cliScript).toContain('pgrep -f "$agent_dir/agent_state/shared-runner.js"');
+      // tmux servers can carry the runner command in argv; they must never be killed.
+      expect(cliScript).toContain('in tmux*) continue ;; esac');
+      expect(cliScript).toContain('rm -f "$agent_dir/agent_state/shared-agent.json.lock"');
+    });
+
+    it('runner removes a stale shared listener lock but refuses to double-start a live one', () => {
+      expect(cliScript).toContain('sharing_lock="$STATE_DIR/shared-agent.json.lock"');
+      expect(cliScript).toContain('ps -p "$lock_pid" -o args= 2>/dev/null | grep -q "shared-runner.js"');
+      expect(cliScript).toContain('Removed stale shared listener lock');
+    });
+
+    it('never starts a second foreground runner while the background session is alive', () => {
+      const fn = cliScript.slice(cliScript.indexOf('start_agent_foreground() {'));
+      expect(fn.indexOf('agent_is_running "$agent_name"')).toBeLessThan(fn.indexOf('exec "$agent_dir/agent-runner.sh"'));
+    });
+
+    it('installs a global launcher wrapper that execs the CLI (no copied credentials)', () => {
+      expect(cliScript).toContain('--install-command [cmd]');
+      expect(cliScript).toContain('exec bash "$self_path" "\\$@"');
+      expect(cliScript).toContain('# chatspace-launcher PATH');
     });
 
     it('adds message_helper stop command for agent-to-agent control', () => {
@@ -597,21 +655,39 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       expect(cliScript).toContain('/agent/models?provider=');
     });
 
-    it('offers GPT-5.6 models in Codex selection flows and defaults new runners to GPT-5.6 Terra', () => {
+    it('offers current GPT-6 and GPT-5.6 models while keeping the accessible Terra default', () => {
       expect(cliScript).toContain('default (Codex default - gpt-5.6-terra)');
+      expect(cliScript).toContain('gpt-6-astra (GPT-6 Astra - requires eligible access)');
+      expect(cliScript).toContain('gpt-6-sol (GPT-6 Sol - latest coding model)');
+      expect(cliScript).toContain('gpt-6.1-sol (GPT-6.1 Sol - latest balanced model)');
+      expect(cliScript).toContain('gpt-6-luna (GPT-6 Luna - fastest)');
       expect(cliScript).toContain('gpt-5.6-terra (GPT-5.6 Terra - verified default)');
       expect(cliScript).toContain('gpt-5.6-luna (GPT-5.6 Luna - fastest)');
       expect(cliScript).toContain('gpt-5.6-sol (GPT-5.6 Sol - requires eligible plan)');
       expect(cliScript).toContain('gpt-5.5 (GPT-5.5 - latest)');
+      expect(cliScript).toContain('gpt-5.5-pro (GPT-5.5 Pro - highest reasoning)');
       expect(cliScript).toContain('gpt-5.4 (GPT-5.4 - latest default)');
       expect(cliScript).toContain('gpt-5.4-pro (GPT-5.4 Pro - highest reasoning)');
+      expect(cliScript).toContain('gpt-5.4-mini (GPT-5.4 Mini - efficient)');
+      expect(cliScript).toContain('gpt-5.4-nano (GPT-5.4 Nano - lowest cost)');
       expect(cliScript).toContain('default|codex)');
       expect(cliScript).toContain('[ "$MODEL" != "default" ]');
       expect(cliScript).not.toContain('default (Codex default - gpt-5.4)');
     });
 
+    it('forwards supported reasoning effort to Codex-backed GPT-6 Astra runs', () => {
+      expect(cliScript).toContain("model_reasoning_effort='$THINKING_EFFORT'");
+      expect(cliScript).toContain('low|medium|high|xhigh|max)');
+      expect(cliScript).toContain('Ignoring unsupported Codex thinking_effort');
+    });
+
     it('offers current Claude and Copilot fallback model choices', () => {
-      expect(cliScript).toContain('claude-fable-5 (Claude Fable 5 - latest)');
+      expect(cliScript).toContain('claude-fable-5-1 (Claude Fable 5.1 - most capable)');
+      expect(cliScript).toContain('claude-mythos-5-1 (Claude Mythos 5.1 - invite only)');
+      expect(cliScript).toContain('claude-opus-5-5 (Claude Opus 5.5 - latest coding model)');
+      expect(cliScript).toContain('claude-fable-5 (Claude Fable 5)');
+      expect(cliScript).toContain('claude-mythos-5 (Claude Mythos 5 - invite only)');
+      expect(cliScript).toContain('claude-sonnet-5-5 (Claude Sonnet 5.5 - latest balanced)');
       expect(cliScript).toContain('claude-sonnet-5 (Claude Sonnet 5)');
       expect(cliScript).toContain('claude-opus-4-8 (Claude Opus 4.8)');
       expect(cliScript).toContain('claude-opus-4-7 (Claude Opus 4.7 - latest)');
@@ -620,17 +696,21 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       expect(cliScript).toContain('claude-opus-4.7 (Claude Opus 4.7)');
       expect(cliScript).toContain('gpt-5.4-mini (GPT 5.4 Mini)');
       expect(cliScript).toContain('gpt-5.3-codex (GPT 5.3 Codex)');
+      expect(cliScript).toContain('gemini-3.8-flash (Gemini 3.8 Flash)');
     });
 
     it('offers Antigravity provider/model choices and runs agy in print mode', () => {
       expect(cliScript).toContain('antigravity (Antigravity CLI - direct, uses agy -p)');
       expect(cliScript).toContain('Select Antigravity model:');
-      expect(cliScript).toContain('claude-opus-4.8 (Claude Opus 4.8)');
-      expect(cliScript).toContain('gemini-3.1-pro (Gemini 3.1 Pro)');
+      expect(cliScript).toContain('claude-opus-4-6-thinking (Claude Opus 4.6 Thinking)');
+      expect(cliScript).toContain('gemini-3.8-flash (Gemini 3.8 Flash)');
       expect(cliScript).toContain('prompt_text=$(cat "$prompt_file")');
       expect(cliScript).toContain('agy models');
-      expect(cliScript).toContain('sync_models_to_backend "antigravity" "$antigravity_models"');
-      expect(cliScript).toContain('agy_args+=("--model" "$MODEL")');
+      expect(cliScript).toContain("command('agy', ['models'])");
+      expect(cliScript).toContain("local agy_tab=$'\\t'");
+      expect(cliScript).toContain('local agy_model="${MODEL%%"$agy_tab"*}"');
+      expect(cliScript).toContain('agy_args+=("--model" "$agy_model")');
+      expect(cliScript).toContain('agy_args+=("--effort" "$THINKING_EFFORT")');
       expect(cliScript).toContain('agy_args+=("-p" "$prompt_text")');
       expect(cliScript).toContain('cmd_preview+=" <prompt_text>"');
       expect(cliScript).toContain('run_cli_in_background "" "$stdout_capture" agy "${agy_args[@]}"');
@@ -863,6 +943,39 @@ describe('generateMainCLIScript - agent runner fixes', () => {
     });
   });
 
+  describe('No-connection give-up (7-day)', () => {
+    it('defines NO_CONNECTION_GIVE_UP_SECONDS as 604800 (7 days)', () => {
+      expect(cliScript).toContain('NO_CONNECTION_GIVE_UP_SECONDS=604800');
+    });
+
+    it('includes check_no_connection_giveup function', () => {
+      expect(cliScript).toContain('check_no_connection_giveup()');
+    });
+
+    it('stops attempting to reach the backend after 7 days, unlike the 48h slow-retry', () => {
+      expect(cliScript).toContain('giving up automated retries');
+      expect(cliScript).not.toContain('Agent stopped via no-connection failsafe');
+    });
+
+    it('calls check_no_connection_giveup before check_for_messages, skipping the network call', () => {
+      const lines = cliScript.split('\n');
+      const giveupCallLine = lines.findIndex(l => l.includes('check_no_connection_giveup'));
+      const checkResultLine = lines.findIndex(
+        (l, i) => i > giveupCallLine && l.includes('check_result=$(check_for_messages)')
+      );
+      expect(giveupCallLine).toBeGreaterThan(-1);
+      expect(checkResultLine).toBeGreaterThan(giveupCallLine);
+    });
+
+    it('re-baselines LAST_SUCCESSFUL_CONNECTION on startup so a restart resumes retrying', () => {
+      // Same startup mark used by the 48h failsafe also un-sticks the 7-day give-up state.
+      const lines = cliScript.split('\n');
+      const runningFlagLine = lines.findIndex(l => l.includes('echo $$ > "$RUNNING_FLAG"'));
+      const markLine = lines.findIndex((l, i) => i > runningFlagLine && l.includes('mark_successful_backend_connection'));
+      expect(markLine).toBeGreaterThan(runningFlagLine);
+    });
+  });
+
   describe('Network timeout safety', () => {
     // Extract auto_sync function body from each script variant
     function extractAutoSyncBody(script) {
@@ -880,13 +993,11 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       ['encrypted', () => encryptedCliScript],
     ]) {
       describe(`${label} script`, () => {
-        it('all curl calls in auto_sync have --connect-timeout', () => {
-          const body = extractAutoSyncBody(getScript());
-          const curlLines = body.split('\n').filter(l => l.includes('curl '));
-          expect(curlLines.length).toBeGreaterThan(0);
-          for (const line of curlLines) {
-            expect(line).toContain('--connect-timeout');
-          }
+        it('metadata discovery bounds network requests and subprocess execution', () => {
+          const script = getScript();
+          expect(script).toContain('signal: AbortSignal.timeout(15000)');
+          expect(script).toContain('timeout: 15000, maxBuffer:');
+          expect(script).toContain('Model metadata timed out');
         });
 
         it('all curl calls in auto_sync have --max-time', () => {
@@ -1065,4 +1176,35 @@ describe('generateMainCLIScript - agent creation defaults', () => {
     expect(cliScript).toContain('default_agent_name="${computer_name}-${project_name}"');
     expect(cliScript).toContain('default_agent_name="$project_name"');
   });
+});
+
+test.each(['unavailable', 'invalid'])('native startup retries %s sharing availability without selecting the private-only loop', (kind) => {
+  const { generateAgentRunner } = require('../../src/utils/apiGuideGenerator');
+  const source = generateAgentRunner();
+  const start = source.indexOf('if [ "${CHATSPACE_TRUSTED_SHARING:-1}"');
+  const end = source.indexOf('\n    if [ "$(printf', start);
+  expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+  const stub = kind === 'unavailable' ? 'curl() { return 22; }' : "curl() { printf '<html>temporarily unavailable</html>'; }";
+  const result = require('child_process').spawnSync('bash', ['-c', `${stub}\nlog() { printf '%s\\n' "$*" >&2; }\n${source.slice(start, end)}\nfi\nprintf 'PRIVATE_LOOP'`], { encoding: 'utf8' });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('supervisor will retry');
+  expect(result.stdout).not.toContain('PRIVATE_LOOP');
+});
+
+test('headless session commands use an enabled persistent service instead of starting a second listener', () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'persistent-agent-cli-'));
+  try {
+    const agentDir = path.join(dir, 'fixture'); fs.mkdirSync(agentDir);
+    fs.writeFileSync(path.join(agentDir, '.env'), ''); fs.writeFileSync(path.join(agentDir, 'agent-runner.sh'), '#!/bin/bash\n', { mode: 0o700 });
+    const source = generateMainCLIScript('fixture', 'https://example.invalid');
+    const start = source.indexOf('start_agent_session() {'), end = source.indexOf('show_agent_session_status() {', start);
+    const harness = `CHATSPACE_DIR="$1"\nget_agent_folder() { printf fixture; }\nagent_session_name() { printf fixture-local-agent; }\nsystemctl() { if [ "$2" = "is-enabled" ]; then return 0; fi; printf 'SERVICE:%s:%s\\n' "$2" "$3"; }\ntmux() { printf 'UNEXPECTED_TMUX'; return 1; }\n${source.slice(start, end)}\nstart_agent_session Fixture start\nstart_agent_session Fixture restart\nshutdown_agent_session Fixture`;
+    const result = require('child_process').spawnSync('bash', ['-c', harness, 'fixture', dir], { encoding: 'utf8' });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('SERVICE:start:agent-fixture.service');
+    expect(result.stdout).toContain('SERVICE:restart:agent-fixture.service');
+    expect(result.stdout).toContain('SERVICE:stop:agent-fixture.service');
+    expect(result.stdout).not.toContain('UNEXPECTED_TMUX');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

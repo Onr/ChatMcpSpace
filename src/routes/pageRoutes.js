@@ -62,6 +62,26 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+const SHARING_INVITATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function getPendingSharingInvitationId(req) {
+  const value = req.session?.pendingSharingInvitationId;
+  return typeof value === 'string' && SHARING_INVITATION_ID_RE.test(value) ? value : null;
+}
+function dashboardInvitationUrl(req) {
+  const invitationId = getPendingSharingInvitationId(req);
+  if (!invitationId) return '/dashboard';
+  delete req.session.pendingSharingInvitationId;
+  return `/dashboard?invitationId=${encodeURIComponent(invitationId)}`;
+}
+function postLoginRedirectUrl(req) {
+  const pending = req.session?.mcpOAuthReturnTo;
+  const expiresAt = req.session?.mcpOAuthReturnToExpiresAt;
+  delete req.session?.mcpOAuthReturnTo;
+  delete req.session?.mcpOAuthReturnToExpiresAt;
+  if (typeof pending === 'string' && pending.startsWith('/oauth/authorize?') && !pending.startsWith('//') && Number(expiresAt) > Date.now()) return pending;
+  return dashboardInvitationUrl(req);
+}
+
 const DEFAULT_LANDING_PREVIEW_CONFIG = {
   renderMode: 'iframe',
   iframeUrl: '/dashboard-preview?embedded=1',
@@ -925,6 +945,7 @@ router.use(csrfProtection);
  * Returns a fresh CSRF token (auto-refreshed by csrfProtection middleware)
  */
 router.get('/csrf-token', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({ csrfToken: req.session.csrfToken });
 });
 
@@ -934,7 +955,7 @@ router.get('/csrf-token', (req, res) => {
  */
 router.get('/', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.redirect('/dashboard');
+    return res.redirect(postLoginRedirectUrl(req));
   }
   return renderLandingPage(req, res);
 });
@@ -1034,7 +1055,9 @@ router.get('/dashboard-preview', (req, res) => {
  * Initiate Google OAuth authentication
  */
 router.get('/auth/google', passport.authenticate('google', {
-  scope: ['profile', 'email']
+  scope: ['profile', 'email'],
+  // Always show Google's account chooser so users can switch accounts
+  prompt: 'select_account'
 }));
 
 /**
@@ -1053,7 +1076,7 @@ router.get('/auth/google/callback',
       await createSession(req, req.user);
       req.session.emailVerified = true;
       req.session.isGoogleAuth = true;  // Track OAuth login for encryption prompt
-      res.redirect('/dashboard');
+      res.redirect(postLoginRedirectUrl(req));
     } catch (error) {
       console.error('Google OAuth callback error:', error);
       res.redirect('/');
@@ -1091,15 +1114,27 @@ router.get('/architecture', (req, res) => {
  * GET /register
  * Render registration page
  */
+router.get('/join/invitation/:invitationId', (req, res) => {
+  const invitationId = req.params.invitationId;
+  if (!SHARING_INVITATION_ID_RE.test(invitationId)) return res.redirect('/register');
+  if (req.session) req.session.pendingSharingInvitationId = invitationId;
+  if (req.session?.userId) return res.redirect(dashboardInvitationUrl(req));
+  return res.redirect('/register');
+});
+
 router.get('/register', (req, res) => {
+  const invitationId = typeof req.query.invitationId === 'string' && SHARING_INVITATION_ID_RE.test(req.query.invitationId)
+    ? req.query.invitationId : getPendingSharingInvitationId(req);
+  if (invitationId && req.session) req.session.pendingSharingInvitationId = invitationId;
   // If already logged in, redirect to dashboard
   if (req.session && req.session.userId) {
-    return res.redirect('/dashboard');
+    return res.redirect(dashboardInvitationUrl(req));
   }
 
   res.render('register', {
     error: null,
-    email: ''
+    email: '',
+    invitationId
   });
 });
 
@@ -1110,12 +1145,15 @@ router.get('/register', (req, res) => {
 router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) => {
   try {
     const { email, password, confirmPassword } = req.body;
+    const submittedInvitationId = typeof req.body.invitationId === 'string' && SHARING_INVITATION_ID_RE.test(req.body.invitationId)
+      ? req.body.invitationId : null;
+    if (submittedInvitationId && req.session) req.session.pendingSharingInvitationId = submittedInvitationId;
 
     // Validate input
     if (!email || !password) {
       return res.render('register', {
         error: 'Email and password are required',
-        email: email || ''
+        email: email || '', invitationId: getPendingSharingInvitationId(req)
       });
     }
 
@@ -1123,7 +1161,7 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
     if (!isValidEmail(email)) {
       return res.render('register', {
         error: 'Please enter a valid email address',
-        email: email
+        email: email, invitationId: getPendingSharingInvitationId(req)
       });
     }
 
@@ -1132,7 +1170,7 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
     if (!passwordValidation.valid) {
       return res.render('register', {
         error: passwordValidation.message,
-        email: email
+        email: email, invitationId: getPendingSharingInvitationId(req)
       });
     }
 
@@ -1151,7 +1189,7 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
     // user in straight away.
     if (isLocalAuthMode()) {
       await createSession(req, user);
-      return res.redirect('/dashboard');
+      return res.redirect(dashboardInvitationUrl(req));
     }
 
     // Send verification email
@@ -1182,7 +1220,7 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
 
     res.render('register', {
       error: errorMessage,
-      email: req.body.email || ''
+      email: req.body.email || '', invitationId: getPendingSharingInvitationId(req)
     });
   }
 });
@@ -1207,7 +1245,8 @@ router.get('/verify-email-sent', (req, res) => {
 
   res.render('verify-email-sent', {
     email: email || req.session?.email || null,
-    sendError
+    sendError,
+    invitationId: getPendingSharingInvitationId(req)
   });
 });
 
@@ -1333,7 +1372,7 @@ router.post('/resend-verification', authRateLimiter, validateCsrfToken, async (r
  * POST /verify-code
  * Verify email with 6-digit code
  */
-router.post('/verify-code', authRateLimiter, async (req, res) => {
+router.post('/verify-code', authRateLimiter, validateCsrfToken, async (req, res) => {
   try {
     let { email, code, _csrf } = req.body;
 
@@ -1382,7 +1421,8 @@ router.post('/verify-code', authRateLimiter, async (req, res) => {
     res.json({
       success: true,
       message: result.alreadyVerified ? 'Email was already verified' : 'Email verified successfully',
-      alreadyVerified: result.alreadyVerified || false
+      alreadyVerified: result.alreadyVerified || false,
+      redirectTo: dashboardInvitationUrl(req)
     });
 
   } catch (error) {
@@ -1401,7 +1441,7 @@ router.post('/verify-code', authRateLimiter, async (req, res) => {
 router.get('/login', (req, res) => {
   // If already logged in, redirect to dashboard
   if (req.session && req.session.userId) {
-    return res.redirect('/dashboard');
+    return res.redirect(postLoginRedirectUrl(req));
   }
 
   // Redirect to landing page which has the login form
@@ -1414,7 +1454,7 @@ router.get('/login', (req, res) => {
  */
 router.get('/login/2fa', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.redirect('/dashboard');
+    return res.redirect(postLoginRedirectUrl(req));
   }
 
   const pendingMfa = getValidPendingMfa(req);
@@ -1472,13 +1512,21 @@ router.post('/login', authRateLimiter, validateCsrfToken, async (req, res) => {
 
     if (await isUserMfaEnabled(user.userId)) {
       await beginMfaChallenge(req, user, { isGoogleAuth: false });
+      if (req.get('Accept')?.includes('application/json')) {
+        return res.json({ redirectTo: '/login/2fa' });
+      }
       return res.redirect('/login/2fa');
     }
 
     await createSession(req, user);
 
-    // Redirect to dashboard
-    res.redirect('/dashboard');
+    // Fetch cannot read a manual redirect's Location header in a browser.
+    // Return the server-selected continuation explicitly to the sign-in form.
+    const redirectTo = postLoginRedirectUrl(req);
+    if (req.get('Accept')?.includes('application/json')) {
+      return res.json({ redirectTo });
+    }
+    res.redirect(redirectTo);
 
   } catch (error) {
     console.error('Login error:', error);
@@ -1508,6 +1556,72 @@ router.get('/logout', async (req, res) => {
  * Render dashboard page with agent list
  * Requires authentication
  */
+const UUID_ROUTE_PARAM = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function legacyShareConversationId(queryParams) {
+  for (const name of ['conversationId', 'roomId', 'id']) {
+    const candidate = queryParams?.[name];
+    if (typeof candidate === 'string' && UUID_ROUTE_PARAM.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function dashboardShareRedirect(req, res) {
+  const threadService = require('../shared/chatThreadService');
+  const conversationId = legacyShareConversationId(req.query);
+  if (conversationId) {
+    try {
+      await threadService.getChatContext(req.user.userId, conversationId);
+      return res.redirect(302, '/dashboard?conversationId=' + encodeURIComponent(conversationId));
+    } catch (_) {
+      // A stale or inaccessible legacy room must not prevent agent-based
+      // resolution when the old link also carries an agentId.
+    }
+  }
+
+  const agentId = req.query?.agentId;
+  if (typeof agentId === 'string' && UUID_ROUTE_PARAM.test(agentId)) {
+    const owned = (await query('SELECT agent_id FROM agents WHERE agent_id=$1 AND user_id=$2', [agentId, req.user.userId])).rows[0];
+    if (owned) {
+      try {
+        const thread = await threadService.resolveAgentThread(req.user.userId, agentId);
+        return res.redirect(302, '/dashboard?conversationId=' + encodeURIComponent(thread.conversationId));
+      } catch (_) {
+        // Fall through to the dashboard if a stale agent link cannot resolve.
+      }
+    }
+    try {
+      const threads = await threadService.listChatThreads(req.user.userId);
+      const accessible = threads.find(thread => thread.agentId === agentId &&
+        (thread.role === 'owner' || thread.membershipStatus === 'active'));
+      if (accessible) return res.redirect(302, '/dashboard?conversationId=' + encodeURIComponent(accessible.conversationId));
+    } catch (_) {
+      // A valid agent may have no existing conversation for this account.
+    }
+  }
+
+  return res.redirect(302, '/dashboard');
+}
+
+router.get('/shared', protectRoute, async (req, res) => {
+  if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') return dashboardShareRedirect(req, res);
+  if (process.env.FEATURE_SHARED_CONVERSATIONS !== 'true') return res.status(404).send('Not found');
+  res.render('shared', { title: 'Shared conversations', pageBodyClass: 'shared-page', csrfToken: res.locals.csrfToken });
+});
+
+router.get('/guest-sharing', protectRoute, async (req, res) => {
+  if (process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true') return dashboardShareRedirect(req, res);
+  if (process.env.FEATURE_SHARED_CONVERSATIONS !== 'true' || process.env.FEATURE_GUEST_SHARING !== 'true') {
+    return res.status(404).send('Not found');
+  }
+  res.render('guest-sharing', {
+    title: 'Guest sharing',
+    pageBodyClass: 'guest-sharing-page',
+    csrfToken: res.locals.csrfToken,
+    userId: req.user.userId
+  });
+});
+
 router.get('/dashboard', protectRoute, async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -1582,6 +1696,7 @@ router.get('/dashboard', protectRoute, async (req, res) => {
         position: row.position,
         isWorking,
         lastWorkingHeartbeatTime: lastWorkingHeartbeatTime ? lastWorkingHeartbeatTime.toISOString() : null,
+        lastSeenAt: row.last_seen_at ? row.last_seen_at.toISOString() : null,
         lastMessageId: lastMessageId || null,
         lastMessageTime: lastMessageTime ? lastMessageTime.toISOString() : null,
         lastActivityTime: lastActivityTime ? lastActivityTime.toISOString() : null,
@@ -1704,7 +1819,7 @@ router.post('/login/2fa', authRateLimiter, validateCsrfToken, async (req, res) =
       email: pendingMfa.email
     });
 
-    return res.redirect('/dashboard');
+    return res.redirect(postLoginRedirectUrl(req));
   } catch (error) {
     console.error('2FA login error:', error);
     const pendingMfa = getValidPendingMfa(req);
@@ -1749,6 +1864,17 @@ router.get('/settings/external-agents/approve', protectRoute, async (req, res) =
     <h1>Approve External Agent</h1>
     <p><strong>${escapeHtml(agentName)}</strong> is asking to connect to your Chat Space as a scoped external agent.</p>
     <p class="muted">Provider: ${escapeHtml(provider)}. This creates a 10-minute, single-use pairing code. Do not share your full API key.</p>
+    <p>Your agent keeps running on its own machine. You can message it here and receive its replies in the same chat.</p>
+    <label for="collaborationMode">Who may it collaborate with?</label>
+    <select id="collaborationMode">
+      <option value="disabled">Only me</option>
+      <option value="groups" selected>Selected groups and agents open to collaboration</option>
+      <option value="listen_all">All collaboration-enabled agents in my account</option>
+    </select>
+    <p><label for="collaborationGroups">Group names, separated by commas</label><br>
+      <input id="collaborationGroups" type="text" placeholder="For example: My project"></p>
+    <p class="muted">To receive assignments from your central agent, include its group or choose all collaboration-enabled agents. This allows messages, not remote machine administration. Creating new agents is disabled for this connection.</p>
+    <p><a href="/api/agent/external-bridge-guide">Connector setup guide</a> · <a href="/api/agent/external-bridge.js">Download connector</a></p>
     <button id="approveButton" type="button">Approve and create code</button>
     <p id="result" aria-live="polite"></p>
   </main>
@@ -1763,14 +1889,14 @@ router.get('/settings/external-agents/approve', protectRoute, async (req, res) =
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-csrf-token': ${JSON.stringify(res.locals.csrfToken || '')}
+            'x-csrf-token': ${safeJsonForScript(res.locals.csrfToken || '')}
           },
           body: JSON.stringify({
-            provider: ${JSON.stringify(provider)},
-            agentName: ${JSON.stringify(agentName)},
-            providerBotRef: ${JSON.stringify(providerBotRef)},
-            interAgentMode: 'groups',
-            groupNames: [],
+            provider: ${safeJsonForScript(provider)},
+            agentName: ${safeJsonForScript(agentName)},
+            providerBotRef: ${safeJsonForScript(providerBotRef)},
+            interAgentMode: document.getElementById('collaborationMode').value,
+            groupNames: document.getElementById('collaborationGroups').value.split(',').map(value => value.trim()).filter(Boolean),
             canSpawn: false
           })
         });

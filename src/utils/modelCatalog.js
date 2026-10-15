@@ -4,12 +4,19 @@ const path = require('path');
 const STATIC_PROVIDER_MODELS = {
   codex: [
     { value: 'default', label: 'Default' },
+    { value: 'gpt-6-astra', label: 'GPT-6 Astra' },
+    { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
+    { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+    { value: 'gpt-6-luna', label: 'GPT-6 Luna' },
     { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
     { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
     { value: 'gpt-5.5', label: 'GPT-5.5' },
+    { value: 'gpt-5.5-pro', label: 'GPT-5.5 Pro' },
     { value: 'gpt-5.4', label: 'GPT-5.4' },
     { value: 'gpt-5.4-pro', label: 'GPT-5.4 Pro' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano' },
     { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
     { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
     { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
@@ -19,6 +26,10 @@ const STATIC_PROVIDER_MODELS = {
   ],
   openai: [
     { value: 'default', label: 'Default' },
+    { value: 'gpt-6-astra', label: 'GPT-6 Astra' },
+    { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
+    { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+    { value: 'gpt-6-luna', label: 'GPT-6 Luna' },
     { value: 'o3', label: 'o3' },
     { value: 'o3-mini', label: 'o3-mini' },
     { value: 'o1', label: 'o1' },
@@ -27,21 +38,35 @@ const STATIC_PROVIDER_MODELS = {
   ],
   claude: [
     { value: 'default', label: 'Default' },
+    { value: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
+    { value: 'claude-mythos-5-1', label: 'Claude Mythos 5.1 (invite only)' },
+    { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
     { value: 'claude-opus-5', label: 'Claude Opus 5' },
     { value: 'claude-fable-5', label: 'Claude Fable 5' },
+    { value: 'claude-mythos-5', label: 'Claude Mythos 5 (invite only)' },
+    { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
     { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+    { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
     { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
     { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
     { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
     { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5' },
     { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
     { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+    { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 (2025-09-29)' },
     { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (2025-10-01)' },
     { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' },
     { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' }
   ],
   gemini: [
     { value: 'default', label: 'Default' },
+    { value: 'gemini-4-argon', label: 'Gemini 4 Argon' },
+    { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
     { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
     { value: 'gemini-3.1-flash', label: 'Gemini 3.1 Flash' },
     { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
@@ -69,6 +94,8 @@ const STATIC_PROVIDER_MODELS = {
     { value: 'gpt-5.2', label: 'GPT-5.2' },
     { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
     { value: 'gpt-5.1', label: 'GPT-5.1' },
+    { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
     { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
     { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
     { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
@@ -87,18 +114,16 @@ const STATIC_PROVIDER_MODELS = {
     { value: 'openai/o3', label: 'OpenAI o3' }
   ],
   antigravity: [
+    // Only IDs `agy --model` accepted on 2026-10-15; account rosters differ,
+    // so the CLI's `agy models` sync adds anything else a user can access.
     { value: 'default', label: 'Default' },
-    { value: 'claude-opus-4.8', label: 'Claude Opus 4.8' },
-    { value: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
-    { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
-    { value: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
-    { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
-    { value: 'gpt-5.4', label: 'GPT-5.4' },
-    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-    { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-    { value: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
-    { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }
+    { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+    { value: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+    { value: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Thinking)' },
+    { value: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 (Thinking)' },
+    { value: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' }
   ],
   kilo: [
     { value: 'default', label: 'Default' },
@@ -107,16 +132,35 @@ const STATIC_PROVIDER_MODELS = {
     { value: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
     { value: 'google/gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
     { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { value: 'x-ai/grok-4', label: 'Grok 4' },
+    { value: 'x-ai/grok-4-fast', label: 'Grok 4 Fast' },
+    { value: 'x-ai/grok-code-fast-1', label: 'Grok Code Fast 1' },
+    { value: 'x-ai/grok-3', label: 'Grok 3' },
+    { value: 'x-ai/grok-3-mini', label: 'Grok 3 Mini' },
     { value: 'openai/gpt-5', label: 'GPT-5' },
     { value: 'openai/o3', label: 'o3' }
   ],
   openrouter: [
     { value: 'default', label: 'Default' },
+    { value: 'anthropic/claude-opus-5.5', label: 'Claude Opus 5.5' },
+    { value: 'anthropic/claude-sonnet-5.5', label: 'Claude Sonnet 5.5' },
+    { value: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5' },
+    { value: 'anthropic/claude-fable-5.1', label: 'Claude Fable 5.1' },
+    { value: 'google/gemini-4-argon', label: 'Gemini 4 Argon' },
+    { value: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { value: 'openai/gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+    { value: 'openai/gpt-6-astra', label: 'GPT-6 Astra' },
+    { value: 'x-ai/grok-4.7', label: 'Grok 4.7' },
     { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
     { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
     { value: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
     { value: 'google/gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
     { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { value: 'x-ai/grok-4', label: 'Grok 4' },
+    { value: 'x-ai/grok-4-fast', label: 'Grok 4 Fast' },
+    { value: 'x-ai/grok-code-fast-1', label: 'Grok Code Fast 1' },
+    { value: 'x-ai/grok-3', label: 'Grok 3' },
+    { value: 'x-ai/grok-3-mini', label: 'Grok 3 Mini' },
     { value: 'openai/o3', label: 'o3' },
     { value: 'openai/o3-mini', label: 'o3-mini' },
     { value: 'openai/gpt-4o', label: 'GPT-4o' }
@@ -144,17 +188,28 @@ function sanitizeModelValue(raw) {
   return value;
 }
 
+// Some CLIs (e.g. `agy models`) print "<id>\t<display label>" per line, and
+// older syncs cached that whole line as both value and label.
+function splitTabbedModel(raw) {
+  const [id, ...labelParts] = String(raw).split('\t');
+  return { id, tabLabel: labelParts.join(' ').trim() };
+}
+
 function normalizeModelOption(input) {
   if (typeof input === 'string') {
-    const value = sanitizeModelValue(input);
+    const { id, tabLabel } = splitTabbedModel(input);
+    const value = sanitizeModelValue(id);
     if (!value) return null;
-    return { value, label: value };
+    return { value, label: tabLabel || value };
   }
   if (!input || typeof input !== 'object') return null;
-  const value = sanitizeModelValue(input.value || input.id || input.model || '');
+  const rawValue = input.value || input.id || input.model || '';
+  const { id, tabLabel } = splitTabbedModel(rawValue);
+  const value = sanitizeModelValue(id);
   if (!value) return null;
-  const rawLabel = typeof input.label === 'string' ? input.label.trim() : '';
-  return { value, label: rawLabel || value };
+  let rawLabel = typeof input.label === 'string' ? input.label.trim() : '';
+  if (rawLabel.includes('\t')) rawLabel = splitTabbedModel(rawLabel).tabLabel;
+  return { value, label: rawLabel || tabLabel || value, ...(input.unconfirmed === true ? { unconfirmed: true } : {}) };
 }
 
 function dedupeAndNormalizeOptions(options = []) {
@@ -200,16 +255,24 @@ function writeUserModelCache(userId, cache) {
 
 function getProviderModelCatalog(userId) {
   const staticCatalog = deepClone(STATIC_PROVIDER_MODELS);
-  if (!userId) {
-    return staticCatalog;
-  }
-
-  const cache = readUserModelCache(userId);
+  let discovered = {};
+  try { discovered = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, '_discovered.json'), 'utf8')).providers || {}; } catch (_) { /* Use the last built-in catalog offline. */ }
+  const cache = userId ? readUserModelCache(userId) : {};
   const merged = {};
   for (const provider of Object.keys(staticCatalog)) {
     const staticModels = staticCatalog[provider] || [];
-    const cachedModels = Array.isArray(cache[provider]?.models) ? cache[provider].models : [];
-    merged[provider] = dedupeAndNormalizeOptions([...staticModels, ...cachedModels]);
+    const staticIds = new Set(staticModels.map(option => option.value));
+    const cachedModels = (Array.isArray(cache[provider]?.models) ? cache[provider].models : []).map(option => {
+      const normalized = normalizeModelOption(option);
+      if (normalized && ['public-catalog', 'cli-bundled'].includes(cache[provider]?.source) && !staticIds.has(normalized.value)) {
+        return { ...normalized, label: `${normalized.label} · New, untested`, unconfirmed: true };
+      }
+      return option;
+    });
+    const known = new Set([...staticModels, ...cachedModels].map(option => normalizeModelOption(option)?.value));
+    const candidates = (discovered[provider] || []).filter(option => !known.has(option.value))
+      .map(option => ({ ...option, label: `${option.label} · New, untested`, unconfirmed: true }));
+    merged[provider] = dedupeAndNormalizeOptions([...staticModels, ...cachedModels, ...candidates]);
   }
   return merged;
 }

@@ -93,6 +93,7 @@
       
       <form class="space-y-4" action="/register" method="POST" id="registerForm">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <% if (invitationId) { %><input type="hidden" name="invitationId" value="<%= invitationId %>"><p class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">You’re creating an account to join a shared conversation. Verify the invited email address to continue.</p><% } %>
         <div class="space-y-4">
           <div>
             <label for="email" class="block text-sm font-medium text-slate-300 mb-1">Email address</label>

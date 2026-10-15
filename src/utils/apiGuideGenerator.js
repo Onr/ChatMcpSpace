@@ -3,6 +3,7 @@
  * Generates a gum-based CLI main script for agent management
  */
 const { AGENT_CLI_VERSION } = require('./agentCliVersion');
+const modelDiscoverySource = require('fs').readFileSync(require('path').join(__dirname, '../../scripts/discover-provider-models.js'), 'utf8');
 
 function isNonProductionEnv() {
     const env = String(process.env.NODE_ENV || '').toLowerCase();
@@ -133,6 +134,12 @@ ARG_LIST=false               # --list: List existing agents
 ARG_NEWS_FEED=false          # --news-feed: Create/recreate the Local News Feed agent
 ARG_LOCAL_COS=false          # --local-cos: Install the Local Chief of Staff on THIS machine
 ARG_CONFIG=""                # --config <file>: Load settings from JSON file
+ARG_START=""                 # --start <name>: Start agent in background (tmux, auto-restart on crash)
+ARG_RESTART=""               # --restart <name>: Stop the running session (if any) and start it again
+ARG_SHUTDOWN=""              # --shutdown <name>: Stop the agent's background session
+ARG_STATUS=false             # --status: Show which agents have a running background session
+ARG_INSTALL_COMMAND=""       # --install-command [name]: Install a global launcher (default: chatspace)
+ARG_PERMS_EXPLICIT=false     # set when any provider/permission flag is passed (see below)
 
 # Agent configuration
 ARG_PASSWORD=""              # --password <pwd>: Account password for E2E encryption
@@ -161,6 +168,19 @@ ARG_INTER_AGENT="listen_all"             # --inter-agent <mode>: disabled|listen
 ARG_INTER_AGENT_GROUP=""                 # --inter-agent-group <name>: Group to join/create
 ARG_GROUP_PASSWORD=""                    # --group-password <pwd>: Encrypted group password
 
+# "--continue <name>" must not overwrite an existing agent's saved provider,
+# model and permissions with the flag defaults above. Only rebuild them when the
+# caller explicitly passed a provider/permission flag.
+for _cli_arg in "$@"; do
+    case "$_cli_arg" in
+        --allow-all|--safe-defaults|--setup-profile|--providers|--config|\\
+        --codex-*|--claude-*|--gemini-*|--no-gemini-sandbox|--antigravity-*|--kilo-auto|\\
+        --inter-agent|--inter-agent-group|--group-password)
+            ARG_PERMS_EXPLICIT=true
+            ;;
+    esac
+done
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -187,6 +207,31 @@ while [[ $# -gt 0 ]]; do
         --list)
             ARG_LIST=true
             shift
+            ;;
+        --start)
+            ARG_START="$2"
+            shift 2
+            ;;
+        --restart)
+            ARG_RESTART="$2"
+            shift 2
+            ;;
+        --shutdown)
+            ARG_SHUTDOWN="$2"
+            shift 2
+            ;;
+        --status)
+            ARG_STATUS=true
+            shift
+            ;;
+        --install-command)
+            if [ -n "\${2:-}" ] && [ "$(printf '%s' "$2" | cut -c1-2)" != "--" ]; then
+                ARG_INSTALL_COMMAND="$2"
+                shift 2
+            else
+                ARG_INSTALL_COMMAND="chatspace"
+                shift
+            fi
             ;;
         --news-feed)
             ARG_NEWS_FEED=true
@@ -325,6 +370,14 @@ while [[ $# -gt 0 ]]; do
             echo "  --local-cos             Install the Local Chief of Staff on this machine"
             echo "  --config <file>         Load settings from JSON file"
             echo ""
+            echo "BACKGROUND CONTROL (no manual tmux kill/cleanup needed):"
+            echo "  --start <name>          Start agent in a background tmux session (restarts on crash)"
+            echo "  --restart <name>        Stop the running session (if any) and start it again"
+            echo "  --shutdown <name>       Stop the agent's background session"
+            echo "  --status                Show which agents are running in the background"
+            echo "  --install-command [cmd] Install a global launcher (default: chatspace) so"
+            echo "                          the CLI can be run from any directory"
+            echo ""
             echo "AGENT CONFIGURATION:"
             echo "  --password <pwd>        Account password (for E2E encryption)"
             echo "  --project-path <path>   Working directory (default: current dir)"
@@ -415,6 +468,11 @@ if [ -n "$ARG_CONFIG" ] && [ -f "$ARG_CONFIG" ]; then
         exit 1
     fi
 fi
+
+# Remember whether the caller chose a project path before defaulting it, so
+# "--continue" keeps the agent's saved project_path unless one was passed.
+ARG_PROJECT_PATH_EXPLICIT=false
+[ -n "$ARG_PROJECT_PATH" ] && ARG_PROJECT_PATH_EXPLICIT=true
 
 # Set default project path if not specified
 [ -z "$ARG_PROJECT_PATH" ] && ARG_PROJECT_PATH="$(pwd)"
@@ -1303,6 +1361,18 @@ select_model_provider() {
     done
 }
 
+sync_runtime_permissions() {
+    local payload
+    payload=$(jq -nc --arg agentName "$1" --slurpfile config "$2" --slurpfile allowed "$3" \\
+        '{agentName:$agentName,config:$config[0],allowedPermissions:$allowed[0]}') || return 1
+    if ! curl -fsS --connect-timeout 5 --max-time 15 -X POST \\
+        -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \\
+        --data-binary "$payload" "$API_BASE/agent/runtime-permissions" >/dev/null; then
+        print_error "Could not save the permission grant to the server. Check the owner API key and try again."
+        return 1
+    fi
+}
+
 sync_models_to_backend() {
     local provider="$1"
     local models_text="\${2:-}"
@@ -1335,72 +1405,11 @@ fetch_backend_models_for_provider() {
 }
 
 auto_sync_all_installed_providers_models() {
-    # Check each provider and sync its models if installed
-
-    # 1. Copilot
-    if command -v copilot &>/dev/null; then
-        local copilot_models=""
-        copilot_models=$(timeout 10 copilot --help 2>/dev/null | grep -A 20 -- "--model <model>" | grep -o '".*"' | tr -d '"' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort -u || echo "")
-        if [ -n "$copilot_models" ]; then
-            sync_models_to_backend "copilot" "$copilot_models"
-        fi
-    fi
-
-    # 1b. Antigravity: query the account-specific model roster.
-    if command -v agy &>/dev/null; then
-        local antigravity_models=""
-        antigravity_models=$(timeout 15 agy models 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u || echo "")
-        if [ -n "$antigravity_models" ]; then
-            sync_models_to_backend "antigravity" "$antigravity_models"
-        fi
-    fi
-
-    # 2. Kilo
-    if command -v kilo &>/dev/null; then
-        local kilo_models=""
-        kilo_models=$(timeout 10 kilo models 2>/dev/null | sed 's|^kilo/||' | sort -u || echo "")
-        if [ -n "$kilo_models" ]; then
-            sync_models_to_backend "kilo" "$kilo_models"
-        fi
-    fi
-
-    # 3. Gemini
-    if command -v gemini &>/dev/null && [ -n "\${GEMINI_API_KEY:-}" ]; then
-        local gemini_models=""
-        gemini_models=$(curl -s --connect-timeout 5 --max-time 15 "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>/dev/null | jq -r '.models[].name' 2>/dev/null | sed 's/models\///' | sort -V || echo "")
-        if [ -n "$gemini_models" ]; then
-            sync_models_to_backend "gemini" "$gemini_models"
-        fi
-    fi
-
-    # 4. OpenAI
-    if [ -n "\${OPENAI_API_KEY:-}" ]; then
-        local openai_models=""
-        openai_models=$(curl -s --connect-timeout 5 --max-time 15 https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" 2>/dev/null | jq -r '.data[].id' 2>/dev/null | grep -E "^(gpt-|o[1-9])" | sort -V || echo "")
-        if [ -n "$openai_models" ]; then
-            sync_models_to_backend "openai" "$openai_models"
-        fi
-    fi
-
-    # 5. OpenRouter
-    if [ -n "\${OPENROUTER_API_KEY:-}" ]; then
-        local or_models=""
-        or_models=$(curl -s --connect-timeout 5 --max-time 15 https://openrouter.ai/api/v1/models 2>/dev/null | jq -r '.data[].id' 2>/dev/null | sort -V || echo "")
-        if [ -n "$or_models" ]; then
-            sync_models_to_backend "openrouter" "$or_models"
-        fi
-    fi
-
-    # 6. Ollama
-    if curl -s --connect-timeout 2 --max-time 5 http://localhost:11434/api/tags &>/dev/null; then
-        local ollama_models=""
-        ollama_models=$(curl -s --connect-timeout 2 --max-time 10 http://localhost:11434/api/tags 2>/dev/null | jq -r '.models[].name' 2>/dev/null || echo "")
-        if [ -n "$ollama_models" ]; then
-            sync_models_to_backend "ollama" "$ollama_models"
-        fi
-    fi
-
-    return 0
+    command -v node >/dev/null 2>&1 || return 0
+    CHATSPACE_MODEL_PROVIDER="\${1:-}" CHATSPACE_MODEL_API_BASE="$API_BASE" CHATSPACE_MODEL_API_KEY="$API_KEY" node <<'CHATSPACE_MODEL_DISCOVERY'
+${modelDiscoverySource}
+main().catch(() => { process.exitCode = 1; });
+CHATSPACE_MODEL_DISCOVERY
 }
 
 select_model() {
@@ -1412,12 +1421,19 @@ select_model() {
             model=$(gum choose \
                 --header "Select model (uses your Codex/ChatGPT account):" \
                 --cursor "➤ " \
+                "gpt-6-astra (GPT-6 Astra - requires eligible access)" \
+                "gpt-6-sol (GPT-6 Sol - latest coding model)" \
+                "gpt-6.1-sol (GPT-6.1 Sol - latest balanced model)" \
+                "gpt-6-luna (GPT-6 Luna - fastest)" \
                 "gpt-5.6-terra (GPT-5.6 Terra - verified default)" \
                 "gpt-5.6-luna (GPT-5.6 Luna - fastest)" \
                 "gpt-5.6-sol (GPT-5.6 Sol - requires eligible plan)" \
                 "gpt-5.5 (GPT-5.5 - latest)" \
+                "gpt-5.5-pro (GPT-5.5 Pro - highest reasoning)" \
                 "gpt-5.4 (GPT-5.4 - latest default)" \
                 "gpt-5.4-pro (GPT-5.4 Pro - highest reasoning)" \
+                "gpt-5.4-mini (GPT-5.4 Mini - efficient)" \
+                "gpt-5.4-nano (GPT-5.4 Nano - lowest cost)" \
                 "gpt-5.3-codex (Codex 5.3)" \
                 "gpt-5.2-codex (Codex 5.2)" \
                 "gpt-5.1-codex-max (Best for coding)" \
@@ -1482,6 +1498,11 @@ select_model() {
                     "openai/gpt-4o (OpenAI GPT-4o)" \
                     "meta-llama/llama-3.3-70b-instruct (Llama 3.3 70B)" \
                     "deepseek/deepseek-r1 (DeepSeek R1 reasoning)" \
+                    "x-ai/grok-4 (xAI Grok 4)" \
+                    "x-ai/grok-4-fast (xAI Grok 4 Fast)" \
+                    "x-ai/grok-code-fast-1 (xAI Grok Code Fast 1)" \
+                    "x-ai/grok-3 (xAI Grok 3)" \
+                    "x-ai/grok-3-mini (xAI Grok 3 Mini)" \
                     "--- FREE MODELS ---" \
                     "x-ai/grok-2-vision:free (Grok 2 Vision - FREE)" \
                     "qwen/qwen-2.5-72b-instruct:free (Qwen 2.5 72B - FREE)" \
@@ -1497,12 +1518,19 @@ select_model() {
             model=$(gum choose \
                 --header "Select OpenAI model (via Codex CLI):" \
                 --cursor "➤ " \
+                "gpt-6-astra (GPT-6 Astra - requires eligible access)" \
+                "gpt-6-sol (GPT-6 Sol - latest coding model)" \
+                "gpt-6.1-sol (GPT-6.1 Sol - latest balanced model)" \
+                "gpt-6-luna (GPT-6 Luna - fastest)" \
                 "gpt-5.6-terra (GPT-5.6 Terra - verified default)" \
                 "gpt-5.6-luna (GPT-5.6 Luna - fastest)" \
                 "gpt-5.6-sol (GPT-5.6 Sol - requires eligible plan)" \
                 "gpt-5.5 (GPT-5.5 - latest)" \
+                "gpt-5.5-pro (GPT-5.5 Pro - highest reasoning)" \
                 "gpt-5.4 (GPT-5.4 - latest default)" \
                 "gpt-5.4-pro (GPT-5.4 Pro - highest reasoning)" \
+                "gpt-5.4-mini (GPT-5.4 Mini - efficient)" \
+                "gpt-5.4-nano (GPT-5.4 Nano - lowest cost)" \
                 "gpt-5.3-codex (Codex 5.3)" \
                 "gpt-5.1-codex-max (Best for coding - default)" \
                 "gpt-5.1-codex (GPT-5.1 Codex optimized)" \
@@ -1513,14 +1541,22 @@ select_model() {
             model=$(gum choose \
                 --header "Select Claude model:" \
                 --cursor "➤ " \
+                "claude-fable-5-1 (Claude Fable 5.1 - most capable)" \
+                "claude-mythos-5-1 (Claude Mythos 5.1 - invite only)" \
+                "claude-opus-5-5 (Claude Opus 5.5 - latest coding model)" \
                 "claude-opus-5 (Claude Opus 5)" \
-                "claude-fable-5 (Claude Fable 5 - latest)" \
+                "claude-fable-5 (Claude Fable 5)" \
+                "claude-mythos-5 (Claude Mythos 5 - invite only)" \
+                "claude-sonnet-5-5 (Claude Sonnet 5.5 - latest balanced)" \
                 "claude-sonnet-5 (Claude Sonnet 5)" \
+                "claude-haiku-5-5 (Claude Haiku 5.5 - fastest)" \
                 "claude-opus-4-8 (Claude Opus 4.8)" \
                 "claude-opus-4-7 (Claude Opus 4.7 - latest)" \
                 "claude-opus-4-6 (Claude Opus 4.6)" \
                 "claude-sonnet-4-6 (Claude Sonnet 4.6 - balanced)" \
-                "claude-haiku-4-5 (Claude Haiku 4.5 - fastest)" \
+                "claude-haiku-4-5 (Claude Haiku 4.5)" \
+                "claude-sonnet-4-5-20250929 (Claude Sonnet 4.5 snapshot)" \
+                "claude-haiku-4-5-20251001 (Claude Haiku 4.5 snapshot)" \
                 "claude-3-7-sonnet-20250219 (Claude 3.7 Sonnet)" \
                 "claude-3-5-sonnet-20241022 (Claude 3.5 Sonnet - best for coding)" \
                 "claude-3-5-haiku-20241022 (Claude 3.5 Haiku - fastest)" \
@@ -1540,17 +1576,13 @@ select_model() {
                 --header "Select Antigravity model:" \
                 --cursor "➤ " \
                 "default (Use Antigravity default model)" \
-                "claude-opus-4.8 (Claude Opus 4.8)" \
-                "claude-opus-4.7 (Claude Opus 4.7)" \
-                "claude-opus-4.6 (Claude Opus 4.6)" \
-                "claude-sonnet-4.6 (Claude Sonnet 4.6)" \
-                "claude-sonnet-4.5 (Claude Sonnet 4.5)" \
-                "gpt-5.4 (GPT 5.4)" \
-                "gpt-5.4-mini (GPT 5.4 Mini)" \
-                "gpt-5.3-codex (GPT 5.3 Codex)" \
-                "gemini-3.1-pro (Gemini 3.1 Pro)" \
-                "gemini-3-flash (Gemini 3 Flash)" \
-                "gemini-2.5-pro (Gemini 2.5 Pro)")
+                "gemini-3.8-flash (Gemini 3.8 Flash)" \
+                "gemini-3.8-flash-high (Gemini 3.8 Flash High)" \
+                "gemini-3.8-flash-medium (Gemini 3.8 Flash Medium)" \
+                "gemini-3.8-flash-low (Gemini 3.8 Flash Low)" \
+                "claude-sonnet-4-6 (Claude Sonnet 4.6)" \
+                "claude-opus-4-6-thinking (Claude Opus 4.6 Thinking)" \
+                "gpt-oss-120b-medium (GPT-OSS 120B Medium)")
             model=$(echo "$model" | cut -d' ' -f1)
             ;;
         gemini)
@@ -1574,6 +1606,12 @@ select_model() {
                 model=$(gum choose \
                     --header "Select Gemini model:" \
                     --cursor "➤ " \
+                    "gemini-4-argon (Gemini 4 Argon - most capable)" \
+                    "gemini-3.8-flash (Gemini 3.8 Flash - latest stable)" \
+                    "gemini-3.7-flash (Gemini 3.7 Flash - latest stable)" \
+                    "gemini-3.6-flash (Gemini 3.6 Flash)" \
+                    "gemini-3.5-flash (Gemini 3.5 Flash)" \
+                    "gemini-3.5-flash-lite (Gemini 3.5 Flash Lite)" \
                     "gemini-2.5-pro (Best for complex tasks)" \
                     "gemini-2.5-flash (Fast and efficient)" \
                     "gemini-2.0-flash (Gemini 2.0 Flash)" \
@@ -1605,7 +1643,7 @@ select_model() {
                     --cursor "➤ " \
                     "default (Use model from Kilo config)" \
                     "anthropic/claude-3-7-sonnet-20250219 (Claude 3.7 Sonnet)" \
-                    "anthropic/claude-sonnet-4-20250514 (Claude Sonnet 4)" \
+                    "anthropic/claude-sonnet-5-5 (Claude Sonnet 5.5)" \
                     "openai/gpt-5 (GPT-5)" \
                     "openai/o3-mini (OpenAI o3-mini)" \
                     "google/gemini-2.5-pro (Gemini 2.5 Pro)")
@@ -1616,7 +1654,8 @@ select_model() {
             print_info "Fetching available Copilot models..."
             local copilot_models=""
             if command -v copilot &>/dev/null; then
-                copilot_models=$(copilot --help | grep -A 20 -- "--model <model>" | grep -o '".*"' | tr -d '"' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort -u || echo "")
+                auto_sync_all_installed_providers_models "copilot" >/dev/null 2>&1 || true
+                copilot_models=$(fetch_backend_models_for_provider "copilot")
             fi
             
             if [ -n "$copilot_models" ]; then
@@ -1655,6 +1694,8 @@ select_model() {
                     "gpt-5.2-codex (GPT 5.2 Codex)" \
                     "gpt-5.2 (GPT 5.2)" \
                     "gpt-5-mini (GPT 5 Mini)" \
+                    "gemini-3.8-flash (Gemini 3.8 Flash)" \
+                    "gemini-3.7-flash (Gemini 3.7 Flash)" \
                     "gemini-3.1-pro (Gemini 3.1 Pro)" \
                     "gemini-3-flash (Gemini 3 Flash)" \
                     "claude-3.7-sonnet (Claude 3.7 Sonnet)" \
@@ -2075,9 +2116,11 @@ run_agent() {
         print_info "Permissions already configured"
         if ! gum confirm --affirmative "Reconfigure" --negative "Use existing" "Reconfigure allowed permissions?"; then
             print_info "Using existing permissions"
+            sync_runtime_permissions "$agent_name" "$config_file" "$allowed_perms_file" || return 1
             # Just start the runner with existing config
             print_section ">> Starting Agent..."
-            exec "$agent_dir/agent-runner.sh"
+            start_agent_foreground "$agent_name" "$agent_dir"
+            return 0
         fi
     fi
     
@@ -2605,6 +2648,7 @@ INTERAGENTINSTR
   "started_at": "$(date -Iseconds)"
 }
 CFGEOF
+    sync_runtime_permissions "$agent_name" "$config_file" "$allowed_perms_file" || return 1
     
     print_success "Created default config (frontend can change this)"
     echo ""
@@ -2625,14 +2669,27 @@ Config (⚙️) button to change provider/model/mode.
 The agent will load new config at each loop iteration."
     
     echo ""
-    if ! gum confirm --affirmative "Start Agent" --negative "Cancel" "Start the agent runner now?"; then
-        print_info "You can start the agent later by running this script again."
-        return 0
-    fi
-    
-    print_section ">> Starting Agent..."
-    echo ""
-    exec "$agent_dir/agent-runner.sh"
+    local start_choice
+    start_choice=$(gum choose --header "Start the agent runner now?" \
+        "Start here (this terminal)" \
+        "Start in background (tmux, auto-restart on crash)" \
+        "Cancel") || start_choice="Cancel"
+    case "$start_choice" in
+        "Start in background"*)
+            start_agent_session "$agent_name" restart
+            return $?
+            ;;
+        "Start here"*)
+            print_section ">> Starting Agent..."
+            echo ""
+            start_agent_foreground "$agent_name" "$agent_dir"
+            return 0
+            ;;
+        *)
+            print_info "You can start the agent later by running this script again."
+            return 0
+            ;;
+    esac
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3176,7 +3233,7 @@ manage_autostart() {
             folder=$(get_agent_folder "$selected_agent")
             local agent_dir="$CHATSPACE_DIR/$folder"
             print_info "Starting agent in foreground (Ctrl+C to stop)..."
-            exec "$agent_dir/agent-runner.sh"
+            start_agent_foreground "$selected_agent" "$agent_dir"
             ;;
         "📋 View Status & Logs")
             view_service_status "$selected_agent"
@@ -4041,7 +4098,28 @@ run_agent_headless() {
     
     local allowed_perms_file="$agent_dir/agent_state/allowed_permissions.json"
     local config_file="$agent_dir/agent_state/agent_config.json"
-    
+    local run_mode="\${2:-configure}"
+
+    # Continuing an already-configured agent: keep its provider/model/permissions.
+    if [ "$run_mode" = "preserve" ] && [ "$ARG_PERMS_EXPLICIT" != "true" ] \\
+        && [ -s "$allowed_perms_file" ] && [ -s "$config_file" ]; then
+        echo "Keeping existing configuration for '$agent_name' (pass provider/permission flags to reconfigure)."
+        if [ "$ARG_PROJECT_PATH_EXPLICIT" = "true" ] && command -v jq &>/dev/null; then
+            local tmp_cfg
+            tmp_cfg=$(mktemp)
+            if jq --arg p "$ARG_PROJECT_PATH" '.project_path = $p' "$config_file" > "$tmp_cfg"; then
+                mv "$tmp_cfg" "$config_file"
+                echo "  Project path updated to: $ARG_PROJECT_PATH"
+            else
+                rm -f "$tmp_cfg"
+            fi
+        fi
+        if [ "$ARG_AUTO_START" = "true" ]; then
+            start_agent_foreground "$agent_name" "$agent_dir"
+        fi
+        return 0
+    fi
+
     echo "Configuring agent permissions..."
 
     # --allow-all (setup profile "max-access") grants every provider the full
@@ -4236,6 +4314,7 @@ INTERAGENTINSTR
     "project_path": "$ARG_PROJECT_PATH"
 }
 CONFIGEOF
+    sync_runtime_permissions "$agent_name" "$config_file" "$allowed_perms_file" || return 1
     echo "Created default config at $config_file"
     
     echo ""
@@ -4243,12 +4322,277 @@ CONFIGEOF
     echo "  Providers: $ARG_PROVIDERS"
     echo "  Project path: $ARG_PROJECT_PATH"
     echo "  Inter-agent: $ARG_INTER_AGENT"
-    
+
     # Auto-start if requested
     if [ "$ARG_AUTO_START" = "true" ]; then
+        start_agent_foreground "$agent_name" "$agent_dir"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Background session control (start / restart / shutdown / status)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Each agent gets one tmux session named "<folder>-local-agent". The session runs
+# the runner inside a small supervisor loop that restarts it after a crash and
+# exits after a clean (exit 0) shutdown. Because the CLI finds and replaces that
+# session itself, users never need to kill tmux sessions or delete folders by hand.
+
+agent_session_name() {
+    printf '%s-local-agent' "$(get_agent_folder "$1")"
+}
+
+agent_session_running() {
+    command -v tmux &>/dev/null && tmux has-session -t "=$1" 2>/dev/null
+}
+
+# PIDs of this agent's runner processes, including ones that outlived their
+# terminal/tmux session (e.g. the shared listener, which replaces the runner via
+# exec and keeps running as an orphan when its session is killed).
+agent_runner_pids() {
+    local agent_dir="$1"
+    local lock="$agent_dir/agent_state/shared-agent.json.lock"
+    local pid
+    {
+        if [ -f "$lock" ]; then
+            pid=$(tr -cd '0-9' < "$lock" 2>/dev/null || true)
+            if [ -n "$pid" ] && ps -p "$pid" -o args= 2>/dev/null | grep -q "shared-runner.js"; then
+                echo "$pid"
+            fi
+        fi
+        pgrep -f "$agent_dir/agent_state/shared-runner.js" 2>/dev/null || true
+        for pid in $(pgrep -f "agent-runner.sh" 2>/dev/null || true); do
+            [ "$pid" = "$$" ] && continue
+            # Never match a tmux server/client: its argv can contain the runner
+            # command, and killing it would take every other session down too.
+            case "$(ps -p "$pid" -o comm= 2>/dev/null || true)" in tmux*) continue ;; esac
+            if [ "$(readlink "/proc/$pid/cwd" 2>/dev/null || true)" = "$agent_dir" ] \\
+                || ps -p "$pid" -o args= 2>/dev/null | grep -qF "$agent_dir/agent-runner.sh"; then
+                echo "$pid"
+            fi
+        done
+    } | sort -u
+}
+
+agent_is_running() {
+    local agent_name="$1"
+    local agent_dir="$CHATSPACE_DIR/$(get_agent_folder "$agent_name")"
+    agent_session_running "$(agent_session_name "$agent_name")" && return 0
+    [ -n "$(agent_runner_pids "$agent_dir")" ]
+}
+
+stop_agent_session() {
+    local session="$1"
+    local agent_dir="$2"
+    local i pids
+    if agent_session_running "$session"; then
+        # Ask the runner to exit cleanly first (Ctrl-C).
+        tmux send-keys -t "=$session" C-c 2>/dev/null || true
+    fi
+    pids=$(agent_runner_pids "$agent_dir")
+    [ -n "$pids" ] && kill -TERM $pids 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if ! agent_session_running "$session" && [ -z "$(agent_runner_pids "$agent_dir")" ]; then
+            break
+        fi
+        sleep 1
+    done
+    tmux kill-session -t "=$session" 2>/dev/null || true
+    pids=$(agent_runner_pids "$agent_dir")
+    [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
+    # A killed listener cannot remove its own lock; clear it so the next start works.
+    rm -f "$agent_dir/agent_state/shared-agent.json.lock"
+    return 0
+}
+
+start_agent_session() {
+    local agent_name="$1"
+    local mode="\${2:-start}"
+    local folder agent_dir session
+    folder=$(get_agent_folder "$agent_name")
+    agent_dir="$CHATSPACE_DIR/$folder"
+    session=$(agent_session_name "$agent_name")
+
+    if [ ! -f "$agent_dir/.env" ] || [ ! -x "$agent_dir/agent-runner.sh" ]; then
+        echo "Error: Agent '$agent_name' not found or not configured (expected $agent_dir/agent-runner.sh)."
+        echo "Create it first:  bash $SCRIPT_DIR/agent-cli.sh --headless --create \\"$agent_name\\""
+        return 1
+    fi
+    # An enabled service owns this agent. Use its supervisor instead of
+    # creating a second tmux listener or killing a process it will restart.
+    local service_name="agent-$folder.service"
+    if command -v systemctl &>/dev/null && systemctl --user is-enabled "$service_name" &>/dev/null; then
+        if [ "$mode" = "restart" ]; then
+            systemctl --user restart "$service_name" || return 1
+        else
+            systemctl --user start "$service_name" || return 1
+        fi
+        echo "Started '$agent_name' with its persistent service '$service_name'."
+        return 0
+    fi
+    if ! command -v tmux &>/dev/null; then
+        echo "Error: tmux is required for background mode. Install it (e.g. sudo apt install tmux)"
+        echo "or run in the foreground:  bash $SCRIPT_DIR/agent-cli.sh --headless --continue \\"$agent_name\\""
+        return 1
+    fi
+
+    if agent_is_running "$agent_name"; then
+        if [ "$mode" = "restart" ]; then
+            echo "Stopping running agent '$agent_name'..."
+            stop_agent_session "$session" "$agent_dir"
+        elif agent_session_running "$session"; then
+            echo "Agent '$agent_name' is already running (tmux session '$session')."
+            echo "  Attach:   tmux attach -t $session"
+            echo "  Restart:  bash $SCRIPT_DIR/agent-cli.sh --restart \\"$agent_name\\""
+            return 0
+        else
+            echo "Agent '$agent_name' is already running outside a managed session (PID $(agent_runner_pids "$agent_dir" | tr '\\n' ' '))."
+            echo "  Replace it with a managed session:  bash $SCRIPT_DIR/agent-cli.sh --restart \\"$agent_name\\""
+            return 0
+        fi
+    fi
+
+    local log_file="$agent_dir/agent_state/supervisor.log"
+    mkdir -p "$agent_dir/agent_state"
+    local supervisor
+    supervisor='while true; do ./agent-runner.sh; code=$?; echo "$(date -Is) runner exited with code $code" >> agent_state/supervisor.log; [ "$code" -eq 0 ] && break; echo "Runner exited ($code); restarting in 10s (Ctrl-C to stop)..."; sleep 10 || break; done'
+    tmux new-session -d -s "$session" -c "$agent_dir" "bash -c '$supervisor'"
+    sleep 1
+    if agent_session_running "$session"; then
+        echo "Started '$agent_name' in tmux session '$session' (auto-restarts on crash)."
+        echo "  Attach:   tmux attach -t $session"
+        echo "  Stop:     bash $SCRIPT_DIR/agent-cli.sh --shutdown \\"$agent_name\\""
+        echo "  Log:      $log_file"
+        return 0
+    fi
+    echo "Error: session '$session' exited immediately. Run in the foreground to see why:"
+    echo "  cd \\"$agent_dir\\" && ./agent-runner.sh"
+    return 1
+}
+
+shutdown_agent_session() {
+    local session agent_dir
+    session=$(agent_session_name "$1")
+    agent_dir="$CHATSPACE_DIR/$(get_agent_folder "$1")"
+    local service_name="agent-$(get_agent_folder "$1").service"
+    if command -v systemctl &>/dev/null && systemctl --user is-enabled "$service_name" &>/dev/null; then
+        systemctl --user stop "$service_name" || return 1
+        echo "Stopped '$1' persistent service."
+        return 0
+    fi
+    if agent_is_running "$1"; then
+        stop_agent_session "$session" "$agent_dir"
+        echo "Stopped '$1'."
+    else
+        echo "Agent '$1' is not running."
+    fi
+}
+
+show_agent_session_status() {
+    local agents name session found=false
+    agents=$(get_existing_agents)
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        session=$(agent_session_name "$name")
+        if agent_session_running "$session"; then
+            echo "running  $name  (tmux attach -t $session)"
+            found=true
+        elif agent_is_running "$name"; then
+            echo "running  $name  (unmanaged process; use --restart to manage it)"
+            found=true
+        else
+            echo "stopped  $name"
+        fi
+    done <<< "$agents"
+    [ "$found" = "true" ] || echo "(no agents running in the background)"
+}
+
+# Run the agent in this terminal. Refuses to start a second runner when the same
+# agent is already running in its background session (two runners would answer
+# every message twice), and offers the restart command instead.
+start_agent_foreground() {
+    local agent_name="$1"
+    local agent_dir="$2"
+    local session
+    session=$(agent_session_name "$agent_name")
+    if agent_is_running "$agent_name"; then
         echo ""
-        echo "Starting agent..."
-        exec "$agent_dir/agent-runner.sh"
+        echo "Agent '$agent_name' is already running (session '$session' or PID $(agent_runner_pids "$agent_dir" | tr '\\n' ' '))."
+        echo "  Attach:   tmux attach -t $session"
+        echo "  Restart:  bash $SCRIPT_DIR/agent-cli.sh --restart \\"$agent_name\\""
+        return 0
+    fi
+    echo ""
+    echo "Starting agent..."
+    exec "$agent_dir/agent-runner.sh"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Global launcher: run this CLI from any directory
+# ═══════════════════════════════════════════════════════════════════════════════
+# Installs a tiny wrapper (not a copy, so the API key stays in one file) in
+# ~/.local/bin. The wrapper keeps the caller's working directory, so new agents
+# default their project path to wherever the command was run.
+install_global_command() {
+    local cmd_name="\${1:-chatspace}"
+    local bin_dir="$HOME/.local/bin"
+    local self_path="$SCRIPT_DIR/$(basename "\${BASH_SOURCE[0]}")"
+    local target="$bin_dir/$cmd_name"
+
+    case "$cmd_name" in
+        */*|"")
+            echo "Error: invalid command name '$cmd_name'"
+            return 1
+            ;;
+    esac
+    if [ -e "$target" ] && ! grep -q "chatspace-launcher" "$target" 2>/dev/null; then
+        echo "Error: $target already exists and was not created by this CLI; choose another name:"
+        echo "  bash $self_path --install-command <name>"
+        return 1
+    fi
+
+    mkdir -p "$bin_dir"
+    chmod +x "$self_path" 2>/dev/null || true
+    cat > "$target" <<LAUNCHEOF
+#!/usr/bin/env bash
+# chatspace-launcher: generated by agent-cli.sh. Re-run "--install-command" to update.
+exec bash "$self_path" "\\$@"
+LAUNCHEOF
+    chmod +x "$target"
+    echo "Installed '$cmd_name' -> $self_path"
+
+    case ":$PATH:" in
+        *":$bin_dir:"*) ;;
+        *)
+            local rc
+            for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+                [ -f "$rc" ] || continue
+                if ! grep -q "chatspace-launcher PATH" "$rc"; then
+                    printf '\\n# chatspace-launcher PATH\\nexport PATH="$HOME/.local/bin:$PATH"\\n' >> "$rc"
+                    echo "Added ~/.local/bin to PATH in $rc"
+                fi
+            done
+            echo "Open a new terminal (or run: export PATH=\\"$bin_dir:\\$PATH\\") to use '$cmd_name'."
+            ;;
+    esac
+    echo ""
+    echo "Examples (from any directory):"
+    echo "  $cmd_name                      # interactive menu"
+    echo "  $cmd_name --status             # which agents are running"
+    echo "  $cmd_name --start <agent>      # start in background"
+    echo "  $cmd_name --restart <agent>    # restart without manual cleanup"
+    return 0
+}
+
+# Offer the launcher once in interactive mode.
+offer_global_command() {
+    local marker="$CHATSPACE_DIR/.global_command_offered"
+    [ -f "$marker" ] && return 0
+    [ -f "$HOME/.local/bin/chatspace" ] && return 0
+    command -v gum &>/dev/null || return 0
+    touch "$marker" 2>/dev/null || true
+    if gum confirm --affirmative "Install" --negative "Skip" "Install the 'chatspace' command so you can run this CLI from any folder?"; then
+        install_global_command "chatspace" || true
+        echo ""
     fi
 }
 
@@ -4282,6 +4626,28 @@ if [ "$ARG_LOCAL_COS" = "true" ]; then
     exit $?
 fi
 
+# Background control + launcher actions (work in both interactive and headless mode)
+if [ -n "$ARG_INSTALL_COMMAND" ]; then
+    install_global_command "$ARG_INSTALL_COMMAND"
+    exit $?
+fi
+if [ "$ARG_STATUS" = "true" ]; then
+    show_agent_session_status
+    exit 0
+fi
+if [ -n "$ARG_START" ]; then
+    start_agent_session "$ARG_START" start
+    exit $?
+fi
+if [ -n "$ARG_RESTART" ]; then
+    start_agent_session "$ARG_RESTART" restart
+    exit $?
+fi
+if [ -n "$ARG_SHUTDOWN" ]; then
+    shutdown_agent_session "$ARG_SHUTDOWN"
+    exit $?
+fi
+
 # Handle headless mode dispatch
 if [ "$ARG_HEADLESS" = "true" ]; then
     # In headless mode, skip news feed unless explicitly requested
@@ -4312,7 +4678,7 @@ if [ "$ARG_HEADLESS" = "true" ]; then
     
     # Handle --continue action
     if [ -n "$ARG_CONTINUE" ]; then
-        run_agent_headless "$ARG_CONTINUE"
+        run_agent_headless "$ARG_CONTINUE" preserve
         exit $?
     fi
 
@@ -4329,12 +4695,13 @@ if [ "$ARG_HEADLESS" = "true" ]; then
     fi
     
     # If headless but no action specified, show error
-    echo "Error: In headless mode, you must specify --create, --continue, --stop, --delete, --list, or --news-feed"
+    echo "Error: In headless mode, you must specify --create, --continue, --start, --restart, --shutdown, --status, --stop, --delete, --list, or --news-feed"
     echo "Run with --help for usage information."
     exit 1
 fi
 
 # Interactive mode
+offer_global_command
 check_news_feed_agent
 if [ "$ARG_SKIP_LOCAL_COS" != "true" ]; then
     check_local_chief_of_staff
@@ -5047,6 +5414,7 @@ _CONVERSATION_HISTORY_FILE = _script_dir / "agent_state" / "conversation_history
 _PENDING_ATTACHMENTS_FILE = _script_dir / "agent_state" / ".pending_attachment_ids.json"
 _PENDING_UPDATE_FILE = _script_dir / "agent_state" / ".pending_self_update.json"
 _POLL_ADVICE_FILE = _script_dir / "agent_state" / ".poll_advice.json"
+_RUN_OVERRIDES_FILE = _script_dir / "agent_state" / ".run_overrides.json"
 _AGENT_CLI_VERSION = "${AGENT_CLI_VERSION}"
 
 
@@ -5549,6 +5917,20 @@ def wait_for_response(poll_interval: int = 10, timeout: int = 0):
     return _wait_for_responses(poll_interval, timeout)
 
 
+def _save_run_overrides(payload: dict):
+    """Persist per-message run settings for the runner; clear them when absent."""
+    try:
+        overrides = payload.get("runOverrides") if isinstance(payload, dict) else None
+        if isinstance(overrides, dict) and overrides and payload.get("responses"):
+            _RUN_OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(_RUN_OVERRIDES_FILE, "w") as f:
+                json.dump(overrides, f)
+        else:
+            _RUN_OVERRIDES_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def check_new_messages() -> list:
     global _last_read_time
 
@@ -5556,6 +5938,7 @@ def check_new_messages() -> list:
 
     result = _api_request("GET", path)
     _save_poll_advice(result)
+    _save_run_overrides(result)
     responses = []
 
     if result.get("responses"):
@@ -5745,7 +6128,7 @@ def _build_spawn_briefing(child_name: str, instructions: str) -> str:
     )
 
 
-def spawn_agent(child_name: str, instructions: str = "", model_provider: str = None, model: str = None, project_path: str = None, can_spawn: bool = False) -> dict:
+def spawn_agent(child_name: str, instructions: str = "", model_provider: str = None, model: str = None, project_path: str = None, can_spawn: bool = False, groups = None) -> dict:
     """
     Spawn a new independent child agent. The child gets its own chat thread,
     folder, and appears in the dashboard UI automatically.
@@ -5760,6 +6143,8 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
         model: Model name override (default: inherit from parent)
         project_path: Working directory override for the child (must be on this machine)
         can_spawn: Whether the child can spawn its own children (default: False)
+        groups: Group IDs or names. None inherits the parent's groups (recommended);
+                an empty list leaves the child ungrouped.
 
     Returns:
         dict with keys: agentId, agentName, spawnDepth, parentAgentId, createdAt
@@ -5790,6 +6175,8 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
         payload["model"] = model
     if project_path:
         payload["projectPath"] = project_path
+    if groups is not None:
+        payload["groups"] = groups
 
     # Forward parent credentials so child .env is complete
     if Config.user_password:
@@ -6304,7 +6691,7 @@ def _format_responses_for_llm(responses: list, attachment_paths: dict = None) ->
 
 
 def _print_spawn_usage(exit_code: int = 1):
-    print("Usage: uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--can-spawn]")
+    print("Usage: uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--group <id-or-name>] [--no-inherit-groups] [--can-spawn]")
     sys.exit(exit_code)
 
 
@@ -6329,7 +6716,7 @@ ${hasEncryption ? `def main():
   uv run message_helper.py download <attachment-id> <save-path> --iv <iv-base64> --tag <tag-base64>
 
 Agent Spawning:
-  uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--can-spawn]
+  uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--group <id-or-name>] [--no-inherit-groups] [--can-spawn]
   uv run message_helper.py stop <agentName>
   uv run message_helper.py self-terminate [reason]
   uv run message_helper.py lineage
@@ -6397,10 +6784,10 @@ Attachment Commands:
         elif args[i] == "--description" and i + 1 < len(args):
             rich_description = args[i + 1]
             i += 2
-        elif args[i] in ("--provider", "--model", "--project-path") and i + 1 < len(args):
+        elif args[i] in ("--provider", "--model", "--project-path", "--group") and i + 1 < len(args):
             # Spawn-specific flags; skip both flag and value so they don't pollute instructions text
             i += 2
-        elif args[i] == "--can-spawn":
+        elif args[i] in ("--can-spawn", "--no-inherit-groups"):
             # Spawn-specific boolean flag
             i += 1
         else:
@@ -6791,6 +7178,7 @@ Attachment Commands:
         model_val = None
         project_path_val = None
         can_spawn_val = "--can-spawn" in sys.argv
+        group_vals = [] if "--no-inherit-groups" in sys.argv else None
         for idx, a in enumerate(sys.argv):
             if a == "--provider" and idx + 1 < len(sys.argv):
                 provider_val = sys.argv[idx + 1]
@@ -6798,13 +7186,18 @@ Attachment Commands:
                 model_val = sys.argv[idx + 1]
             elif a == "--project-path" and idx + 1 < len(sys.argv):
                 project_path_val = sys.argv[idx + 1]
+            elif a == "--group" and idx + 1 < len(sys.argv):
+                if group_vals is None:
+                    group_vals = []
+                group_vals.append(sys.argv[idx + 1])
         result = spawn_agent(
             child_name,
             instructions,
             model_provider=provider_val,
             model=model_val,
             project_path=project_path_val,
-            can_spawn=can_spawn_val
+            can_spawn=can_spawn_val,
+            groups=group_vals
         )
         if result.get("agentId"):
             print("Agent spawned successfully!")
@@ -6886,7 +7279,7 @@ Attachment Commands:
 
 if __name__ == "__main__":
     main()` : `def _print_spawn_usage(exit_code: int = 1):
-    print("Usage: uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--can-spawn]")
+    print("Usage: uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--group <id-or-name>] [--no-inherit-groups] [--can-spawn]")
     sys.exit(exit_code)
 
 
@@ -6909,7 +7302,7 @@ def main():
   uv run message_helper.py set-model <agentName> [--provider <p>] [--model <m>]   (Chief of Staff only)
 
 Agent Spawning:
-  uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--can-spawn]
+  uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--group <id-or-name>] [--no-inherit-groups] [--can-spawn]
   uv run message_helper.py stop <agentName>
   uv run message_helper.py self-terminate [reason]
   uv run message_helper.py lineage""")
@@ -6942,10 +7335,10 @@ Agent Spawning:
                 print(f"Error: Invalid JSON for --options: {e}")
                 sys.exit(1)
             i += 2
-        elif args[i] in ("--provider", "--model", "--project-path") and i + 1 < len(args):
+        elif args[i] in ("--provider", "--model", "--project-path", "--group") and i + 1 < len(args):
             # Spawn-specific flags; skip both flag and value so they don't pollute instructions text
             i += 2
-        elif args[i] == "--can-spawn":
+        elif args[i] in ("--can-spawn", "--no-inherit-groups"):
             # Spawn-specific boolean flag
             i += 1
         elif args[i] == "--json":
@@ -7235,6 +7628,7 @@ Agent Spawning:
         model_val = None
         project_path_val = None
         can_spawn_val = "--can-spawn" in sys.argv
+        group_vals = [] if "--no-inherit-groups" in sys.argv else None
         for idx, a in enumerate(sys.argv):
             if a == "--provider" and idx + 1 < len(sys.argv):
                 provider_val = sys.argv[idx + 1]
@@ -7242,13 +7636,18 @@ Agent Spawning:
                 model_val = sys.argv[idx + 1]
             elif a == "--project-path" and idx + 1 < len(sys.argv):
                 project_path_val = sys.argv[idx + 1]
+            elif a == "--group" and idx + 1 < len(sys.argv):
+                if group_vals is None:
+                    group_vals = []
+                group_vals.append(sys.argv[idx + 1])
         result = spawn_agent(
             child_name,
             instructions,
             model_provider=provider_val,
             model=model_val,
             project_path=project_path_val,
-            can_spawn=can_spawn_val
+            can_spawn=can_spawn_val,
+            groups=group_vals
         )
         if result.get("agentId"):
             print("Agent spawned successfully!")
@@ -7531,10 +7930,18 @@ Local-only agents will NOT appear in the dashboard UI and the user will not be a
 uv run message_helper.py spawn "my-helper-agent" "Your task is to research X and report findings"
 
 # With specific provider/model
-uv run message_helper.py spawn "code-reviewer" "Review all PRs for security issues" --provider claude --model claude-sonnet-4-20250514
+uv run message_helper.py spawn "code-reviewer" "Review all PRs for security issues" --provider claude --model claude-sonnet-5-5
+
+# Gemini models through the installed Antigravity CLI (agy)
+uv run message_helper.py spawn "gemini-reviewer" "Review the UI" --provider antigravity --model gemini-3.8-flash
 
 # With an explicit working directory on this same machine
 uv run message_helper.py spawn "repo-worker" "Implement and test issue #42" --project-path /path/to/repo
+
+# Recommended: omit --group to inherit all of the creating agent's groups.
+# Override with one or more group IDs/names, or opt out explicitly.
+uv run message_helper.py spawn "researcher" "Research the topic" --group Research
+uv run message_helper.py spawn "isolated-worker" "Work without group access" --no-inherit-groups
 \\\`\\\`\\\`
 
 The \\\`spawn\\\` command automatically:
@@ -7591,6 +7998,8 @@ uv run message_helper.py lineage
 - Max 75 total agents per user
 - Cooldown: 1 spawn per minute per agent
 - Child inherits your model/provider config unless overridden
+- Child inherits all of your groups by default (recommended)
+- Use repeatable \`--group <id-or-name>\` to choose groups, or \`--no-inherit-groups\` for none
 - Child inherits your permission ceiling (cannot exceed your permissions)
 - Child inherits your working directory unless you pass \\\`--project-path\\\`
 - Child listens to user + DM traffic by polling chatmcp.space API in its own loop
@@ -7727,9 +8136,14 @@ curl -s -X POST -H "X-API-Key: $API_KEY" -H "X-Agent-Name: ${CHIEF_OF_STAFF_DEFA
      -d '{ "name": "research-agent",
             "role": "Scrape and summarize web pages",
             "initialInstructions": "You are…",
-            "runtimeConfig": { "model_provider": "claude", "model": "default" } }' \\
+            "runtimeConfig": { "model_provider": "antigravity", "model": "gemini-3.8-flash" },
+            "groups": ["Research"] }' \\
      ${apiBase}/agent/cos/spawn-child
 \`\`\`
+Omit \`groups\` to inherit the Chief of Staff's groups (recommended). Pass group
+IDs/names to choose explicitly, or \`"groups": []\` to leave the child ungrouped.
+Gemini models should use \`model_provider: "antigravity"\` so they run through
+the installed \`agy\` CLI rather than requiring the separate Gemini CLI.
 The server inserts the DB row + writes \`chatspace/<name>/\` files. After it
 returns, you must **start the agent locally** using the \`tmuxLaunchCommand\`
 returned in the response (which uses the absolute \`subAgentDir\` path):
@@ -7839,6 +8253,28 @@ curl -s -X DELETE -H "X-API-Key: $API_KEY" -H "X-Agent-Name: ${CHIEF_OF_STAFF_DE
 \`\`\`
 You cannot delete yourself or another Chief of Staff. After deletion, kill
 the local tmux session: \`tmux kill-session -t "<name>"\`.
+
+### Tidy up agents you created (archive, clear, reorder)
+These only work on agents in your own lineage (agents you spawned, and
+their children). Anything else returns \`403 COS_NOT_CREATOR\`.
+\`\`\`bash
+# Archive (stops the agent; restorable from the user's Archive page)
+curl -s -X POST -H "X-API-Key: $API_KEY" -H "X-Agent-Name: ${CHIEF_OF_STAFF_DEFAULT_NAME}" \\
+     -H "Content-Type: application/json" -d '{ "reason": "task finished" }' \\
+     ${apiBase}/agent/cos/agents/<agent_id>/archive
+
+# Clear an agent's conversation history
+curl -s -X DELETE -H "X-API-Key: $API_KEY" -H "X-Agent-Name: ${CHIEF_OF_STAFF_DEFAULT_NAME}" \\
+     ${apiBase}/agent/cos/agents/<agent_id>/messages
+
+# Reorder agents in the sidebar
+curl -s -X PUT -H "X-API-Key: $API_KEY" -H "X-Agent-Name: ${CHIEF_OF_STAFF_DEFAULT_NAME}" \\
+     -H "Content-Type: application/json" \\
+     -d '{ "updates": [{ "agentId": "<agent_id>", "position": 2 }] }' \\
+     ${apiBase}/agent/cos/agents/positions
+\`\`\`
+Use groups (above) to organize by project. Ask the user before archiving or
+clearing, the same way you would before a delete.
 
 ## Deletion safety rules — read carefully
 
@@ -8590,8 +9026,10 @@ ERROR_FAILSAFE_MAX_MESSAGES=30
 ERROR_FAILSAFE_WINDOW_STARTED_AT=0
 ERROR_FAILSAFE_MESSAGE_COUNT=0
 NO_CONNECTION_FAILSAFE_SECONDS=172800
+NO_CONNECTION_GIVE_UP_SECONDS=604800
 LAST_SUCCESSFUL_CONNECTION=$(date +%s)
 NO_CONNECTION_ALERTED="false"
+NO_CONNECTION_GIVE_UP_ALERTED="false"
 ERROR_COOLDOWN_UNTIL=0
 ERROR_COOLDOWN_SECONDS="\${ERROR_COOLDOWN_SECONDS:-300}"
 RUNNER_RESTART_WINDOW_SECONDS="\${RUNNER_RESTART_WINDOW_SECONDS:-600}"
@@ -8864,6 +9302,49 @@ load_config() {
     return 0
 }
 
+# Per-message run settings (provider/model/effort/permissions). message_helper.py
+# writes them when the oldest unread message was queued with overrides.
+RUN_OVERRIDES_FILE="$STATE_DIR/.run_overrides.json"
+SAVED_RUN_CONFIG=()
+
+apply_run_overrides() {
+    [ -f "$RUN_OVERRIDES_FILE" ] || return 1
+    command -v jq >/dev/null 2>&1 || { rm -f "$RUN_OVERRIDES_FILE"; return 1; }
+    local ov_provider ov_model ov_approval ov_sandbox ov_effort
+    ov_provider=$(jq -r '.model_provider // empty' "$RUN_OVERRIDES_FILE" 2>/dev/null)
+    ov_model=$(jq -r '.model // empty' "$RUN_OVERRIDES_FILE" 2>/dev/null)
+    ov_approval=$(jq -r '.approval_mode // empty' "$RUN_OVERRIDES_FILE" 2>/dev/null)
+    ov_sandbox=$(jq -r '.sandbox_mode // empty' "$RUN_OVERRIDES_FILE" 2>/dev/null)
+    ov_effort=$(jq -r '.thinking_effort // empty' "$RUN_OVERRIDES_FILE" 2>/dev/null)
+    rm -f "$RUN_OVERRIDES_FILE"
+    [ -z "$ov_provider$ov_model$ov_approval$ov_sandbox$ov_effort" ] && return 1
+
+    SAVED_RUN_CONFIG=("$MODEL_PROVIDER" "$MODEL" "$APPROVAL_MODE" "$SANDBOX_MODE" "\${THINKING_EFFORT:-}")
+    [ -n "$ov_provider" ] && MODEL_PROVIDER="$ov_provider"
+    [ -n "$ov_model" ] && MODEL="$ov_model"
+    [ -n "$ov_approval" ] && APPROVAL_MODE="$ov_approval"
+    [ -n "$ov_sandbox" ] && SANDBOX_MODE="$ov_sandbox"
+    [ -n "$ov_effort" ] && THINKING_EFFORT="$ov_effort"
+
+    if ! validate_config; then
+        log WARN "Per-message run settings rejected by local permissions; using agent config"
+        restore_run_overrides
+        return 1
+    fi
+    log INFO "Applying per-message run settings: provider=$MODEL_PROVIDER, model=$MODEL, approval=$APPROVAL_MODE, sandbox=$SANDBOX_MODE, effort=\${THINKING_EFFORT:-default}"
+    return 0
+}
+
+restore_run_overrides() {
+    [ "\${#SAVED_RUN_CONFIG[@]}" -eq 5 ] || return 0
+    MODEL_PROVIDER="\${SAVED_RUN_CONFIG[0]}"
+    MODEL="\${SAVED_RUN_CONFIG[1]}"
+    APPROVAL_MODE="\${SAVED_RUN_CONFIG[2]}"
+    SANDBOX_MODE="\${SAVED_RUN_CONFIG[3]}"
+    THINKING_EFFORT="\${SAVED_RUN_CONFIG[4]}"
+    SAVED_RUN_CONFIG=()
+}
+
 # Fetch config from API (allows frontend to update settings dynamically)
 # NOTE: project_path is NOT fetched from API - it's only set via CLI at agent creation
 fetch_config_from_api() {
@@ -8917,73 +9398,11 @@ sync_models_to_backend() {
 }
 
 auto_sync_all_installed_providers_models() {
-    # Check each provider and sync its models if installed
-    log INFO "Auto-syncing available models for all providers..."
-
-    # 1. Copilot
-    if command -v copilot &>/dev/null; then
-        local copilot_models=""
-        copilot_models=$(timeout 10 copilot --help 2>/dev/null | grep -A 20 -- "--model <model>" | grep -o '".*"' | tr -d '"' | tr ',' '\n' | tr -d ' ' | grep -v '^$' | sort -u || echo "")
-        if [ -n "$copilot_models" ]; then
-            sync_models_to_backend "copilot" "$copilot_models"
-        fi
-    fi
-
-    # 1b. Antigravity: query the account-specific model roster.
-    if command -v agy &>/dev/null; then
-        local antigravity_models=""
-        antigravity_models=$(timeout 15 agy models 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u || echo "")
-        if [ -n "$antigravity_models" ]; then
-            sync_models_to_backend "antigravity" "$antigravity_models"
-        fi
-    fi
-
-    # 2. Kilo
-    if command -v kilo &>/dev/null; then
-        local kilo_models=""
-        kilo_models=$(timeout 10 kilo models 2>/dev/null | sed 's|^kilo/||' | sort -u || echo "")
-        if [ -n "$kilo_models" ]; then
-            sync_models_to_backend "kilo" "$kilo_models"
-        fi
-    fi
-
-    # 3. Gemini
-    if command -v gemini &>/dev/null && [ -n "\${GEMINI_API_KEY:-}" ]; then
-        local gemini_models=""
-        gemini_models=$(curl -s --connect-timeout 5 --max-time 15 "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>/dev/null | jq -r '.models[].name' 2>/dev/null | sed 's/models\///' | sort -V || echo "")
-        if [ -n "$gemini_models" ]; then
-            sync_models_to_backend "gemini" "$gemini_models"
-        fi
-    fi
-
-    # 4. OpenAI
-    if [ -n "\${OPENAI_API_KEY:-}" ]; then
-        local openai_models=""
-        openai_models=$(curl -s --connect-timeout 5 --max-time 15 https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" 2>/dev/null | jq -r '.data[].id' 2>/dev/null | grep -E "^(gpt-|o[1-9])" | sort -V || echo "")
-        if [ -n "$openai_models" ]; then
-            sync_models_to_backend "openai" "$openai_models"
-        fi
-    fi
-
-    # 5. OpenRouter
-    if [ -n "\${OPENROUTER_API_KEY:-}" ]; then
-        local or_models=""
-        or_models=$(curl -s --connect-timeout 5 --max-time 15 https://openrouter.ai/api/v1/models 2>/dev/null | jq -r '.data[].id' 2>/dev/null | sort -V || echo "")
-        if [ -n "$or_models" ]; then
-            sync_models_to_backend "openrouter" "$or_models"
-        fi
-    fi
-
-    # 6. Ollama
-    if curl -s --connect-timeout 2 --max-time 5 http://localhost:11434/api/tags &>/dev/null; then
-        local ollama_models=""
-        ollama_models=$(curl -s --connect-timeout 2 --max-time 10 http://localhost:11434/api/tags 2>/dev/null | jq -r '.models[].name' 2>/dev/null || echo "")
-        if [ -n "$ollama_models" ]; then
-            sync_models_to_backend "ollama" "$ollama_models"
-        fi
-    fi
-
-    return 0
+    command -v node >/dev/null 2>&1 || return 0
+    CHATSPACE_MODEL_PROVIDER="\${1:-}" CHATSPACE_MODEL_API_BASE="$API_BASE" CHATSPACE_MODEL_API_KEY="$API_KEY" node <<'CHATSPACE_MODEL_DISCOVERY'
+${modelDiscoverySource}
+main().catch(() => { process.exitCode = 1; });
+CHATSPACE_MODEL_DISCOVERY
 }
 
 # Reset remembered config error state after a valid config cycle.
@@ -9054,6 +9473,10 @@ validate_config() {
     provider_allowed=$(echo "$ALLOWED_PERMISSIONS" | jq -r ".\\"$check_provider\\" // empty" 2>/dev/null)
     
     if [ -z "$provider_allowed" ]; then
+        if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
+            log ERROR "Selected shared provider '$check_provider' is not enabled by the owner's permissions"
+            return 1
+        fi
         local allowed_list
         allowed_list=$(echo "$ALLOWED_PERMISSIONS" | jq -r '[keys[] | select(. != "inter_agent" and . != "project_path")] | join(", ")' 2>/dev/null)
 
@@ -9686,6 +10109,27 @@ check_no_connection_failsafe() {
     return 0
 }
 
+check_no_connection_giveup() {
+    local now
+    now=$(date +%s)
+    LAST_SUCCESSFUL_CONNECTION=$(get_last_successful_backend_connection)
+    local elapsed=$((now - LAST_SUCCESSFUL_CONNECTION))
+    if [ "$elapsed" -lt "$NO_CONNECTION_GIVE_UP_SECONDS" ]; then
+        NO_CONNECTION_GIVE_UP_ALERTED="false"
+        return 1
+    fi
+
+    # A full week of an unreachable backend is long enough that further
+    # per-minute retries are just wasted cycles. Stop attempting to reach
+    # the backend; a manual restart re-baselines LAST_SUCCESSFUL_CONNECTION
+    # and resumes normal polling once connectivity is restored.
+    if [ "$NO_CONNECTION_GIVE_UP_ALERTED" != "true" ]; then
+        log ERROR "Backend unreachable for \${elapsed}s (limit=$NO_CONNECTION_GIVE_UP_SECONDS s); giving up automated retries. Restart the agent once connectivity is restored."
+        NO_CONNECTION_GIVE_UP_ALERTED="true"
+    fi
+    return 0
+}
+
 send_error_message() {
     local message="$1"
     local priority="\${2:-1}"
@@ -9765,12 +10209,17 @@ run_cli_in_background() {
         run_with_clean_claude_env="true"
     fi
 
-    # Run command in background with output capture
     if [ "$run_with_clean_claude_env" = "true" ]; then
+        cmd_args=(env -u CLAUDECODE "\${cmd_args[@]}")
+    fi
+
+    # Shared replies carry structured recipients. Preserve the complete stdout
+    # and keep diagnostics on stderr instead of truncating/mixing the JSON.
+    if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
         if [ -n "$stdin_file" ]; then
-            env -u CLAUDECODE "\${cmd_args[@]}" < "$stdin_file" > >(tee "$stdout_capture") 2>&1 &
+            "\${cmd_args[@]}" < "$stdin_file" > "$stdout_capture" &
         else
-            env -u CLAUDECODE "\${cmd_args[@]}" > >(tee "$stdout_capture") 2>&1 &
+            "\${cmd_args[@]}" > "$stdout_capture" &
         fi
     else
         if [ -n "$stdin_file" ]; then
@@ -9832,6 +10281,20 @@ run_cli_in_background() {
 
     rm -f "$AGENT_PID_FILE"
     send_working_heartbeat "false" || true
+    if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ] && [ "$exit_code" -eq 0 ] &&
+       [ ! -s "$AGENT_RESPONSE_FILE" ] && [ -s "$stdout_capture" ]; then
+        if [ "$run_with_clean_claude_env" = "true" ]; then
+            # Claude's text stream includes intermediate tool progress. Its
+            # JSON result contains only the final answer, outside that stream.
+            if ! jq -er 'select(.type == "result" and .is_error != true) | .result | select(type == "string" and length > 0)' "$stdout_capture" > "$AGENT_RESPONSE_FILE"; then
+                rm -f "$AGENT_RESPONSE_FILE"
+                log ERROR "Claude did not return a successful final reply"
+                return 1
+            fi
+        else
+            cp "$stdout_capture" "$AGENT_RESPONSE_FILE"
+        fi
+    fi
     return $exit_code
 }
 
@@ -10056,8 +10519,12 @@ run_agent() {
 
             # Print mode - non-interactive, reads prompt from stdin
             claude_args+=("-p")
-            # Output format for non-interactive execution
-            claude_args+=("--output-format" "text")
+            # Shared callers need the final result, without tool progress.
+            if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
+                claude_args+=("--output-format" "json")
+            else
+                claude_args+=("--output-format" "text")
+            fi
             
             # Handle approval/sandbox modes for Claude
             # Claude uses --permission-mode and --dangerously-skip-permissions
@@ -10608,10 +11075,28 @@ run_agent() {
             fi
 
             local agy_args=()
+            # "agy models" prints "<id><TAB><label>"; older syncs saved the whole line.
+            local agy_tab=$'\\t'
+            local agy_model="\${MODEL%%"$agy_tab"*}"
 
-            if [ -n "$MODEL" ] && [ "$MODEL" != "default" ]; then
-                agy_args+=("--model" "$MODEL")
+            if [ -n "$agy_model" ] && [ "$agy_model" != "default" ]; then
+                agy_args+=("--model" "$agy_model")
             fi
+
+            case "$THINKING_EFFORT" in
+                low|medium|high)
+                    agy_args+=("--effort" "$THINKING_EFFORT")
+                    ;;
+                xhigh|max)
+                    log WARN "Antigravity only supports low, medium, or high effort; using high instead of '$THINKING_EFFORT'"
+                    agy_args+=("--effort" "high")
+                    ;;
+                "")
+                    ;;
+                *)
+                    log WARN "Ignoring unsupported Antigravity thinking_effort '$THINKING_EFFORT'"
+                    ;;
+            esac
 
             case "$SANDBOX_MODE" in
                 none)
@@ -10845,13 +11330,26 @@ run_agent() {
             if [ "$SANDBOX_MODE" = "none" ]; then
                 codex_args+=("--cd" "$PROJECT_ROOT")
             else
-                codex_args+=("--cd" "$SCRIPT_DIR")
+                codex_args+=("--cd" "$PROJECT_ROOT")
             fi
             
             # Add model if specified
             if [ -n "$MODEL" ]; then
                 codex_args+=("--model" "$MODEL")
             fi
+
+            # Forward the dashboard's reasoning control to Codex. GPT-6 Astra
+            # supports low, medium, high, xhigh, and max (but not none/minimal).
+            case "$THINKING_EFFORT" in
+                low|medium|high|xhigh|max)
+                    codex_args+=("-c" "model_reasoning_effort='$THINKING_EFFORT'")
+                    ;;
+                "")
+                    ;;
+                *)
+                    log WARN "Ignoring unsupported Codex thinking_effort '$THINKING_EFFORT'"
+                    ;;
+            esac
             
             codex_args+=("-")
             
@@ -10982,7 +11480,7 @@ run_agent() {
             if [ "$SANDBOX_MODE" = "none" ]; then
                 codex_args+=("--cd" "$PROJECT_ROOT")
             else
-                codex_args+=("--cd" "$SCRIPT_DIR")
+                codex_args+=("--cd" "$PROJECT_ROOT")
             fi
             
             # Handle model and provider for codex
@@ -11016,6 +11514,19 @@ run_agent() {
                 lmstudio)
                     # Use LM Studio local provider  
                     codex_args+=("--oss" "--local-provider" "lmstudio" "--model" "$MODEL")
+                    ;;
+            esac
+
+            # Apply the configured reasoning level for every Codex-backed
+            # provider. This includes GPT-6 Astra through ChatGPT or the API.
+            case "$THINKING_EFFORT" in
+                low|medium|high|xhigh|max)
+                    codex_args+=("-c" "model_reasoning_effort='$THINKING_EFFORT'")
+                    ;;
+                "")
+                    ;;
+                *)
+                    log WARN "Ignoring unsupported Codex thinking_effort '$THINKING_EFFORT'"
                     ;;
             esac
             
@@ -11113,6 +11624,11 @@ run_agent() {
             ;;
     esac
     
+    # Shared callers deliver this response through their encrypted conversation API.
+    if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
+        return "\${cli_exit:-0}"
+    fi
+
     # Check for response file (required for all agents)
     if [ -f "$AGENT_RESPONSE_FILE" ]; then
         local response
@@ -11284,6 +11800,14 @@ main() {
             has_self_wakeup="true"
         fi
 
+        # After a full week without a successful backend connection, stop
+        # attempting network calls entirely instead of retrying forever.
+        # Stop/restart requests above are still honored while idling.
+        if check_no_connection_giveup; then
+            sleep 300
+            continue
+        fi
+
         local check_result
         check_result=$(check_for_messages)
         update_server_poll_interval
@@ -11374,17 +11898,27 @@ main() {
                 log SUCCESS "Self wake signal detected!"
             fi
 
+            local run_overrides_applied="false"
+            if [ "$has_messages" = "true" ] && apply_run_overrides; then
+                run_overrides_applied="true"
+            fi
+
             history=$(get_history)
             local prompt
             prompt=$(build_agent_prompt "$combined" "$history")
 
             local run_exit=0
             local run_success=0
-            if run_agent "$prompt"; then
+            local agent_rc=0
+            run_agent "$prompt" || agent_rc=$?
+            if [ "$run_overrides_applied" = "true" ]; then
+                restore_run_overrides
+            fi
+            if [ "$agent_rc" -eq 0 ]; then
                 CONSECUTIVE_FAILURES=0
                 run_success=1
             else
-                run_exit=$?
+                run_exit=$agent_rc
                 if [ "$run_exit" -eq 143 ] && check_stop_flag; then
                     log INFO "Stop request confirmed during command execution"
                     handle_stop
@@ -11490,6 +12024,99 @@ supervise_main() {
         sleep "$delay"
     done
 }
+
+# Metadata refreshes do not poll conversations or invoke an inference turn.
+if [ "\${CHATSPACE_MODEL_SYNC_ONLY:-0}" = "1" ]; then
+    auto_sync_all_installed_providers_models
+    exit 0
+fi
+
+# Shared mode executes one supplied transcript with the existing permission mapping.
+# It never polls private history or sends a fallback response to the private chat.
+if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
+    DEBUG_SEND_COMMAND_PREVIEW="false"
+    send_message() { return 0; }
+    send_error_message() { log ERROR "$1" >&2; }
+    # The outer serialized listener maintains heartbeats and cancellation.
+    # A provider subprocess must not consume another private polling quota.
+    send_working_heartbeat() { return 0; }
+    check_stop_flag() { return 1; }
+    load_allowed_permissions >&2
+    load_config >&2
+    MODEL_PROVIDER="\${CHATSPACE_SHARED_PROVIDER:-$MODEL_PROVIDER}"
+    MODEL="\${CHATSPACE_SHARED_MODEL:-$MODEL}"
+    if [ -n "\${CHATSPACE_SHARED_RUN_CONFIG:-}" ]; then
+        shared_approval=$(printf '%s' "$CHATSPACE_SHARED_RUN_CONFIG" | jq -r '.approval_mode // empty')
+        shared_sandbox=$(printf '%s' "$CHATSPACE_SHARED_RUN_CONFIG" | jq -r '.sandbox_mode // empty')
+        [ -z "$shared_approval" ] || APPROVAL_MODE="$shared_approval"
+        [ -z "$shared_sandbox" ] || SANDBOX_MODE="$shared_sandbox"
+        if printf '%s' "$CHATSPACE_SHARED_RUN_CONFIG" | jq -e 'has("thinking_effort")' >/dev/null; then
+            THINKING_EFFORT=$(printf '%s' "$CHATSPACE_SHARED_RUN_CONFIG" | jq -r '.thinking_effort // empty')
+        fi
+    fi
+    validate_config >&2 || exit 1
+    shared_output_dir=$(mktemp -d)
+    chmod 700 "$shared_output_dir"
+    AGENT_RESPONSE_FILE="$shared_output_dir/response.json"
+    AGENT_PID_FILE="$shared_output_dir/provider.pid"
+    shared_prompt=$(cat)
+    shared_exit=0
+    run_agent "$shared_prompt" >&2 || shared_exit=$?
+    if [ "$shared_exit" -eq 0 ] && [ -s "$AGENT_RESPONSE_FILE" ]; then
+        cat "$AGENT_RESPONSE_FILE"
+    else
+        shared_exit=1
+    fi
+    rm -rf "$shared_output_dir"
+    exit "$shared_exit"
+fi
+
+# Replace this listener with one serialized private/shared listener when enabled.
+# Single-turn provider subprocesses exit above, so they cannot enroll recursively.
+if [ "\${CHATSPACE_TRUSTED_SHARING:-1}" = "1" ] && command -v node >/dev/null 2>&1; then
+    if ! sharing_status=$(curl -fsS --max-time 10 "$API_BASE/agent/sharing-status" 2>/dev/null) || \\
+        ! printf '%s' "$sharing_status" | jq -e 'has("enabled") and (.enabled | type == "boolean")' >/dev/null 2>&1; then
+        log WARN "Sharing availability could not be checked; the supervisor will retry the connection"
+        exit 1
+    fi
+    if [ "$(printf '%s' "$sharing_status" | jq -r '.enabled // false' 2>/dev/null || true)" = "true" ]; then
+        load_allowed_permissions
+        load_config
+        validate_config || exit 1
+        # A listener killed without cleanup leaves its lock behind, and the shared
+        # runner then refuses to start until someone deletes it by hand. Clear the
+        # lock only when its recorded PID is no longer a live shared-runner.
+        sharing_lock="$STATE_DIR/shared-agent.json.lock"
+        if [ -f "$sharing_lock" ]; then
+            lock_pid=$(tr -cd '0-9' < "$sharing_lock" 2>/dev/null || true)
+            if [ -n "$lock_pid" ] && ps -p "$lock_pid" -o args= 2>/dev/null | grep -q "shared-runner.js"; then
+                log ERROR "This agent's shared listener is already running (PID $lock_pid). Use agent-cli.sh --restart <agent> to replace it."
+                exit 0
+            fi
+            rm -f "$sharing_lock"
+            log INFO "Removed stale shared listener lock"
+        fi
+        sharing_bundle=$(mktemp "$STATE_DIR/.shared-runner.XXXXXX.js")
+        if ! curl -fsS --max-time 30 "$API_BASE/agent/shared-runner.js" -o "$sharing_bundle" || ! node --check "$sharing_bundle"; then
+            rm -f "$sharing_bundle"
+            log ERROR "Shared listener could not be prepared; restart after fixing the connection."
+            exit 1
+        fi
+        chmod 700 "$sharing_bundle"
+        mv "$sharing_bundle" "$STATE_DIR/shared-runner.js"
+        export CHATSPACE_BRIDGE_STATE="$STATE_DIR/shared-agent.json"
+        export CHATSPACE_SHARED_PROFILES="$STATE_DIR/shared-profiles.json"
+        export CHATSPACE_SHARED_EXPORT_DIR="$STATE_DIR/shared-exports"
+        export CHATSPACE_SHARED_MANAGED_RUNNER="$SCRIPT_DIR/$(basename "\${BASH_SOURCE[0]}")"
+        export CHATSPACE_SHARED_PROJECT="$PROJECT_ROOT"
+        export CHATSPACE_SHARED_PROVIDER="$MODEL_PROVIDER"
+        export CHATSPACE_SHARED_MODEL="$MODEL"
+        export CHATSPACE_SHARED_PROTOCOL=2
+        export CHATSPACE_SHARED_EXECUTION_MODE=trusted
+        log INFO "Starting trusted sharing with the existing provider permissions"
+        exec node "$STATE_DIR/shared-runner.js" run-managed
+    fi
+fi
 
 supervise_main`;
 }

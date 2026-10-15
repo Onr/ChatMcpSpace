@@ -13,6 +13,11 @@ describe('Mobile layout regression guards', () => {
   const dashboard = fs.readFileSync(dashboardPath, 'utf8');
   const multiChat = fs.readFileSync(multiChatPath, 'utf8');
 
+  it('loads compiled utilities without a browser stylesheet compiler', () => {
+    expect(layout).toContain('/css/tailwind.css?v=<%= Date.now() %>');
+    expect(layout).not.toContain('cdn.tailwindcss.com');
+  });
+
   it('viewport meta opts into interactive-widget=resizes-content so keyboard shrinks layout viewport on Chrome/Android', () => {
     expect(layout).toMatch(/<meta name="viewport"[^>]*interactive-widget=resizes-content/);
   });
@@ -202,12 +207,30 @@ describe('Mobile layout regression guards', () => {
   });
 
   it('height-constrains wide mobile browsers so message history scrolls inside chat', () => {
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)/);
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?html:has\(#dashboardRoot\),\s*\n\s*body:has\(#dashboardRoot\)\s*\{[\s\S]*?overflow:\s*hidden\s*!important;/);
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?#dashboardRoot > \.dashboard-main-grid\s*\{[\s\S]*?height:\s*100%\s*!important;/);
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?\.dashboard-main-grid > #multiChatContainer > \.chat-tile--main\s*\{[\s\S]*?max-height:\s*100%\s*!important;/);
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?#conversationArea\s*\{[\s\S]*?overflow-y:\s*auto\s*!important;/);
-    expect(css).toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?#messageInputArea\s*\{[\s\S]*?position:\s*absolute\s*!important;/);
+    const bandRe = '@media \\(min-width:\\s*768px\\) and \\(max-width:\\s*1023px\\),\\s*\\(pointer:\\s*coarse\\) and \\(min-width:\\s*768px\\) and \\(max-width:\\s*1180px\\)';
+    expect(css).toMatch(new RegExp(bandRe));
+    expect(css).toMatch(new RegExp(bandRe + '[\\s\\S]*?html:has\\(#dashboardRoot\\),\\s*\\n\\s*body:has\\(#dashboardRoot\\)\\s*\\{[\\s\\S]*?overflow:\\s*hidden\\s*!important;'));
+    expect(css).toMatch(new RegExp(bandRe + '[\\s\\S]*?#dashboardRoot > \\.dashboard-main-grid\\s*\\{[\\s\\S]*?height:\\s*100%\\s*!important;'));
+    expect(css).toMatch(new RegExp(bandRe + '[\\s\\S]*?\\.dashboard-main-grid > #multiChatContainer > \\.chat-tile--main\\s*\\{[\\s\\S]*?max-height:\\s*100%\\s*!important;'));
+    expect(css).toMatch(new RegExp(bandRe + '[\\s\\S]*?#conversationArea\\s*\\{[\\s\\S]*?overflow-y:\\s*auto\\s*!important;'));
+    expect(css).toMatch(new RegExp(bandRe + '[\\s\\S]*?#messageInputArea\\s*\\{[\\s\\S]*?position:\\s*absolute\\s*!important;'));
+  });
+
+  it('height-constrains narrow desktop windows (mouse pointer) so the whole page never scrolls', () => {
+    // dashboard.js already flips into single-column mobile list/chat mode for any
+    // window under 1024px wide regardless of pointer type (MOBILE_LIST_ONLY_MEDIA_QUERY
+    // = '(max-width: 1023px)'). The viewport-bound app shell CSS used to require
+    // pointer:coarse, so a resized desktop browser window between 768px and 1023px
+    // got the mobile layout without the height/overflow constraints, leaving the page
+    // taller than the viewport and forcing users to scroll the whole window to reach
+    // the composer.
+    expect(js).toMatch(/const MOBILE_LIST_ONLY_MEDIA_QUERY = '\(max-width: 1023px\)'/);
+    expect(css).toMatch(/@media \(min-width:\s*768px\) and \(max-width:\s*1023px\),\s*\(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)\s*\{/);
+    expect(css).toMatch(/@media \(min-width:\s*768px\) and \(max-width:\s*1023px\),\s*\(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?html:has\(#dashboardRoot\),\s*\n\s*body:has\(#dashboardRoot\)\s*\{[\s\S]*?overflow:\s*hidden\s*!important;/);
+    expect(css).toMatch(/@media \(min-width:\s*768px\) and \(max-width:\s*1023px\),\s*\(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?#conversationArea\s*\{[\s\S]*?overflow-y:\s*auto\s*!important;/);
+    expect(css).toMatch(/@media \(min-width:\s*768px\) and \(max-width:\s*1023px\),\s*\(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)[\s\S]*?#messageInputArea\s*\{[\s\S]*?position:\s*absolute\s*!important;/);
+    // Must not regress back to a pointer:coarse-only condition for this band.
+    expect(css).not.toMatch(/@media \(pointer:\s*coarse\) and \(min-width:\s*768px\) and \(max-width:\s*1180px\)\s*\{/);
   });
 
   it('binds list toggle controls outside dock initialization path', () => {
@@ -255,9 +278,73 @@ describe('Mobile layout regression guards', () => {
 
   it('collapses the main interactive Agent Space when the mobile composer gains focus', () => {
     expect(js).toMatch(/function collapseMainInteractiveSpaceForMobileFocus\(\)/);
-    expect(js).toMatch(/if \(!isMobileListOnlyMode\(\) \|\| !selectedAgentId\) return;/);
+    expect(js).toMatch(/if \(\(!isMobileListOnlyMode\(\) && !isDashboardFastModeActive\(\)\) \|\| !selectedAgentId\) return;/);
     expect(js).toMatch(/setMainInteractiveContentVisibility\(false\);/);
     expect(js).toMatch(/userMessageInput\.addEventListener\('focus',\s*\(\) => \{[\s\S]*?collapseMainInteractiveSpaceForMobileFocus\(\);/);
+  });
+
+  it('keeps the Agent Space HTML message viewer available in mobile Fast Mode', () => {
+    // The viewer must NOT be in the blanket fast-mode hide list any more.
+    expect(css).not.toMatch(/body\.dashboard-fast-mode #mainInteractiveSpace,/);
+
+    // It is hidden only on the placeholder screen and in the All Chats view.
+    expect(css).toMatch(/body\.dashboard-fast-mode:not\(\[data-agent-selected="true"\]\) #mainInteractiveSpace,\s*body\.dashboard-fast-mode\[data-all-chats-view="true"\] #mainInteractiveSpace\s*\{\s*display:\s*none\s*!important;\s*\}/);
+
+    // Fast Mode caps the viewer so it cannot squeeze the conversation away,
+    // including on touch-landscape shells outside the 767px mobile block.
+    expect(css).toMatch(/body\.dashboard-fast-mode #mainInteractiveSpace\s*\{[\s\S]*?max-height:\s*30vh;[\s\S]*?overflow:\s*hidden;/);
+    expect(css).toMatch(/body\.dashboard-fast-mode #mainInteractiveContent\s*\{[\s\S]*?max-height:\s*25vh\s*!important;/);
+
+    // The rich-content pipeline that feeds the viewer is not fast-mode gated.
+    expect(js).toMatch(/if \(window\.RichRendering\)\s*\{\s*updateMainInteractiveSpace\(\);/);
+    expect(dashboard).toMatch(/id="mainInteractiveSpace"/);
+    expect(dashboard).toMatch(/id="mainInteractiveContent"/);
+  });
+
+  it('keeps the per-message text-to-speech button available in mobile Fast Mode', () => {
+    // The TTS button must NOT be in the blanket fast-mode hide list any more,
+    // while the info button (a separate, unrelated affordance) stays hidden.
+    expect(css).not.toMatch(/body\.dashboard-fast-mode \.message-tts-btn\s*\{[\s\S]*?display:\s*none/);
+    expect(css).toMatch(/body\.dashboard-fast-mode \.council-orbit,[\s\S]*?body\.dashboard-fast-mode #interAgentStatsInline,[\s\S]*?body\.dashboard-fast-mode \.message-info-btn\s*\{[\s\S]*?display:\s*none\s*!important;/);
+
+    // The button-creation and playback logic itself is not fast-mode gated.
+    expect(js).toMatch(/function attachMessageTtsButton\(bubble, message\)\s*\{/);
+    expect(js).not.toMatch(/function attachMessageTtsButton\(bubble, message\)\s*\{\s*if \(isDashboardFastModeActive/);
+    expect(js).toMatch(/speakMessageText\(normalizedContent, ttsButton, \{/);
+  });
+
+  it('supports resumable message TTS with message-scoped checkpoints and word seeking', () => {
+    expect(js).toMatch(/const MESSAGE_TTS_CHECKPOINT_STORAGE_KEY = 'dashboard_message_tts_checkpoints_v1'/);
+    expect(js).toMatch(/function getMessageTtsPlaybackKey\(message, text\)/);
+    expect(js).toMatch(/messageId \? `message:\$\{messageId\}` : `text:\$\{hashMessageTtsText\(text\)\}`/);
+    expect(js).toMatch(/function pauseActiveMessagePlayback\(\)/);
+    expect(js).toMatch(/saveMessageTtsCheckpoint\(session\.key, session\.text, session\.offset, session\.rate\)/);
+    expect(js).toMatch(/utterance\.onboundary = \(event\) => \{/);
+    expect(js).toMatch(/startOffset \+ Math\.max\(0, Number\(event\.charIndex\) \|\| 0\)/);
+    expect(js).toMatch(/\.message-tts-word/);
+    expect(js).toMatch(/startOffset: Number\(word\.dataset\.offset \|\| 0\)/);
+    expect(js).toMatch(/MESSAGE_TTS_CHECKPOINT_LIMIT/);
+    expect(js).toMatch(/if \(activeMessageTtsSession\?\.status === 'playing'\) pauseActiveMessagePlayback\(\)/);
+  });
+
+  it('renders an accessible responsive message TTS player', () => {
+    expect(js).toMatch(/player\.setAttribute\('aria-label', 'Message audio player'\)/);
+    expect(js).toMatch(/class="message-tts-progress" type="range"/);
+    expect(js).toMatch(/class="message-tts-status sr-only" aria-live="polite"/);
+    expect(js).toMatch(/class="message-tts-transcript" hidden aria-label="Choose a word/);
+    expect(css).toMatch(/\.message-tts-player\s*\{[\s\S]*?width:\s*100%/);
+    expect(css).toMatch(/@media \(max-width:\s*767px\), \(pointer:\s*coarse\) and \(max-width:\s*1180px\)[\s\S]*?\.message-tts-control\s*\{[\s\S]*?min-height:\s*2\.75rem/);
+    expect(css).toMatch(/\.message-tts-transcript\s*\{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*?animation:\s*none/);
+  });
+
+  it('prefers US English voices for browser TTS', () => {
+    const voiceControl = fs.readFileSync(path.join(__dirname, '../../public/js/voice-control.js'), 'utf8');
+    expect(js).not.toContain('Google UK English Female');
+    expect(js).toMatch(/lang === 'en-us'/);
+    expect(js).toMatch(/utterance\.lang = 'en-US'/);
+    expect(voiceControl).toMatch(/startsWith\('en-'\)/);
+    expect(voiceControl).toMatch(/utterance\.lang = 'en-US'/);
   });
 
   it('uses mobile conversation swipes as chat history back and forward navigation', () => {
@@ -269,6 +356,19 @@ describe('Mobile layout regression guards', () => {
     expect(js).toMatch(/dx > 0[\s\S]*?navigateChatHistoryBy\(-1\)/);
     expect(js).toMatch(/dx > 0[\s\S]*?else \{[\s\S]*?navigateChatHistoryBy\(1\)/);
     expect(js).not.toMatch(/dx > 0[\s\S]*?navigateAgentListBy\(-1\)/);
+  });
+
+  it('uses mobile browser Back for prior chats and the agent list before leaving the dashboard', () => {
+    expect(js).toMatch(/const MOBILE_BROWSER_NAVIGATION_STATE_KEY = 'agentsMcpDashboardMobileNavigation'/);
+    expect(js).toMatch(/function initializeMobileBrowserNavigation\(\)/);
+    expect(js).toMatch(/window\.history\.replaceState\([\s\S]*?view: 'list'/);
+    expect(js).toMatch(/window\.addEventListener\('popstate', handleMobileBrowserNavigation\)/);
+    expect(js).toMatch(/writeMobileBrowserNavigationState\('chat', \{ agentId \}\)/);
+    expect(js).toMatch(/if \(navigationState\.view === 'list'\)[\s\S]*?setMobileListExpanded\(true, \{ skipBrowserHistory: true \}\)/);
+    expect(js).toMatch(/selectAgent\(agent\.agentId, agent\.name,[\s\S]*?skipMobileBrowserHistory: true/);
+    expect(js).toMatch(/if \(expanded && selectedAgentId && !skipBrowserHistory\)[\s\S]*?writeMobileBrowserNavigationState\('list'\)/);
+    expect(js).toMatch(/getMobileBrowserNavigationState\(\)\?\.view === 'list'[\s\S]*?window\.history\.back\(\)/);
+    expect(js).toMatch(/setMobileListExpanded\(false, \{ skipBrowserHistory: true \}\)/);
   });
 
   it('removes pin-chat affordances from mobile and touch layouts', () => {
@@ -321,7 +421,8 @@ describe('Mobile layout regression guards', () => {
     expect(css).toMatch(/\.mobile-fast-mode-toggle\[aria-pressed="true"\] \.mobile-fast-mode-toggle__thumb\s*\{[\s\S]*?transform:\s*translateX/);
     expect(css).not.toMatch(/\.mobile-fast-mode-toggle\s*\{[^}]*position:\s*absolute/);
     expect(dashboard).not.toMatch(/id="mobileFastModeToggle"/);
-    expect(css).toMatch(/body\.dashboard-fast-mode #mainInteractiveSpace,[\s\S]*?body\.dashboard-fast-mode #interAgentStatsInline,[\s\S]*?body\.dashboard-fast-mode \.message-tts-btn,[\s\S]*?body\.dashboard-fast-mode \.message-info-btn\s*\{[\s\S]*?display:\s*none\s*!important;/);
+    expect(css).toMatch(/body\.dashboard-fast-mode \.council-orbit,[\s\S]*?body\.dashboard-fast-mode #interAgentStatsInline,[\s\S]*?body\.dashboard-fast-mode \.message-info-btn\s*\{[\s\S]*?display:\s*none\s*!important;/);
+    expect(css).not.toMatch(/body\.dashboard-fast-mode \.message-tts-btn\s*\{[\s\S]*?display:\s*none/);
     expect(css).toMatch(/body\.dashboard-fast-mode\[data-agent-selected="true"\]:not\(\[data-all-chats-view="true"\]\) #messageInputArea,[\s\S]*?display:\s*block\s*!important/);
     expect(css).toMatch(/body\.dashboard-fast-mode #messageInputArea #agentConfigBtn\s*\{[\s\S]*?display:\s*none\s*!important;/);
     expect(css).toMatch(/body\.dashboard-fast-mode #messageInputArea \.mobile-agent-status-strip\s*\{[\s\S]*?pointer-events:\s*auto;[\s\S]*?cursor:\s*pointer;/);
@@ -424,6 +525,11 @@ describe('Mobile layout regression guards', () => {
     expect(css).toMatch(/#collapseMobileListBtn svg\s*\{[\s\S]*?width:\s*1\.18rem;[\s\S]*?height:\s*1\.18rem;/);
   });
 
+  it('lets the expanded mobile agent list escape the council card clipping boundary', () => {
+    expect(js).toMatch(/function setMobileListExpanded\([\s\S]*?classList\.toggle\('mobile-agent-list-open',\s*expanded\)/);
+    expect(css).toMatch(/@media \(max-width:\s*767px\)[\s\S]*?\.council-chamber\.mobile-agent-list-open\s*\{[\s\S]*?overflow:\s*visible\s*!important;/);
+  });
+
   it('avoids rebuilding hidden orbit and dock DOM while Fast Mode is active', () => {
     expect(js).toMatch(/function isDashboardFastModeActive\(\)/);
     expect(js).toMatch(/const FAST_MODE_AGENT_RENDER_MIN_INTERVAL_MS = 12000/);
@@ -438,11 +544,8 @@ describe('Mobile layout regression guards', () => {
     expect(js).toMatch(/function getCachedMarbleSvg\(agentId,\s*size,\s*agentName = '',\s*context = 'avatar'\)/);
   });
 
-  it('does not auto-render full old chat history on mobile or Fast Mode', () => {
-    expect(js).toMatch(/function shouldAutoLoadOlderMessages\(agentId\)/);
-    expect(js).toMatch(/if \(isDashboardFastModeActive\(\)\) return false;/);
-    expect(js).toMatch(/if \(isMobileListOnlyMode\(\)\) return false;/);
-    expect(js).toMatch(/pointer:\s*coarse[\s\S]*max-width:\s*1180px/);
-    expect(js).toMatch(/if \(data\.hasMore && shouldAutoLoadOlderMessages\(agentId\)\) \{[\s\S]*?loadOlderMessagesInBackground\(agentId,\s*requestToken\);/);
+  it('loads older chat history on demand when scrolled near the top, not on open', () => {
+    expect(js).not.toMatch(/shouldAutoLoadOlderMessages/);
+    expect(js).toMatch(/convArea\.scrollTop > 300\) return;[\s\S]*?loadOlderMessagesInBackground\(selectedAgentId,\s*null\);/);
   });
 });

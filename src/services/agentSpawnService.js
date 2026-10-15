@@ -403,6 +403,7 @@ async function validateSpawnRequest(userId, parentAgentId, childAgentName) {
  * @param {string} [params.model]             – model name override (default: inherit)
  * @param {string} [params.projectPath]       – working directory override for spawned child
  * @param {boolean} [params.canSpawn=false]   – allow child to spawn its own children
+ * @param {string[]|undefined} [params.groupSelectors] – group IDs/names; undefined inherits parent groups, [] leaves ungrouped
  * @returns {Promise<Object>} spawned child agent info
  */
 async function spawnAgent({
@@ -413,7 +414,8 @@ async function spawnAgent({
   modelProvider,
   model,
   projectPath,
-  canSpawn = false
+  canSpawn = false,
+  groupSelectors
 }) {
   // ── Validate ──────────────────────────────────────────────────────────
   const validation = await validateSpawnRequest(userId, parentAgentId, childAgentName);
@@ -462,6 +464,54 @@ async function spawnAgent({
     );
 
     const childAgent = insertResult.rows[0];
+
+    // Keep children with their creator by default. Callers can override this
+    // with one or more group IDs/names, or pass an empty list for no groups.
+    let selectedGroups;
+    if (groupSelectors === undefined) {
+      const inheritedGroups = await client.query(
+        `SELECT g.group_id, g.group_name
+         FROM agent_group_members gm
+         JOIN agent_groups g ON g.group_id = gm.group_id
+         WHERE gm.agent_id = $1 AND g.user_id = $2
+         ORDER BY g.group_name ASC`,
+        [parentAgentId, userId]
+      );
+      selectedGroups = inheritedGroups.rows;
+    } else {
+      selectedGroups = [];
+      const seenGroupIds = new Set();
+      for (const selector of groupSelectors) {
+        const groupResult = await client.query(
+          `SELECT group_id, group_name
+           FROM agent_groups
+           WHERE user_id = $1 AND (group_id::text = $2 OR group_name = $2)`,
+          [userId, selector]
+        );
+        if (groupResult.rows.length === 0) {
+          throw new SpawnError(`Group "${selector}" was not found for this user.`, 'SPAWN_GROUP_NOT_FOUND');
+        }
+        const group = groupResult.rows[0];
+        if (!seenGroupIds.has(group.group_id)) {
+          seenGroupIds.add(group.group_id);
+          selectedGroups.push(group);
+        }
+      }
+    }
+
+    for (const group of selectedGroups) {
+      await client.query(
+        `INSERT INTO agent_group_members (group_id, agent_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [group.group_id, childAgent.agent_id]
+      );
+    }
+
+    runtimeState.allowedPermissions.inter_agent = {
+      ...(runtimeState.allowedPermissions.inter_agent || {}),
+      groups: selectedGroups.map(group => group.group_name)
+    };
+
     await persistAgentRuntimeState({
       agentId: childAgent.agent_id,
       config: runtimeState.agentConfig,
@@ -488,6 +538,10 @@ async function spawnAgent({
       spawnDepth: childAgent.spawn_depth,
       parentAgentId,
       createdAt: childAgent.created_at,
+      groups: selectedGroups.map(group => ({
+        groupId: group.group_id,
+        groupName: group.group_name
+      })),
       loopPid: null,
       logFile: null,
       runtime: {

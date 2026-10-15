@@ -61,6 +61,12 @@ function normalizeRuntimeConfig(config, defaults = DEFAULT_AGENT_API_CONFIG) {
     normalized.sandbox_mode = 'none';
   }
 
+  // Older model syncs stored "<id>\t<label>" lines from `agy models` as the
+  // model value; keep only the id so the CLI receives a valid --model.
+  if (typeof normalized.model === 'string' && normalized.model.includes('\t')) {
+    normalized.model = normalized.model.split('\t')[0].trim() || 'default';
+  }
+
   return normalized;
 }
 
@@ -192,8 +198,8 @@ async function persistAgentRuntimeState({
     ? dbClient.query.bind(dbClient)
     : query;
 
-  const normalizedConfig = normalizeRuntimeConfig(config, {});
-  const normalizedAllowedPermissions = normalizeAllowedPermissions(allowedPermissions);
+  const normalizedConfig = config === undefined ? null : normalizeRuntimeConfig(config, {});
+  const normalizedAllowedPermissions = allowedPermissions === undefined ? null : normalizeAllowedPermissions(allowedPermissions);
 
   await runner(
     `UPDATE agents
@@ -202,8 +208,8 @@ async function persistAgentRuntimeState({
      WHERE agent_id = $1`,
     [
       agentId,
-      JSON.stringify(normalizedConfig),
-      JSON.stringify(normalizedAllowedPermissions)
+      normalizedConfig === null ? null : JSON.stringify(normalizedConfig),
+      normalizedAllowedPermissions === null ? null : JSON.stringify(normalizedAllowedPermissions)
     ]
   );
 

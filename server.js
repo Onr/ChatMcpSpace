@@ -41,9 +41,12 @@ if (fs.existsSync(serviceAccountPath)) {
 
 // Import route handlers
 const pageRoutes = require('./src/routes/pageRoutes');
+const mcpRoutes = require('./src/routes/mcpRoutes');
 const agentApiRoutes = require('./src/routes/agentApiRoutes');
 const userApiRoutes = require('./src/routes/userApiRoutes');
 const emailApiRoutes = require('./src/routes/emailApiRoutes');
+const guestRoutes = require('./src/shared/guestRoutes');
+const { isPublicHttpsConfigured } = require('./src/utils/publicHttps');
 
 // Create Express app
 const app = express();
@@ -55,6 +58,10 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PROD = NODE_ENV === 'production';
 const HTTPS_ENABLED = String(process.env.HTTPS_ENABLED || '').toLowerCase() === 'true';
 const ENABLE_HTTP_REDIRECT = String(process.env.ENABLE_HTTP_REDIRECT || '').toLowerCase() === 'true';
+const PUBLIC_HTTPS_ENABLED = isPublicHttpsConfigured({
+  httpsEnabled: HTTPS_ENABLED,
+  baseUrl: process.env.BASE_URL
+});
 
 // Trust reverse proxy for secure cookies / HTTPS detection
 app.set('trust proxy', 1);
@@ -101,21 +108,21 @@ const cspDirectives = {
 };
 
 // Only upgrade insecure requests when HTTPS is enabled (not for HTTP dev mode)
-if (HTTPS_ENABLED) {
+if (PUBLIC_HTTPS_ENABLED) {
   cspDirectives.upgradeInsecureRequests = [];
 } else if (IS_PROD) {
-  // Security warning: production should use HTTPS
+  // Security warning: production should use HTTPS directly or at its public reverse proxy.
   console.warn('⚠️  WARNING: Running in production mode without HTTPS. This is a security risk!');
-  console.warn('   Set HTTPS_ENABLED=true and configure SSL certificates for production.');
+  console.warn('   Configure an https:// BASE_URL behind a TLS reverse proxy, or enable direct HTTPS.');
 }
 
 app.use(helmet({
   contentSecurityPolicy: {
     directives: cspDirectives
   },
-  // Disable HSTS when not using HTTPS to prevent browsers from forcing HTTPS
+  // Disable HSTS only when the public deployment is not using HTTPS.
   // on HTTP-only dev servers (especially when accessed via IP instead of localhost)
-  strictTransportSecurity: HTTPS_ENABLED ? undefined : false,
+  strictTransportSecurity: PUBLIC_HTTPS_ENABLED ? undefined : false,
 }));
 
 // Explicit CORS allowlist for API routes (same-origin only)
@@ -234,11 +241,29 @@ if (IS_PROD) {
 }
 
 // Mount route handlers
+// OAuth discovery, consent, token, and MCP protocol endpoints. This must run
+// after session initialization and before page routes can render fallbacks.
+app.use('/', mcpRoutes);
+
 // Page routes (HTML rendering)
+app.get('/guest', (req, res) => {
+  if (process.env.FEATURE_SHARED_CONVERSATIONS !== 'true' || process.env.FEATURE_GUEST_SHARING !== 'true') {
+    return res.status(404).send('Not found');
+  }
+  res.set({
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer'
+  });
+  res.render('guest-shared', { layout: false });
+});
 app.use('/', pageRoutes);
 
 // Agent API routes (RESTful API for AI agents)
 app.use('/api/agent', agentApiRoutes);
+
+// Guest routes use a dedicated opaque cookie and never establish account
+// identity on req.user or req.session.userId.
+app.use('/api/guest', guestRoutes);
 
 // User API routes (AJAX endpoints for frontend). These use browser sessions,
 // so state-changing requests must carry the page CSRF token.
@@ -329,7 +354,12 @@ function logStartup({ port, scheme, tlsEnabled }) {
   console.log(`Environment: ${NODE_ENV}`);
   console.log(`Server running on port ${port}`);
   console.log(`URL: ${baseUrl}`);
-  console.log(`TLS: ${tlsEnabled ? 'enabled (HTTPS)' : 'disabled (HTTP only)'}`);
+  const tlsStatus = tlsEnabled
+    ? 'enabled directly (HTTPS)'
+    : PUBLIC_HTTPS_ENABLED
+      ? 'enabled at reverse proxy (HTTPS public URL)'
+      : 'disabled (HTTP only)';
+  console.log(`TLS: ${tlsStatus}`);
 
   if (isLocalAuthMode()) {
     console.log('='.repeat(60));
@@ -376,7 +406,11 @@ async function startServer() {
     // Run all SQL migrations from the migrations directory
     const migrationsSuccess = await runAllMigrations();
     if (!migrationsSuccess) {
-      console.warn('⚠ Some migrations encountered issues. The application may not work correctly.');
+      const message = 'Database migrations failed; refusing to start with a partially updated schema.';
+      if (process.env.NODE_ENV === 'production' || process.env.MIGRATION_STRICT === 'true') {
+        throw new Error(message);
+      }
+      console.warn(`⚠ ${message}`);
     }
 
     console.log('Ensuring encrypted column migration has been applied...');
@@ -404,6 +438,7 @@ async function startServer() {
     }
 
     startScheduledMessageDelivery();
+    require('./src/services/modelRefreshService').startModelRefresh();
 
     const tlsConfig = loadTlsConfig();
     const useHttps = Boolean(tlsConfig);

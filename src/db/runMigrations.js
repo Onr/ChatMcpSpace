@@ -142,10 +142,13 @@ async function runMigration(filename) {
     // Run migration in transaction
     await client.query('BEGIN');
     await client.query(sql);
+    // Record the migration in the same transaction as its schema changes. A
+    // crash can therefore never leave an applied migration untracked.
+    await client.query(
+      'INSERT INTO migrations (migration_name) VALUES ($1) ON CONFLICT (migration_name) DO NOTHING',
+      [filename]
+    );
     await client.query('COMMIT');
-
-    // Mark as applied
-    await markMigrationApplied(filename);
 
     logInfo('migrations.complete', { migration: filename, status: 'success' });
     console.log(`✓ Migration ${filename} completed successfully`);

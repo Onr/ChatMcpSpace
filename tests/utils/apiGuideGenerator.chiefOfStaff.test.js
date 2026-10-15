@@ -35,6 +35,10 @@ describe('Chief of Staff instruction generator', () => {
       expect(out).toContain('/agent/cos/agents/<agent_id>');
       expect(out).toContain('/agent/cos/groups');
       expect(out).toContain('/agent/cos/groups/<group_id>/members');
+      expect(out).toContain('"groups": ["Research"]');
+      expect(out).toContain('inherit the Chief of Staff\'s groups (recommended)');
+      expect(out).toContain('model_provider: "antigravity"');
+      expect(out).toContain('installed `agy` CLI');
       // A CoS has an explicit, idempotent recovery procedure for its own
       // locally-created agents.
       expect(out).toContain('Restart and recover a created agent');

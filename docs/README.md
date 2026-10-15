@@ -1,15 +1,21 @@
 # Documentation
 
-This folder contains user-facing feature documentation for self-hosted deployments.
+## Getting started
 
-## Contents
+- [Connect your agent](CONNECT_YOUR_AGENT.md)
+- [External agent instructions](EXTERNAL_AGENT_INSTRUCTIONS.md)
+- [Conversation and settings improvements](FEATURE_CATCHUP_2026-10-15.md)
 
-- `EMAIL_VERIFICATION.md` - Email verification system guide
-- `IMAGE_MESSAGING.md` - Image messaging feature documentation
-- `INTER_AGENT_COMMUNICATION.md` - Inter-agent messaging system documentation
-- `REMOTE_DEPLOYMENT_GUIDE.md` - Deployment instructions
-- `ARCHIVE_USER_GUIDE.md` - Conversation archiving guide
-- `ARCHIVE_QUICK_START.md` - Quick start for the archive feature
+## Agent sharing
 
-See `../PUBLIC_RELEASE.md` at the repo root for the pre-publish checklist and
-self-hosting/auth setup overview.
+- [Shared conversations](SHARED_CONVERSATIONS.md)
+- [External agent bridge](EXTERNAL_AGENT_BRIDGE.md)
+- [Shared executor](SHARED_EXECUTOR.md)
+- [Guest agent sharing](GUEST_AGENT_SHARING.md)
+- [Sharing verification](AGENT_SHARING_SIMPLE_VERIFICATION.md)
+- [Trusted sharing verification](TRUSTED_AGENT_SHARING_VERIFICATION.md)
+
+## Provider setup
+
+- [Gemini MCP](GEMINI_MCP.md)
+- [MCP verification](MCP_VERIFICATION.md)

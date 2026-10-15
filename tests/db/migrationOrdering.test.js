@@ -8,6 +8,7 @@ const {
 
 const migrationsDir = path.join(__dirname, '../../src/db/migrations');
 const schemaSql = fs.readFileSync(path.join(__dirname, '../../src/db/schema.sql'), 'utf8');
+const serverSource = fs.readFileSync(path.join(__dirname, '../../server.js'), 'utf8');
 
 describe('database migration ordering', () => {
   test('all SQL migrations have a numeric prefix and unique ordered prefix', () => {
@@ -49,6 +50,12 @@ describe('database migration ordering', () => {
       .toBeLessThan(files.indexOf('024b_add_external_bot_connections.sql'));
     expect(files.indexOf('029_add_email_verification.sql'))
       .toBeGreaterThan(files.indexOf('028_add_agent_runtime_state.sql'));
+  });
+
+  test('production startup fails closed when a migration fails', () => {
+    expect(serverSource).toContain("process.env.NODE_ENV === 'production'");
+    expect(serverSource).toContain('refusing to start with a partially updated schema');
+    expect(serverSource).toContain('throw new Error(message)');
   });
 });
 

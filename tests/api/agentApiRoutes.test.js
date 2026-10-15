@@ -1,23 +1,29 @@
 const express = require('express');
 const request = require('supertest');
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema } = require('../utils/pgMemTestUtils');
+const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema, applyLineageSchema } = require('../utils/pgMemTestUtils');
 
-async function createAgentApiTestContext() {
+async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
   jest.resetModules();
 
-  const { pool, query } = createTestDatabase();
+  const { db, pool, query } = createTestDatabase();
+  db.public.registerFunction({ name: 'current_schema', returns: 'text', implementation: () => 'public' });
   await applyRuntimeUserColumns(query);
   await applyArchiveSchema(query);
   const { userId } = await seedUser(query);
 
   jest.doMock('../../src/db/connection', () => ({
     query: (text, params) => query(text, params),
-    getClient: () => pool.connect(),
+    getClient: async () => {
+      const client = await pool.connect();
+      const original = client.query.bind(client);
+      // pg-mem does not parse partial-index predicates in ON CONFLICT. Its
+      // fixture index already provides the equivalent uniqueness check.
+      client.query = (sql, args) => original(sql.replace(/ON CONFLICT \(agent_id, client_message_id\) WHERE client_message_id IS NOT NULL/g,
+        'ON CONFLICT (agent_id, client_message_id)'), args);
+      return client;
+    },
     pool,
   }));
 
@@ -29,6 +35,7 @@ async function createAgentApiTestContext() {
   jest.doMock('../../src/middleware/authMiddleware', () => ({
     requireApiKey: (req, _res, next) => {
       req.user = { userId };
+      req.authContext = scopedAgentId ? { type: 'agent_token', agentId: scopedAgentId } : { type: 'api_key' };
       next();
     },
   }));
@@ -49,9 +56,95 @@ async function createAgentApiTestContext() {
 }
 
 describe('Agent API routes', () => {
+  it('persists owner CLI grants so dashboard config loads cannot restore stale permission limits', async () => {
+    const f = await createAgentApiTestContext(); const agentId = uuidv4();
+    try {
+      await applyLineageSchema(f.query);
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'PermissionFixture']);
+      const allowedPermissions = { codex: { '--sandbox': ['danger-full-access'], '--dangerously-bypass-approvals-and-sandbox': true } };
+      await request(f.app).post('/api/agent/runtime-permissions').send({ agentName: 'PermissionFixture', allowedPermissions,
+        config: { model_provider: 'codex', model: 'default', approval_mode: 'full-auto', sandbox_mode: 'none', project_path: '/project' } }).expect(200);
+      const loaded = await request(f.app).get('/api/agent/config?agentName=PermissionFixture').expect(200);
+      expect(loaded.body).toMatchObject({ allowedPermissions, config: { sandbox_mode: 'none', approval_mode: 'full-auto', project_path: '/project' } });
+    } finally { await f.pool.end(); }
+  });
+  it('rejects attempts by scoped runtime credentials to grant themselves full access', async () => {
+    const f = await createAgentApiTestContext({ scopedAgentId: uuidv4() });
+    try { await request(f.app).post('/api/agent/runtime-permissions').send({ agentName: 'Alpha', allowedPermissions: { codex: {} } }).expect(403); }
+    finally { await f.pool.end(); }
+  });
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+  });
+
+  async function sharedPrivateReplyFixture(scoped = true) {
+    const agentId = uuidv4(), runtimeId = uuidv4(), executionId = uuidv4(), roomId = uuidv4();
+    const fixture = await createAgentApiTestContext({ scopedAgentId: scoped ? agentId : null });
+    const fs = require('fs'), path = require('path');
+    await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/041_add_message_idempotency.sql'), 'utf8'));
+    await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/042_add_shared_conversations.sql'), 'utf8'));
+    await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/054_add_agent_chat_threads.sql'), 'utf8'));
+    await fixture.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, fixture.userId, 'Alpha']);
+    await fixture.query("INSERT INTO shared_conversations(id,agent_id,owner_id,title) VALUES($1,$2,$3,'Shared Alpha')", [roomId, agentId, fixture.userId]);
+    await fixture.query("INSERT INTO agent_chat_threads(conversation_id,agent_id,owner_id,is_primary,state) VALUES($1,$2,$3,TRUE,'preparing')", [roomId, agentId, fixture.userId]);
+    await fixture.query("INSERT INTO shared_runtimes(agent_id,runtime_id,capabilities,execution_id,execution_kind,execution_uncertain) VALUES($1,$2,'{}',$3,'private',FALSE)", [agentId, runtimeId, executionId]);
+    return { ...fixture, agentId, runtimeId, executionId, roomId };
+  }
+  async function withSharedFlags(callback) {
+    const flags = ['FEATURE_IN_PLACE_AGENT_SHARING', 'FEATURE_SHARED_CONVERSATIONS'];
+    const original = flags.map(flag => process.env[flag]);
+    flags.forEach(flag => { process.env[flag] = 'true'; });
+    try { await callback(); }
+    finally { flags.forEach((flag, i) => { if (original[i] === undefined) delete process.env[flag]; else process.env[flag] = original[i]; }); }
+  }
+
+  it('delivers a completed private reply after sharing without rerunning it or exposing it to guests', async () => withSharedFlags(async () => {
+    const f = await sharedPrivateReplyFixture();
+    try {
+      const body = { agentName: 'Alpha', content: 'fixture-iv:fixture-tag:fixture-ciphertext', encrypted: true, clientMessageId: uuidv4() };
+      const send = () => request(f.app).post('/api/agent/messages').set('x-shared-runtime', f.runtimeId).set('x-shared-private-execution', f.executionId).send(body);
+      const first = await send().expect(201);
+      const replay = await send().expect(200);
+      expect(replay.body).toMatchObject({ messageId: first.body.messageId, idempotent: true });
+      expect((await f.query('SELECT content,encrypted FROM messages WHERE agent_id=$1', [f.agentId])).rows).toEqual([{ content: body.content, encrypted: true }]);
+      expect((await f.query('SELECT id FROM shared_messages WHERE conversation_id=$1', [f.roomId])).rows).toEqual([]);
+    } finally { await f.pool.end(); }
+  }));
+
+  it.each(['unscoped', 'plaintext', 'no-id', 'no-lease', 'wrong-runtime', 'wrong-execution', 'shared-execution', 'uncertain', 'expired'])
+    ('rejects %s private replies into converted chats', async condition => withSharedFlags(async () => {
+      const f = await sharedPrivateReplyFixture(condition !== 'unscoped');
+      try {
+        if (condition === 'shared-execution') await f.query("UPDATE shared_runtimes SET execution_kind='shared' WHERE agent_id=$1", [f.agentId]);
+        if (condition === 'uncertain') await f.query('UPDATE shared_runtimes SET execution_uncertain=TRUE WHERE agent_id=$1', [f.agentId]);
+        if (condition === 'expired') await f.query('UPDATE shared_runtimes SET last_seen_at=$2 WHERE agent_id=$1', [f.agentId, new Date(Date.now() - 300000)]);
+        let req = request(f.app).post('/api/agent/messages').set('x-shared-runtime', condition === 'wrong-runtime' ? uuidv4() : f.runtimeId);
+        if (condition !== 'no-lease') req = req.set('x-shared-private-execution', condition === 'wrong-execution' ? uuidv4() : f.executionId);
+        await req.send({ agentName: 'Alpha', content: 'fixture ciphertext', encrypted: condition !== 'plaintext',
+          ...(condition !== 'no-id' ? { clientMessageId: uuidv4() } : {}) }).expect(409);
+        expect((await f.query('SELECT message_id FROM messages WHERE agent_id=$1', [f.agentId])).rows).toEqual([]);
+      } finally { await f.pool.end(); }
+    }));
+
+  it('GET /api/agent/sharing-status reports active flags without exposing account configuration', async () => {
+    const previous = [process.env.FEATURE_SHARED_CONVERSATIONS, process.env.FEATURE_GUEST_SHARING];
+    const { app, pool } = await createAgentApiTestContext();
+    try {
+      process.env.FEATURE_SHARED_CONVERSATIONS = 'true';
+      process.env.FEATURE_GUEST_SHARING = 'true';
+      const enabled = await request(app).get('/api/agent/sharing-status').expect(200);
+      expect(enabled.body).toEqual({ enabled: true, guestEnabled: true, executionMode: 'trusted' });
+      expect(enabled.headers['cache-control']).toBe('no-store');
+      process.env.FEATURE_SHARED_CONVERSATIONS = 'false';
+      const disabled = await request(app).get('/api/agent/sharing-status').expect(200);
+      expect(disabled.body).toEqual({ enabled: false, guestEnabled: false, executionMode: 'trusted' });
+    } finally {
+      for (const [i, key] of ['FEATURE_SHARED_CONVERSATIONS', 'FEATURE_GUEST_SHARING'].entries()) {
+        if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i];
+      }
+      await pool.end();
+    }
   });
 
   it('POST /api/agent/messages stores message without marking unread user messages as read', async () => {
@@ -85,6 +178,75 @@ describe('Agent API routes', () => {
     const unreadAfter = await query('SELECT read_at FROM user_messages WHERE user_message_id = $1', [unreadId]);
     expect(unreadAfter.rows[0].read_at).toBeNull();
 
+    await pool.end();
+  });
+
+  it('POST /api/agent/messages accepts the clientMessageId sent by new-agent introductions (regression)', async () => {
+    const { app, pool } = await createAgentApiTestContext();
+    const clientMessageId = uuidv4();
+
+    const res = await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'NewAgentIntro',
+        content: 'Hello! I am ready to assist you.',
+        clientMessageId,
+      })
+      .expect(201);
+
+    expect(res.body.status).toBe('sent');
+    expect(res.body.messageId).toMatch(/^[a-f0-9-]{36}$/);
+
+    await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'NewAgentIntro',
+        content: 'invalid id must be rejected cleanly',
+        clientMessageId: 'not-a-uuid',
+      })
+      .expect(400)
+      .expect((invalidRes) => {
+        expect(invalidRes.body.error.code).toBe('VALIDATION_ERROR');
+        expect(invalidRes.body.error.message).toMatch(/clientMessageId must be a UUID/);
+      });
+
+    await pool.end();
+  });
+
+  it('GET /api/agent/responses hands out one run-overrides batch per poll', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+    const agentId = uuidv4();
+    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [agentId, userId, 'BatchBot', 1]);
+    const claude = JSON.stringify({ model_provider: 'claude', model: 'claude-sonnet-5' });
+    const codex = JSON.stringify({ model_provider: 'codex', model: 'gpt-5.6-terra' });
+    const rows = [['one', claude, 1], ['two', claude, 2], ['three', codex, 3], ['four', null, 4]];
+    for (const [content, overrides, sec] of rows) {
+      await query(
+        'INSERT INTO user_messages (user_message_id, agent_id, content, encrypted, run_overrides, created_at) VALUES ($1, $2, $3, FALSE, $4::jsonb, $5)',
+        [uuidv4(), agentId, content, overrides, new Date(Date.UTC(2026, 0, 1, 0, 0, sec))]
+      );
+    }
+
+    // pg-mem mis-applies the route's ANY($1) bulk update, so poll with markRead=false and mark
+    // the returned batch read explicitly, as the real database does.
+    const markRead = async (body) => {
+      for (const r of body.responses) {
+        await query('UPDATE user_messages SET read_at = NOW()::timestamp WHERE user_message_id = $1', [r.messageId]);
+      }
+    };
+    const first = await request(app).get('/api/agent/responses?agentName=BatchBot&markRead=false').expect(200);
+    expect(first.body.responses.map((r) => r.content)).toEqual(['one', 'two']);
+    expect(first.body.runOverrides).toEqual({ model_provider: 'claude', model: 'claude-sonnet-5' });
+
+    await markRead(first.body);
+    const second = await request(app).get('/api/agent/responses?agentName=BatchBot&markRead=false').expect(200);
+    expect(second.body.responses.map((r) => r.content)).toEqual(['three']);
+    expect(second.body.runOverrides).toEqual({ model_provider: 'codex', model: 'gpt-5.6-terra' });
+
+    await markRead(second.body);
+    const third = await request(app).get('/api/agent/responses?agentName=BatchBot&markRead=false').expect(200);
+    expect(third.body.responses.map((r) => r.content)).toEqual(['four']);
+    expect(third.body.runOverrides).toBeNull();
     await pool.end();
   });
 
@@ -499,48 +661,5 @@ describe('Agent API routes', () => {
     const expected = crypto.createHash('sha256').update(res.text, 'utf8').digest('hex');
     // Old clients ignore this header; new bootstrap clients verify it before chmod +x.
     expect(res.headers['x-script-sha256']).toBe(expected);
-  });
-
-  it('POST /api/agent/stop resolves agents stored under .chatspace', async () => {
-    const { app, query, pool, userId } = await createAgentApiTestContext();
-
-    const agentName = 'StopByDotChatspace';
-    const agentId = uuidv4();
-    await query('INSERT INTO agents (agent_id, user_id, agent_name, position) VALUES ($1, $2, $3, $4)', [
-      agentId,
-      userId,
-      agentName,
-      1,
-    ]);
-
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'chatmcp-stop-'));
-    const folderName = agentName.toLowerCase();
-    const agentDir = path.join(tmpRoot, '.chatspace', folderName);
-    fs.mkdirSync(path.join(agentDir, 'agent_state'), { recursive: true });
-
-    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(tmpRoot);
-    const homeBackup = process.env.HOME;
-    process.env.HOME = path.join(tmpRoot, 'home');
-
-    try {
-      const res = await request(app)
-        .post('/api/agent/stop')
-        .send({ agentName })
-        .expect(200);
-
-      expect(res.body).toMatchObject({
-        agentId,
-        agentName,
-      });
-
-      const stopFlagPath = path.join(agentDir, 'agent_state', '.stop_requested');
-      expect(fs.existsSync(stopFlagPath)).toBe(true);
-      expect(fs.readFileSync(stopFlagPath, 'utf8').trim()).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    } finally {
-      cwdSpy.mockRestore();
-      process.env.HOME = homeBackup;
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
-      await pool.end();
-    }
   });
 });

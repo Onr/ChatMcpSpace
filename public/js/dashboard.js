@@ -299,7 +299,7 @@ function renderFastModeAlertPanel(filter) {
       closeFastModeAlertPanel();
       if (!aid) return;
       if (typeof setMobileListExpanded === 'function') {
-        setMobileListExpanded(false);
+        setMobileListExpanded(false, { skipBrowserHistory: true });
       }
       try {
         if (typeof openAgentWithFeedback === 'function') {
@@ -474,12 +474,32 @@ function preserveMobileConversationScroll() {
   }
 
   const preservedScrollTop = conversationArea.scrollTop;
+  const generation = (preserveMobileConversationScroll.generation || 0) + 1;
+  preserveMobileConversationScroll.generation = generation;
+  const preservedAgentId = selectedAgentId;
+  const preservedConversationId = selectedChatContext?.conversationId || selectedAgentId;
   const preserveUntil = Date.now() + 700;
+  let expectedScrollTop = preservedScrollTop;
+  let lastScrollHeight = conversationArea.scrollHeight;
+  let lastClientHeight = conversationArea.clientHeight;
+  let cancelled = false;
   const restore = () => {
-    if (Date.now() > preserveUntil) return;
+    if (cancelled || Date.now() > preserveUntil || preserveMobileConversationScroll.generation !== generation) return;
+    if (selectedAgentId !== preservedAgentId || (selectedChatContext?.conversationId || selectedAgentId) !== preservedConversationId) return;
     if (document.body.dataset.allChatsView === 'true' || selectedAgentId === '__ALL__') return;
     if (!document.getElementById('messageInputArea')) return;
+    // Keep the viewport through keyboard/composer resizing, but abandon an
+    // older restoration once the reader chooses a new position at the same
+    // layout size. Background composer updates must not undo their scroll.
+    if (Math.abs(conversationArea.scrollTop - expectedScrollTop) > 1 &&
+        conversationArea.scrollHeight === lastScrollHeight && conversationArea.clientHeight === lastClientHeight) {
+      cancelled = true;
+      return;
+    }
     conversationArea.scrollTop = preservedScrollTop;
+    expectedScrollTop = conversationArea.scrollTop;
+    lastScrollHeight = conversationArea.scrollHeight;
+    lastClientHeight = conversationArea.clientHeight;
     window.updateScrollToBottomButton?.();
   };
 
@@ -591,6 +611,15 @@ let messagePollNextDelayMs = 3000;
 let agentPollInFlight = false;
 let messagePollInFlight = false;
 let selectedAgentId = null;
+let selectedChatContext = null;
+let sharedChatSelectionRequest = 0;
+let dashboardComposerReady = false;
+let dashboardAgentRestorationReady = false;
+function signalDashboardReadyWhenInitialized() {
+  if (!dashboardComposerReady || !dashboardAgentRestorationReady || window.dashboardReady) return;
+  window.dashboardReady = true;
+  window.dispatchEvent(new Event('dashboard:ready'));
+}
 let selectedAgentName = '';
 let selectedAgentType = 'standard'; // 'standard' or 'news_feed'
 let selectedAgentExternalProvider = '';
@@ -630,6 +659,9 @@ let isLoadingOlderMessages = false; // Guard against concurrent older-message fe
 const INITIAL_MESSAGE_LIMIT = 50; // Only fetch latest N messages on first load
 let activeAgentStatsRequestToken = 0; // Cancels stale async stat updates for action menus
 let activeConversationLoadToken = 0; // Incremented per chat switch to ignore stale responses
+let conversationRenderGeneration = 0;
+let isSendingMessage = false;
+let openingChatSelection = null;
 const CONVERSATION_PRELOAD_LIMIT = 4; // Number of chats to preload in background
 const CONVERSATION_PRELOAD_COOLDOWN_MS = 20000; // Avoid hammering the same chat preload
 let conversationPreloadInFlight = new Set(); // Track background preload requests
@@ -653,6 +685,7 @@ let newAgentIds = new Set(); // Track newly added agents for animation
 let activeTtsButton = null; // Track currently playing TTS button for animation cleanup
 let currentFocusArea = isMobileListOnlyMode() ? 'list' : 'council'; // Track current focus area: 'council' | 'list' | 'conversation'
 let activeTtsUtterance = null; // Track active SpeechSynthesisUtterance instance
+let activeMessageTtsSession = null; // Resumable per-message playback state
 let globalNotifiedMessages = new Set(); // Track message IDs globally to prevent duplicate TTS across agents
 let ttsAudioLock = false; // Prevent overlapping TTS audio playback
 let pendingTtsQueue = []; // Queue TTS requests when audio is locked
@@ -660,6 +693,9 @@ const GLOBAL_NOTIFICATION_TTL = 300000; // Clear global notification tracking af
 const NOTIFIED_MESSAGES_STORAGE_KEY = 'dashboard_notified_messages'; // sessionStorage key
 const LAST_AGENT_STORAGE_KEY = 'dashboard_last_agent_id'; // localStorage key for last opened agent
 const CHAT_NAVIGATION_HISTORY_LIMIT = 50;
+const MOBILE_BROWSER_NAVIGATION_STATE_KEY = 'agentsMcpDashboardMobileNavigation';
+const MESSAGE_TTS_CHECKPOINT_STORAGE_KEY = 'dashboard_message_tts_checkpoints_v1';
+const MESSAGE_TTS_CHECKPOINT_LIMIT = 100;
 const MESSAGE_HISTORY_STORAGE_KEY = 'dashboard_message_history_v1';
 const COUNCIL_SPLIT_STORAGE_KEY = 'dashboard_council_split_v1';
 const COUNCIL_LIST_SPLIT_STORAGE_KEY = 'dashboard_council_list_split_v1';
@@ -840,6 +876,8 @@ const INTERACTIVE_RICH_COUNT_STORAGE_KEY = 'dashboard_interactive_rich_count_by_
 let currentAgentList = []; // Latest agent list snapshot for orbit layout
 let chatNavigationHistory = []; // Back/forward stack of chats opened in the main conversation
 let chatNavigationIndex = -1; // Points at the currently selected entry in chatNavigationHistory
+let mobileBrowserNavigationInitialized = false;
+let handlingMobileBrowserNavigation = false;
 let currentOrbitLayout = null; // Computed orbit layout for drag/drop
 let currentGroups = window.__initialGroups || []; // [{ groupId, groupName, description, memberIds }]
 let activeGroupId = null; // null = main view, groupId = zoomed into group
@@ -987,16 +1025,120 @@ function navigateChatHistoryBy(delta) {
   return true;
 }
 
+function isMobileBrowserNavigationEnabled() {
+  return Boolean(
+    document.body?.classList.contains('dashboard-mobile') ||
+    isMobileListOnlyMode()
+  );
+}
+
+function getMobileBrowserNavigationState(state = window.history?.state) {
+  const navigationState = state?.[MOBILE_BROWSER_NAVIGATION_STATE_KEY];
+  if (!navigationState || navigationState.version !== 1) return null;
+  if (navigationState.view !== 'list' && navigationState.view !== 'chat') return null;
+  return navigationState;
+}
+
+function writeMobileBrowserNavigationState(view, { agentId = '', replace = false } = {}) {
+  if (
+    !mobileBrowserNavigationInitialized ||
+    handlingMobileBrowserNavigation ||
+    !isMobileBrowserNavigationEnabled() ||
+    !window.history?.pushState
+  ) {
+    return;
+  }
+
+  const current = getMobileBrowserNavigationState();
+  const normalizedAgentId = view === 'chat' ? String(agentId || '') : '';
+  if (current?.view === view && String(current.agentId || '') === normalizedAgentId) {
+    return;
+  }
+
+  const nextState = {
+    ...(window.history.state || {}),
+    [MOBILE_BROWSER_NAVIGATION_STATE_KEY]: {
+      version: 1,
+      view,
+      agentId: normalizedAgentId
+    }
+  };
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method](nextState, '', window.location.href);
+}
+
+function handleMobileBrowserNavigation(event) {
+  if (!mobileBrowserNavigationInitialized || !isMobileBrowserNavigationEnabled()) return;
+
+  const navigationState = getMobileBrowserNavigationState(event.state);
+  if (!navigationState) return;
+
+  handlingMobileBrowserNavigation = true;
+  try {
+    if (navigationState.view === 'list') {
+      if (activeGroupId) exitGroupView();
+      clearAgentListSearch({ blur: true, update: false });
+      const listScroll = document.getElementById('agentListScroll');
+      if (listScroll) delete listScroll.dataset.fastModeCleared;
+      updateAgentListPanel(currentAgentList);
+      setMobileListExpanded(true, { skipBrowserHistory: true });
+      return;
+    }
+
+    const agent = getChatNavigationAgent(navigationState.agentId);
+    if (!agent) {
+      window.history.replaceState({
+        ...(window.history.state || {}),
+        [MOBILE_BROWSER_NAVIGATION_STATE_KEY]: { version: 1, view: 'list', agentId: '' }
+      }, '', window.location.href);
+      setMobileListExpanded(true, { skipBrowserHistory: true });
+      return;
+    }
+
+    const existingIndex = chatNavigationHistory.findIndex((entry) => entry.agentId === agent.agentId);
+    if (existingIndex >= 0) chatNavigationIndex = existingIndex;
+    selectAgent(agent.agentId, agent.name, {
+      ...getChatNavigationMetadata(agent),
+      forceMainSelection: true,
+      skipChatNavigationHistory: true,
+      skipMobileBrowserHistory: true
+    });
+  } finally {
+    handlingMobileBrowserNavigation = false;
+  }
+}
+
+function initializeMobileBrowserNavigation() {
+  if (mobileBrowserNavigationInitialized || !isMobileBrowserNavigationEnabled()) return;
+
+  mobileBrowserNavigationInitialized = true;
+  const current = getMobileBrowserNavigationState();
+  if (!current) {
+    window.history.replaceState({
+      ...(window.history.state || {}),
+      [MOBILE_BROWSER_NAVIGATION_STATE_KEY]: { version: 1, view: 'list', agentId: '' }
+    }, '', window.location.href);
+  }
+  window.addEventListener('popstate', handleMobileBrowserNavigation);
+}
+
 /**
  * Fetch a fresh CSRF token from the server and update window.csrfToken.
  * Returns the new token string.
  */
+let csrfRefreshPromise = null;
 async function refreshCsrfToken() {
-  const res = await fetch('/csrf-token', { credentials: 'same-origin' });
-  if (!res.ok) throw new Error('Failed to refresh CSRF token');
-  const data = await res.json();
-  window.csrfToken = data.csrfToken;
-  return data.csrfToken;
+  if (!csrfRefreshPromise) {
+    csrfRefreshPromise = (async () => {
+      const res = await fetch('/csrf-token', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to refresh CSRF token');
+      const data = await res.json();
+      if (typeof data.csrfToken !== 'string' || !data.csrfToken) throw new Error('Failed to refresh CSRF token');
+      window.csrfToken = data.csrfToken;
+      return data.csrfToken;
+    })().finally(() => { csrfRefreshPromise = null; });
+  }
+  return csrfRefreshPromise;
 }
 
 /**
@@ -1004,22 +1146,22 @@ async function refreshCsrfToken() {
  * Use this for any state-changing request that sends X-CSRF-Token.
  */
 async function csrfFetch(url, options = {}) {
-  // Ensure the latest token is in the header
-  if (options.headers && ('X-CSRF-Token' in options.headers)) {
-    options.headers['X-CSRF-Token'] = window.csrfToken;
-  }
-  let res = await fetch(url, options);
-  if (res.status === 403) {
-    const clone = res.clone();
+  const headers = typeof Headers !== 'undefined' && options.headers instanceof Headers
+    ? Object.fromEntries(options.headers.entries())
+    : Array.isArray(options.headers) ? Object.fromEntries(options.headers) : { ...options.headers };
+  const csrfHeader = Object.keys(headers).find(name => name.toLowerCase() === 'x-csrf-token');
+  const canRetry = csrfHeader && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(options.method || 'GET').toUpperCase());
+  if (csrfHeader) headers[csrfHeader] = window.csrfToken || headers[csrfHeader];
+  const requestOptions = { ...options, headers };
+  let res = await fetch(url, requestOptions);
+  if (canRetry && res.status === 403) {
     try {
-      const body = await clone.json();
-      if (body?.error?.code?.startsWith('CSRF_TOKEN')) {
+      const body = await res.clone().json();
+      if (['CSRF_TOKEN_MISSING', 'CSRF_TOKEN_INVALID', 'CSRF_TOKEN_EXPIRED'].includes(body?.error?.code)) {
         await refreshCsrfToken();
-        // Retry with refreshed token
-        if (options.headers) {
-          options.headers['X-CSRF-Token'] = window.csrfToken;
-        }
-        res = await fetch(url, options);
+        // Validation rejected the mutation before it ran. Replay its original
+        // body once, retaining request IDs and encrypted upload bytes.
+        res = await fetch(url, { ...requestOptions, headers: { ...headers, [csrfHeader]: window.csrfToken } });
       }
     } catch (_) { /* not JSON or other error, return original response */ }
   }
@@ -1577,6 +1719,7 @@ if (typeof marked !== 'undefined') {
  */
 document.addEventListener('DOMContentLoaded', async () => {
   applyDashboardMobileModeClasses();
+  initializeMobileBrowserNavigation();
 
   // Prevent browser swipe-back/forward navigation gesture (e.g. two-finger horizontal swipe
   // on trackpad or edge-swipe on touch devices that triggers browser history navigation).
@@ -1722,6 +1865,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.updateScrollToBottomButton = updateScrollBtn;
 
     convArea.addEventListener('scroll', updateScrollBtn, { passive: true });
+
+    convArea.addEventListener('scroll', () => {
+      if (convArea.scrollTop > 300) return;
+      if (!selectedAgentId || selectedAgentId === '__ALL__') return;
+      if (selectedChatContext?.mode === 'shared') return;
+      if (conversationHasMore.get(selectedAgentId) !== true || isLoadingOlderMessages) return;
+      if (Date.now() < forceScrollToBottomUntil) return;
+      loadOlderMessagesInBackground(selectedAgentId, null);
+    }, { passive: true });
 
     const focusComposerFromScrollControl = () => {
       if (!isMobileListOnlyMode()) return;
@@ -1885,6 +2037,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Prepare the free-text composer
   setupMessageComposer();
+  dashboardComposerReady = true;
+  signalDashboardReadyWhenInitialized();
   setupMobileFastModeToggle();
 
   // Setup agent control buttons (stop, config)
@@ -2502,7 +2656,8 @@ async function sendAgentUpdateConfirmation(
 }
 
 function shouldPreloadConversation(agentId) {
-  if (!agentId || conversationCache.has(agentId) || conversationPreloadInFlight.has(agentId)) {
+  if (!agentId || (selectedChatContext?.mode === 'shared' && selectedChatContext.agentId === agentId)
+    || conversationCache.has(agentId) || conversationPreloadInFlight.has(agentId)) {
     return false;
   }
 
@@ -2511,6 +2666,9 @@ function shouldPreloadConversation(agentId) {
 }
 
 async function preloadConversation(agentId) {
+  // An idle callback may have been queued while this was a private selection.
+  // Re-check context when it fires so it cannot fetch private history for the
+  // agent whose shared room is now open.
   if (!shouldPreloadConversation(agentId)) {
     return;
   }
@@ -2961,10 +3119,7 @@ function updateAgentListUI(agents) {
   } else if (currentGroups.length > 0) {
     // Main view with groups: ungrouped agents + group seats
     orbitAgents = partition.ungrouped;
-    orbitGroups = currentGroups.filter(g => {
-      const data = partition.grouped.get(g.groupId);
-      return data && data.agents.length > 0;
-    });
+    orbitGroups = currentGroups;
   } else {
     // No groups at all: show all agents
     orbitAgents = currentAgentList;
@@ -3872,11 +4027,13 @@ function updateAgentListPanel(agents) {
   let html = '';
 
   // Render group sections
+  let hasAnyGroupSection = false;
   for (const group of currentGroups) {
     const groupData = partition.grouped.get(group.groupId);
     if (!groupData || groupData.agents.length === 0) continue;
     const filteredGroupAgents = filterAgentListBySearch(groupData.agents);
     if (filteredGroupAgents.length === 0) continue;
+    hasAnyGroupSection = true;
 
     const meta = partition.groupMeta.get(group.groupId);
     const memberCount = filteredGroupAgents.length;
@@ -3899,6 +4056,12 @@ function updateAgentListPanel(agents) {
         </svg>
       </div>
     `;
+
+    // While searching, show the matching members inline instead of hiding
+    // them behind the collapsed group header (which would need an extra click).
+    if (hasActiveSearch) {
+      html += renderAgentListItemsHtml(filteredGroupAgents);
+    }
   }
 
   // Ungrouped section
@@ -3918,9 +4081,11 @@ function updateAgentListPanel(agents) {
     return (a.position || 0) - (b.position || 0);
   });
 
-  html += orderedAgents.length > 0
-    ? renderAgentListItemsHtml(orderedAgents)
-    : getAgentListEmptyStateHtml(`No agents match "${searchLabel}"`);
+  if (orderedAgents.length > 0) {
+    html += renderAgentListItemsHtml(orderedAgents);
+  } else if (!hasAnyGroupSection) {
+    html += getAgentListEmptyStateHtml(hasActiveSearch ? `No agents match "${searchLabel}"` : 'No agents connected');
+  }
 
   listScroll.innerHTML = html;
 
@@ -4111,7 +4276,7 @@ function openAgentWithFeedback(agentId, agentName, metadata = {}) {
 }
 
 function setupAgentListHandlers() {
-  const listItems = document.querySelectorAll('.agent-list-item');
+  const listItems = document.querySelectorAll('.agent-list-item[data-agent-id]:not([data-agent-id=""])');
   const pinButtons = document.querySelectorAll('.agent-list-pin-btn');
 
   listItems.forEach(item => {
@@ -4380,6 +4545,49 @@ function setupAgentSelectionHandlers() {
   });
 }
 
+function findCouncilGroupDropTarget(x, y) {
+  return Array.from(document.querySelectorAll('.group-seat[data-group-id], .agent-list-group-header[data-group-id]'))
+    .find(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    }) || null;
+}
+
+function highlightCouncilGroupDropTarget(target) {
+  document.querySelectorAll('.council-group-drop-target').forEach(element => {
+    if (element !== target) element.classList.remove('council-group-drop-target');
+  });
+  target?.classList.add('council-group-drop-target');
+}
+
+const pendingCouncilGroupAdds = new Set();
+async function addAgentToCouncilGroup(agentId, groupId) {
+  const group = currentGroups.find(item => item.groupId === groupId);
+  const key = `${groupId}:${agentId}`;
+  if (!group || !currentAgentList.some(agent => agent.agentId === agentId) ||
+      (group.memberIds || []).includes(agentId) || pendingCouncilGroupAdds.has(key)) return;
+  pendingCouncilGroupAdds.add(key);
+  try {
+    const response = await csrfFetch(`/api/user/groups/${encodeURIComponent(groupId)}/members`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+      body: JSON.stringify({ agentIds: [agentId] })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error?.error?.message || 'Could not add the agent to this group.');
+    }
+    group.memberIds = [...new Set([...(group.memberIds || []), agentId])];
+    cachedGroupPartition = null;
+    updateAgentListUI(currentAgentList);
+    showSuccessMessage(`Agent added to ${group.groupName}`);
+  } catch (error) {
+    showErrorMessage(error.message || 'Could not update the group. Please try again.');
+  } finally {
+    pendingCouncilGroupAdds.delete(key);
+  }
+}
+
 function setupOrbitDragHandlers() {
   if (orbitDragHandlersInitialized) {
     return;
@@ -4432,6 +4640,7 @@ function handleOrbitPointerMove(event) {
   if (!orbitDragState) {
     return;
   }
+  if (event.pointerId !== orbitDragState.pointerId) return;
 
   const { seat, ringKey, startX, startY } = orbitDragState;
   const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
@@ -4479,6 +4688,7 @@ function handleOrbitPointerMove(event) {
     const rect = getOrbitContainerRect();
     if (!rect) return;
     const { seat: activeSeat, ringKey: activeRingKey, lastX, lastY } = orbitDragState;
+    highlightCouncilGroupDropTarget(findCouncilGroupDropTarget(lastX, lastY));
     const angle = Math.atan2(lastY - (rect.top + rect.height / 2), lastX - (rect.left + rect.width / 2));
     const radius = ORBIT_CONFIG.ringRadii[activeRingKey] ?? ORBIT_CONFIG.ringRadii.idle;
     activeSeat.style.left = `${50 + radius * Math.cos(angle)}%`;
@@ -4490,8 +4700,12 @@ function handleOrbitPointerUp(event) {
   if (!orbitDragState) {
     return;
   }
+  if (event.pointerId !== orbitDragState.pointerId) return;
 
   const { seat, ringKey, agentId, active, pointerId } = orbitDragState;
+  const groupTarget = active && event.type !== 'pointercancel'
+    ? findCouncilGroupDropTarget(event.clientX, event.clientY) : null;
+  highlightCouncilGroupDropTarget(null);
 
   if (seat.hasPointerCapture(pointerId)) {
     seat.releasePointerCapture(pointerId);
@@ -4516,6 +4730,16 @@ function handleOrbitPointerUp(event) {
   }
 
   if (!active) {
+    return;
+  }
+
+  if (event.type === 'pointercancel') {
+    updateAgentListUI(currentAgentList);
+    return;
+  }
+  if (groupTarget) {
+    updateAgentListUI(currentAgentList);
+    void addAgentToCouncilGroup(agentId, groupTarget.dataset.groupId);
     return;
   }
 
@@ -4581,6 +4805,28 @@ function setupSidebarDragHandlers() {
 
   if (!sidebar || !dropOverlay || !dropContainer) return;
 
+  sidebar.addEventListener('dragover', event => {
+    const group = event.target.closest('.agent-list-group-header[data-group-id]');
+    if (!group || !Array.from(event.dataTransfer.types || []).includes('application/json')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    highlightCouncilGroupDropTarget(group);
+  });
+  sidebar.addEventListener('dragleave', event => {
+    if (!event.target.closest('.council-group-drop-target')?.contains(event.relatedTarget)) highlightCouncilGroupDropTarget(null);
+  });
+  sidebar.addEventListener('drop', event => {
+    const group = event.target.closest('.agent-list-group-header[data-group-id]');
+    highlightCouncilGroupDropTarget(null);
+    if (!group) return;
+    try {
+      const data = JSON.parse(event.dataTransfer.getData('application/json'));
+      if (!data.agentId) return;
+      event.preventDefault();
+      void addAgentToCouncilGroup(data.agentId, group.dataset.groupId);
+    } catch (_) { /* Ignore files and unrelated drag data. */ }
+  });
+
   sidebar.addEventListener('dragstart', (e) => {
     const item = e.target.closest('.agent-list-item');
     if (!item || shouldSuppressPinControlsForMobile()) return;
@@ -4597,6 +4843,7 @@ function setupSidebarDragHandlers() {
   });
 
   sidebar.addEventListener('dragend', (e) => {
+    highlightCouncilGroupDropTarget(null);
     const item = e.target.closest('.agent-list-item');
     if (item) item.classList.remove('agent-list-item--dragging');
     dropOverlay.classList.remove('dropzone-active', 'dropzone-hover');
@@ -4704,35 +4951,13 @@ function showFloatingAgentMenu(event, seatElement) {
 }
 
 function positionFloatingAgentMenu(rect, agentId = null) {
-  const floatingMenu = document.getElementById('floatingAgentMenu');
-  if (!floatingMenu || !rect) return;
-
-  // Position the menu below and to the right of the agent
-  let left = rect.left + rect.width / 2;
-  let top = rect.bottom + 10;
-
-  // Ensure menu doesn't go off-screen
-  const menuWidth = 192; // w-48 = 12rem = 192px
-  const menuHeight = 270; // approximate height with stats block
-
-  if (left + menuWidth > window.innerWidth) {
-    left = window.innerWidth - menuWidth - 10;
-  }
-  if (left < 10) {
-    left = 10;
-  }
-  if (top + menuHeight > window.innerHeight) {
-    top = rect.top - menuHeight - 10;
-  }
-
-  floatingMenu.style.left = `${left}px`;
-  floatingMenu.style.top = `${top}px`;
-  if (agentId) {
-    floatingMenu.dataset.agentId = agentId;
-  } else {
-    delete floatingMenu.dataset.agentId;
-  }
-  floatingMenu.classList.remove('hidden');
+  if (!rect) return;
+  const agent = findCachedAgentRecord(agentId);
+  const seat = findAgentSeat(agentId);
+  window.AgentActionsUI?.position(rect, agentId, {
+    name: agent?.name || seat?.dataset.agentName || selectedAgentName || 'Agent',
+    shareable: (agent?.agentType || seat?.dataset.agentType || selectedAgentType) !== 'news_feed'
+  });
 }
 
 function findAgentSeat(agentId) {
@@ -4759,14 +4984,14 @@ function findCachedAgentRecord(agentId) {
 function resolveAgentStatsMetadata(agentId, metadata = {}) {
   const seat = findAgentSeat(agentId);
   const cached = findCachedAgentRecord(agentId);
+  const contacts = [metadata.lastHeartbeat, cached?.lastSeenAt, cached?.lastWorkingHeartbeatTime,
+    seat?.getAttribute('data-agent-last-seen'), seat?.getAttribute('data-agent-last-heartbeat')];
+  const lastHeartbeat = contacts.filter(value => Number.isFinite(Date.parse(value)))
+    .reduce((latest, value) => !latest || Date.parse(value) > Date.parse(latest) ? value : latest, '');
 
   return {
     ...metadata,
-    lastHeartbeat:
-      metadata.lastHeartbeat ||
-      cached?.lastWorkingHeartbeatTime ||
-      seat?.getAttribute('data-agent-last-heartbeat') ||
-      ''
+    lastHeartbeat
   };
 }
 
@@ -4983,11 +5208,14 @@ async function openFloatingAgentMenuForAgent(agentId, agentName, metadata = {}, 
     forceMainSelection: true
   };
 
+  // Selecting a chat collapses the mobile list, so remember the pressed icon's
+  // bounds before it becomes hidden.
+  const anchorRect = anchorEl?.getBoundingClientRect?.() || seat?.getBoundingClientRect?.();
+
   if (selectedAgentId !== agentId || selectedAgentName !== resolvedName) {
     await selectAgent(agentId, resolvedName, resolvedMeta);
   }
 
-  const anchorRect = anchorEl?.getBoundingClientRect?.() || seat?.getBoundingClientRect?.();
   refreshAgentActionStats(agentId, resolvedMeta, { force: true });
   if (anchorRect) {
     positionFloatingAgentMenu(anchorRect, agentId);
@@ -5019,7 +5247,7 @@ function setupMessageComposer() {
   if (userMessageForm) {
     userMessageForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!userMessageInput?.value.trim() && pendingImages.length === 0 && selectedAgentId && selectedAgentType !== 'news_feed') {
+      if (selectedChatContext?.mode !== 'shared' && !userMessageInput?.value.trim() && pendingImages.length === 0 && selectedAgentId && selectedAgentType !== 'news_feed') {
         openScheduleMessageActions();
         return;
       }
@@ -5146,16 +5374,109 @@ function setupScheduledMessageHold() {
   }, true);
 }
 
+let pendingRunOverrides = null;
+let pendingRunOverridesAgentId = null;
+let runOverrideModelCatalog = null;
+const RUN_OVERRIDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const RUN_OVERRIDE_APPROVALS = [['full-auto', 'Full auto'], ['auto-edit', 'Auto-edit'], ['suggest', 'Suggest only']];
+const RUN_OVERRIDE_SANDBOXES = [['read-only', 'Read-only'], ['workspace-write', 'Workspace write'], ['none', 'No sandbox']];
+
+function getPendingRunOverrides() {
+  return pendingRunOverrides && pendingRunOverridesAgentId === selectedAgentId ? pendingRunOverrides : null;
+}
+
+function clearPendingRunOverrides() {
+  pendingRunOverrides = null;
+  pendingRunOverridesAgentId = null;
+  if (userMessageSendButton) userMessageSendButton.removeAttribute('data-run-overrides');
+}
+
+function summarizeRunOverrides(overrides) {
+  if (!overrides) return 'Agent default';
+  const provider = overrides.model_provider
+    ? (overrides.model ? `${overrides.model_provider} / ${overrides.model}` : overrides.model_provider)
+    : null;
+  return [provider, overrides.thinking_effort && `effort ${overrides.thinking_effort}`, overrides.approval_mode, overrides.sandbox_mode && `sandbox ${overrides.sandbox_mode}`]
+    .filter(Boolean).join(' · ') || 'Agent default';
+}
+
+async function loadRunOverrideModels() {
+  if (runOverrideModelCatalog) return runOverrideModelCatalog;
+  try {
+    const response = await fetch('/dashboard/models', { credentials: 'same-origin' });
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.models && typeof data.models === 'object') runOverrideModelCatalog = data.models;
+    }
+  } catch (error) {
+    console.warn('Failed to load provider models:', error);
+  }
+  return runOverrideModelCatalog || { codex: [{ value: 'default', label: 'Default' }] };
+}
+
+async function openRunSettingsDialog(onDone) {
+  document.getElementById('runSettingsDialog')?.remove();
+  const catalog = await loadRunOverrideModels();
+  const current = getPendingRunOverrides() || {};
+  const option = (value, label, selected) => `<option value="${escapeScheduledMessageHtml(value)}"${selected ? ' selected' : ''}>${escapeScheduledMessageHtml(label)}</option>`;
+  const select = (id, label, options) => `<label class="mt-3 block text-xs font-medium uppercase tracking-wide text-slate-400" for="${id}">${label}</label><select id="${id}" class="mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-slate-100">${option('', 'Agent default', !options.some((o) => o.selected))}${options.map((o) => option(o.value, o.label, o.selected)).join('')}</select>`;
+  const dialog = document.createElement('div');
+  dialog.id = 'runSettingsDialog';
+  dialog.className = 'fixed inset-0 z-[310] flex items-end justify-center bg-slate-950/75 backdrop-blur-sm sm:items-center sm:p-4';
+  dialog.innerHTML = `<div class="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-emerald-400/30 bg-slate-900 p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="runSettingsTitle"><h2 id="runSettingsTitle" class="text-base font-semibold text-slate-100">Run settings</h2><p class="mt-1 text-sm text-slate-400">Applies to this message only. Messages with different settings run as separate turns.</p>${select('runSettingsProvider', 'Provider', Object.keys(catalog).map((key) => ({ value: key, label: key, selected: current.model_provider === key })))}<div id="runSettingsModelWrap"></div>${select('runSettingsEffort', 'Thinking effort', RUN_OVERRIDE_EFFORTS.map((value) => ({ value, label: value, selected: current.thinking_effort === value })))}${select('runSettingsApproval', 'Approval mode', RUN_OVERRIDE_APPROVALS.map(([value, label]) => ({ value, label, selected: current.approval_mode === value })))}${select('runSettingsSandbox', 'Sandbox', RUN_OVERRIDE_SANDBOXES.map(([value, label]) => ({ value, label, selected: current.sandbox_mode === value })))}<div class="mt-5 grid gap-2"><button type="button" data-run-save class="min-h-11 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300">Use these settings</button><button type="button" data-run-reset class="min-h-11 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">Use agent default</button><button type="button" data-run-cancel class="min-h-11 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800">Cancel</button></div></div>`;
+  document.body.appendChild(dialog);
+  const providerSelect = dialog.querySelector('#runSettingsProvider');
+  const modelWrap = dialog.querySelector('#runSettingsModelWrap');
+  const renderModels = () => {
+    const provider = providerSelect.value;
+    if (!provider) { modelWrap.innerHTML = ''; return; }
+    const models = catalog[provider] || [];
+    modelWrap.innerHTML = `<label class="mt-3 block text-xs font-medium uppercase tracking-wide text-slate-400" for="runSettingsModel">Model</label><select id="runSettingsModel" class="mt-1 min-h-11 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-slate-100">${models.map((m) => option(m.value, m.label, current.model_provider === provider && current.model === m.value)).join('')}</select>`;
+  };
+  providerSelect.addEventListener('change', renderModels);
+  renderModels();
+  const close = () => { dialog.remove(); if (typeof onDone === 'function') onDone(); };
+  dialog.querySelector('[data-run-cancel]').addEventListener('click', close);
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+  dialog.querySelector('[data-run-reset]').addEventListener('click', () => { clearPendingRunOverrides(); close(); });
+  dialog.querySelector('[data-run-save]').addEventListener('click', () => {
+    const overrides = {};
+    const provider = providerSelect.value;
+    if (provider) {
+      overrides.model_provider = provider;
+      const model = dialog.querySelector('#runSettingsModel')?.value;
+      if (model) overrides.model = model;
+    }
+    const effort = dialog.querySelector('#runSettingsEffort').value;
+    const approval = dialog.querySelector('#runSettingsApproval').value;
+    const sandbox = dialog.querySelector('#runSettingsSandbox').value;
+    if (effort) overrides.thinking_effort = effort;
+    if (approval) overrides.approval_mode = approval;
+    if (sandbox) overrides.sandbox_mode = sandbox;
+    if (Object.keys(overrides).length === 0) {
+      clearPendingRunOverrides();
+    } else {
+      pendingRunOverrides = overrides;
+      pendingRunOverridesAgentId = selectedAgentId;
+      if (userMessageSendButton) userMessageSendButton.setAttribute('data-run-overrides', summarizeRunOverrides(overrides));
+    }
+    close();
+  });
+}
+
 function openScheduleMessageActions() {
   document.getElementById('scheduleMessageActionsDialog')?.remove();
   const hasMessage = Boolean(userMessageInput?.value.trim());
+  const summary = summarizeRunOverrides(getPendingRunOverrides());
   const dialog = document.createElement('div');
   dialog.id = 'scheduleMessageActionsDialog';
   dialog.className = 'fixed inset-0 z-[300] flex items-end justify-center bg-slate-950/75 backdrop-blur-sm sm:items-center sm:p-4';
-  dialog.innerHTML = `<div class="w-full max-w-sm rounded-t-2xl border border-emerald-400/30 bg-slate-900 p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="scheduleMessageActionsTitle"><h2 id="scheduleMessageActionsTitle" class="text-base font-semibold text-slate-100">Send later</h2><p class="mt-1 text-sm text-slate-400">Schedule this message or manage messages waiting to be sent.</p><div class="mt-5 grid gap-3"><button type="button" data-schedule-new class="min-h-11 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50" ${hasMessage ? '' : 'disabled'}>Choose send time</button><button type="button" data-schedule-manage class="min-h-11 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">View scheduled messages</button><button type="button" data-schedule-actions-close class="min-h-11 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800">Cancel</button></div>${hasMessage ? '' : '<p class="mt-3 text-xs text-slate-400">Write a message first to choose a send time.</p>'}</div>`;
+  dialog.innerHTML = `<div class="w-full max-w-sm rounded-t-2xl border border-emerald-400/30 bg-slate-900 p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="scheduleMessageActionsTitle"><h2 id="scheduleMessageActionsTitle" class="text-base font-semibold text-slate-100">Send options</h2><p class="mt-1 text-sm text-slate-400">Choose run settings, send now, or schedule this message.</p><button type="button" data-run-settings class="mt-4 w-full min-h-11 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-700"><span class="block text-xs uppercase tracking-wide text-slate-400">Run settings</span><span class="block truncate">${escapeScheduledMessageHtml(summary)}</span></button><div class="mt-3 grid gap-3"><button type="button" data-send-now class="min-h-11 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50" ${hasMessage ? '' : 'disabled'}>Send now</button><button type="button" data-schedule-new class="min-h-11 rounded-lg bg-emerald-400/20 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/30 disabled:cursor-not-allowed disabled:opacity-50" ${hasMessage ? '' : 'disabled'}>Choose send time</button><button type="button" data-schedule-manage class="min-h-11 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">View scheduled messages</button><button type="button" data-schedule-actions-close class="min-h-11 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800">Cancel</button></div>${hasMessage ? '' : '<p class="mt-3 text-xs text-slate-400">Write a message first to send it or choose a send time.</p>'}</div>`;
   document.body.appendChild(dialog);
   const close = () => dialog.remove();
   dialog.querySelector('[data-schedule-actions-close]').addEventListener('click', close);
+  dialog.querySelector('[data-run-settings]').addEventListener('click', () => { close(); openRunSettingsDialog(openScheduleMessageActions); });
+  dialog.querySelector('[data-send-now]')?.addEventListener('click', () => { close(); sendUserMessage(); });
   dialog.querySelector('[data-schedule-new]')?.addEventListener('click', () => { close(); openScheduleMessageDialog(); });
   dialog.querySelector('[data-schedule-manage]').addEventListener('click', () => { close(); openScheduledMessagesDialog(); });
   dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
@@ -5179,6 +5500,7 @@ function openScheduleMessageDialog() {
     <div class="w-full max-w-sm rounded-2xl border border-emerald-400/30 bg-slate-900 p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="scheduleMessageTitle">
       <h2 id="scheduleMessageTitle" class="text-base font-semibold text-slate-100">Schedule message</h2>
       <p class="mt-1 text-sm text-slate-400">Choose when this message should be sent.</p>
+      <p class="mt-2 truncate text-xs text-slate-400">Runs with: ${escapeScheduledMessageHtml(summarizeRunOverrides(getPendingRunOverrides()))}</p>
       <label class="mt-4 block text-xs font-medium uppercase tracking-wide text-slate-400" for="scheduleMessageTime">Send at</label>
       <input id="scheduleMessageTime" type="datetime-local" min="${formatDateTimeLocal(new Date(Date.now() + 60_000))}" value="${formatDateTimeLocal(new Date(Date.now() + 10 * 60_000))}" class="mt-1 w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-slate-100" />
       <div class="mt-5 flex justify-end gap-2">
@@ -5211,12 +5533,13 @@ function openScheduleMessageDialog() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
         credentials: 'same-origin',
-        body: JSON.stringify({ agentId: selectedAgentId, content: contentToSend, encrypted: isEncrypted, scheduledFor: when.toISOString() })
+        body: JSON.stringify({ agentId: selectedAgentId, content: contentToSend, encrypted: isEncrypted, scheduledFor: when.toISOString(), ...(getPendingRunOverrides() ? { runOverrides: getPendingRunOverrides() } : {}) })
       });
       if (!response.ok) {
         throw buildRequestError(response, await readErrorPayload(response), { fallbackMessage: 'Unable to schedule message' });
       }
       userMessageInput.value = '';
+      clearPendingRunOverrides();
       updateComposerState();
       close();
       window.showNotification?.(`Message scheduled for ${when.toLocaleString()}.`, 'success', 'Scheduled');
@@ -5274,7 +5597,7 @@ async function openScheduledMessagesDialog() {
       const { scheduledMessages = [] } = await response.json();
       if (!scheduledMessages.length) { list.innerHTML = '<p class="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-4 text-sm text-slate-400">No scheduled messages for this agent.</p>'; return; }
       const editableMessages = await Promise.all(scheduledMessages.map(prepareScheduledMessageForEditing));
-      list.innerHTML = editableMessages.map((message) => `<article class="rounded-xl border border-slate-700 bg-slate-800/60 p-3" data-scheduled-id="${message.scheduledMessageId}"><p class="whitespace-pre-wrap break-words text-sm text-slate-100">${escapeScheduledMessageHtml(message.content)}</p><p class="mt-2 text-xs text-sky-300">Sends ${new Date(message.scheduledFor).toLocaleString()}</p><div class="mt-3 flex gap-2"><button type="button" data-scheduled-edit class="min-h-11 flex-1 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">${message.editableContent ? 'Edit message' : 'Change time'}</button><button type="button" data-scheduled-cancel class="min-h-11 rounded-lg px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-400/10">Cancel</button></div></article>`).join('');
+      list.innerHTML = editableMessages.map((message) => `<article class="rounded-xl border border-slate-700 bg-slate-800/60 p-3" data-scheduled-id="${message.scheduledMessageId}"><p class="whitespace-pre-wrap break-words text-sm text-slate-100">${escapeScheduledMessageHtml(message.content)}</p><p class="mt-2 text-xs text-sky-300">Sends ${new Date(message.scheduledFor).toLocaleString()}</p>${message.runOverrides ? `<p class="mt-1 truncate text-xs text-slate-400">Runs with: ${escapeScheduledMessageHtml(summarizeRunOverrides(message.runOverrides))}</p>` : ''}<div class="mt-3 flex gap-2"><button type="button" data-scheduled-edit class="min-h-11 flex-1 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">${message.editableContent ? 'Edit message' : 'Change time'}</button><button type="button" data-scheduled-cancel class="min-h-11 rounded-lg px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-400/10">Cancel</button></div></article>`).join('');
       list.querySelectorAll('[data-scheduled-cancel]').forEach((button) => button.addEventListener('click', async () => {
         const card = button.closest('[data-scheduled-id]');
         if (!window.confirm('Cancel this scheduled message?')) return;
@@ -5324,7 +5647,20 @@ function openScheduledMessageEditDialog(message, onSaved) {
  * Enable/disable composer controls based on current state
  */
 function updateComposerState() {
+  if (typeof window !== 'undefined' && window.MessageReplies) {
+    window.MessageReplies.setContext(selectedChatContext?.conversationId || selectedAgentId);
+  }
   if (!userMessageInput || !userMessageSendButton) {
+    return;
+  }
+  if (openingChatSelection !== null) {
+    userMessageSendButton.disabled = true;
+    setSendButtonLabel('Opening...');
+    return;
+  }
+  if (isSendingMessage) {
+    userMessageSendButton.disabled = true;
+    setSendButtonLabel('Sending...');
     return;
   }
 
@@ -5431,13 +5767,23 @@ function updateComposerState() {
   const configContainer = document.getElementById('agentConfigContainer');
   if (stopBtn) stopBtn.disabled = !hasAgent || isNewsFeed;
   if (configBtn) configBtn.disabled = !hasAgent || isNewsFeed;
+  const collaboratorView = selectedChatContext?.mode === 'shared' && selectedChatContext.role !== 'owner';
+  if (stopBtn) stopBtn.hidden = collaboratorView;
+  if (configContainer) configContainer.hidden = collaboratorView;
   // Hide the entire config container when no agent is selected to avoid showing the green "-" text
   if (configContainer) {
-    if (!hasAgent || isNewsFeed) {
+    if (!hasAgent || isNewsFeed || collaboratorView) {
       configContainer.style.display = 'none';
     } else {
       configContainer.style.display = '';
     }
+  }
+  if (selectedChatContext?.privateHistory || selectedChatContext?.mode === 'shared' && !selectedChatContext.capabilities?.send) {
+    userMessageInput.disabled = true;
+    userMessageInput.placeholder = selectedChatContext.privateHistory ? 'Private history — select the agent again to return to the shared chat' : 'Waiting for encrypted conversation access…';
+    userMessageSendButton.disabled = true;
+    if (imageFileInput) imageFileInput.disabled = true;
+    if (generalFileInput) generalFileInput.disabled = true;
   }
 }
 
@@ -5463,9 +5809,10 @@ function setupAgentControls() {
     codex: [{ value: 'default', label: 'Default' }]
   };
   let providerModelsLoaded = false;
+  let providerModelsLoadedAt = 0;
 
   async function ensureProviderModelsLoaded() {
-    if (providerModelsLoaded) return;
+    if (providerModelsLoaded && Date.now() - providerModelsLoadedAt < 5 * 60 * 1000) return;
     try {
       const response = await fetch('/dashboard/models');
       if (!response.ok) return;
@@ -5473,6 +5820,7 @@ function setupAgentControls() {
       if (data && data.models && typeof data.models === 'object') {
         providerModels = data.models;
         providerModelsLoaded = true;
+        providerModelsLoadedAt = Date.now();
       }
     } catch (error) {
       console.warn('Failed to load provider models:', error);
@@ -6192,6 +6540,26 @@ function applyPermissionRestrictions(allowedPermissions, currentProvider) {
     claudeSkip.parentElement.title = skipAllowed ? '' : 'Not allowed by your CLI permissions';
   }
 
+  // Explain why Claude full access is greyed out. The grant comes from the
+  // agent's setup, so the dashboard cannot widen it itself.
+  const claudeOptions = document.getElementById('claudeOptions');
+  if (claudeOptions) {
+    const claudePerms = allowedPermissions?.['claude'] || {};
+    const modes = claudePerms['--permission-mode'] || [];
+    const fullAccessAllowed = noRestrictions || modes.length === 0 || modes.includes('bypassPermissions')
+      || claudePerms['--dangerously-skip-permissions'] === true;
+    let hint = document.getElementById('configClaudeAccessHint');
+    if (!hint) {
+      hint = document.createElement('p');
+      hint.id = 'configClaudeAccessHint';
+      hint.className = 'text-[10px] leading-snug text-amber-300/90';
+      claudeOptions.insertBefore(hint, document.getElementById('configClaudeMode')?.nextSibling || null);
+    }
+    hint.hidden = fullAccessAllowed;
+    hint.textContent = fullAccessAllowed ? '' : `Full access is off for this agent. Its saved permissions only allow: ${modes.join(', ') || 'none'}. `
+      + 'These are set when the agent is set up and cannot be changed from here.';
+  }
+
   // Gemini mode
   const geminiMode = document.getElementById('configGeminiMode');
   if (geminiMode) {
@@ -6385,7 +6753,56 @@ function notifyRateLimit(error, options = {}) {
 /**
  * Submit the free-text reply on behalf of the user
  */
+// Send animation: a light copy of the draft glides from the composer into
+// the conversation and takes on the sent-bubble colour. It is decorative
+// only — the real send never waits on it — and it animates just transform
+// and opacity on one element that is removed when it finishes.
+function playSendFlight(text) {
+  try {
+    if (!text || !userMessageInput || typeof Element.prototype.animate !== 'function') return;
+    if (document.hidden || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const area = document.getElementById('conversationArea');
+    if (!area) return;
+    const from = userMessageInput.getBoundingClientRect();
+    const to = area.getBoundingClientRect();
+    if (!from.width || !to.width || to.bottom < 0 || from.top > window.innerHeight) return;
+
+    const ghost = document.createElement('div');
+    ghost.className = 'send-flight';
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.textContent = text.length > 240 ? `${text.slice(0, 240)}…` : text;
+    const width = Math.min(from.width - 16, Math.max(160, Math.min(to.width * 0.7, 520)));
+    ghost.style.width = `${width}px`;
+    ghost.style.left = `${from.left + 8}px`;
+    ghost.style.top = `${from.top + 6}px`;
+    document.body.appendChild(ghost);
+
+    // Land at the right edge, just above the bottom of the chat, where the
+    // sent message appears.
+    const ghostHeight = ghost.offsetHeight;
+    const dx = (to.right - 24 - width) - (from.left + 8);
+    const dy = Math.min(0, (to.bottom - 20 - ghostHeight) - (from.top + 6));
+    const animation = ghost.animate([
+      { transform: 'translate(0, 0) scale(1)', opacity: 0.95, offset: 0 },
+      { transform: `translate(${dx * 0.55}px, ${dy * 0.7}px) scale(0.97)`, opacity: 1, offset: 0.55 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.94)`, opacity: 0, offset: 1 }
+    ], { duration: 520, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' });
+    ghost.classList.add('send-flight--sent');
+    const cleanup = () => ghost.remove();
+    animation.onfinish = cleanup;
+    animation.oncancel = cleanup;
+    setTimeout(cleanup, 1200);
+  } catch (_) {
+    // Purely cosmetic; never let it affect sending.
+  }
+}
+
 async function sendUserMessage() {
+  if (isSendingMessage || openingChatSelection !== null) return;
+  if (selectedChatContext?.privateHistory) {
+    showErrorMessage('Select the agent again to send in its shared conversation.');
+    return;
+  }
   if (!userMessageInput || !userMessageSendButton) {
     return;
   }
@@ -6396,13 +6813,18 @@ async function sendUserMessage() {
   }
 
   const trimmedContent = userMessageInput.value.trim();
+  const replyContext = selectedChatContext?.conversationId || selectedAgentId;
+  const sentReply = window.MessageReplies?.get(replyContext);
+  const sentFiles = pendingImages.slice();
   const hasImages = pendingImages.length > 0;
 
   // Allow sending if there's content OR images (or both)
   if (!trimmedContent && !hasImages) {
-    showErrorMessage('Please enter a message or attach images.');
+    showErrorMessage('Please enter a message or attach a file.');
     return;
   }
+
+  playSendFlight(trimmedContent);
 
   const sendScrollGuard = captureSendScrollGuard();
   if (sendScrollGuard?.wasNearBottom) {
@@ -6411,10 +6833,31 @@ async function sendUserMessage() {
   }
   settleScrollAfterSend(sendScrollGuard);
 
+  isSendingMessage = true;
   userMessageSendButton.disabled = true;
   setSendButtonLabel(hasImages ? 'Uploading...' : 'Sending...');
 
   try {
+    if (selectedChatContext?.mode === 'shared') {
+      const conversationId = selectedChatContext.conversationId;
+      const sendResult = await window.InPlaceChat.sendMessage(trimmedContent, sentFiles, { replyTo: sentReply?.messageId });
+      if (selectedChatContext?.conversationId !== conversationId) return;
+      const messages = sendResult.messages;
+      conversationCache.set(conversationId, messages);
+      await displayMessages(messages, false, { agentId: selectedAgentId, conversationId });
+      if (!sendResult.preserveDraft && userMessageInput.value.trim() === trimmedContent &&
+          JSON.stringify(pendingImages.map(entry => entry.id)) === JSON.stringify(sentFiles.map(entry => entry.id))) {
+        userMessageInput.value = '';
+        clearAllImages();
+        window.MessageReplies?.clear(replyContext, sentReply);
+      }
+      updateComposerState();
+      setSendButtonLabel('Send');
+      if (sendResult.refreshError) showErrorMessage('Message sent. ' + sendResult.refreshError);
+      settleScrollAfterSend(sendScrollGuard);
+      return;
+    }
+
     // Upload images first if there are any
     let attachmentIds = [];
     if (hasImages) {
@@ -6438,12 +6881,13 @@ async function sendUserMessage() {
     }
 
     // Encrypt the message content if there is any
-    let contentToSend = trimmedContent || null;
+    const replyContent = window.MessageReplies?.encode(trimmedContent, sentReply) || trimmedContent;
+    let contentToSend = replyContent || null;
     let isEncrypted = false;
 
     if (trimmedContent && encryptionKey) {
       try {
-        contentToSend = await window.E2EEncryption.encryptMessage(trimmedContent, encryptionKey);
+        contentToSend = await window.E2EEncryption.encryptMessage(replyContent, encryptionKey);
         isEncrypted = true;
       } catch (encryptError) {
         console.error('Failed to encrypt message:', encryptError);
@@ -6470,6 +6914,11 @@ async function sendUserMessage() {
       requestBody.attachmentIds = attachmentIds;
     }
 
+    const sentRunOverrides = getPendingRunOverrides();
+    if (sentRunOverrides) {
+      requestBody.runOverrides = sentRunOverrides;
+    }
+
     const response = await csrfFetch('/api/user/messages', {
       method: 'POST',
       headers: {
@@ -6485,6 +6934,7 @@ async function sendUserMessage() {
       throw buildRequestError(response, errorData, { fallbackMessage: 'Unable to send message' });
     }
 
+    if (sentRunOverrides) clearPendingRunOverrides();
     const data = await response.json();
 
     // Reload full message history so we rely on
@@ -6517,6 +6967,7 @@ async function sendUserMessage() {
 
     // Clear the input and any pending images
     userMessageInput.value = '';
+    window.MessageReplies?.clear(replyContext, sentReply);
     clearAllImages();
     updateComposerState();
 
@@ -6527,6 +6978,7 @@ async function sendUserMessage() {
     }
     showErrorMessage(error.message || 'Failed to send message');
   } finally {
+    isSendingMessage = false;
     // Note: Don't reset button styling here - displayMessages() handles that
     // based on whether there are more unanswered questions
     updateComposerState();
@@ -7205,6 +7657,15 @@ const attachmentObjectUrls = new Map(); // messageId -> [objectUrl, ...]
  */
 async function downloadAndDecryptAttachment(attachment) {
   try {
+    if (attachment.sharedConversationId) {
+      const response = await fetch(attachment.downloadUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      const ciphertext = await response.arrayBuffer();
+      const version = Number(response.headers.get('X-Shared-Key-Version')) || Number(attachment.sharedKeyVersion);
+      const decryptedBuffer = await window.InPlaceChat.decryptSharedFile(attachment.sharedConversationId, version, ciphertext);
+      const blob = new Blob([decryptedBuffer], { type: inferAttachmentContentType(attachment) });
+      return { blob, objectUrl: URL.createObjectURL(blob) };
+    }
     if (!encryptionKey) {
       throw new Error('No encryption key available');
     }
@@ -7555,10 +8016,63 @@ if (document.readyState === 'loading') {
   initializeLightbox();
 }
 
+// Preserve the icon and refresh the live participant count and accessible label.
+function updateSharedChatControl(context, details) {
+  const button = document.getElementById('selectedChatContextStatus');
+  if (!button) return;
+  button.hidden = context?.mode !== 'shared';
+  const count = details ? [...(details.members || []), ...(details.guests || [])]
+    .filter(member => member.status === 'active').length : null;
+  const countNode = button.querySelector('[data-shared-participant-count]');
+  if (countNode) countNode.textContent = count === null ? '…' : String(count);
+  const action = context?.role === 'owner' ? 'Manage sharing' : 'View people and sharing';
+  const label = count === null ? action : `${action} · ${count} ${count === 1 ? 'person' : 'people'}`;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
 /**
  * Handle agent selection (Council Chamber version)
  */
 async function selectAgent(agentId, agentName, metadata = {}) {
+  const selection = ++sharedChatSelectionRequest;
+  openingChatSelection = null;
+  if (!metadata.chatContext && !metadata.skipSharedResolve && window.InPlaceChat?.resolveAgentContext &&
+      agentId !== '__ALL__' && metadata.agentType !== 'news_feed') {
+    if (isMobileListOnlyMode()) {
+      openingChatSelection = selection;
+      stopMessagePolling();
+      ++activeConversationLoadToken;
+      ++conversationRenderGeneration;
+      setMobileListExpanded(false, { skipBrowserHistory: true });
+      document.getElementById('agentPanelPlaceholder')?.classList.add('hidden');
+      const area = document.getElementById('conversationArea');
+      if (area) {
+        area.classList.remove('hidden');
+        area.innerHTML = `<div class="conversation-loading-overlay" role="status"><div class="conversation-loading-overlay__spinner"></div><span>Opening ${escapeHtml(agentName || 'chat')}…</span></div>`;
+      }
+      updateComposerState();
+    }
+    try {
+      const context = await window.InPlaceChat.resolveAgentContext(agentId);
+      if (selection !== sharedChatSelectionRequest) return;
+      if (context.mode === 'shared') metadata = { ...metadata, chatContext: context, forceMainSelection: true };
+    } catch (error) {
+      if (selection !== sharedChatSelectionRequest) return;
+      showErrorMessage(error.message || 'Could not open this conversation.');
+      const area = document.getElementById('conversationArea');
+      if (openingChatSelection === selection && area) {
+        area.innerHTML = `<div class="flex h-full flex-col items-center justify-center gap-3 text-sm text-slate-300"><p>${escapeHtml(error.message || 'Could not open this chat.')}</p><button type="button" class="min-h-11 rounded-lg bg-emerald-600 px-4 font-semibold text-white" data-retry-open-chat>Try again</button></div>`;
+        area.querySelector('[data-retry-open-chat]')?.addEventListener('click', () => { void selectAgent(agentId, agentName, metadata); });
+      }
+      return;
+    } finally {
+      if (openingChatSelection === selection) {
+        openingChatSelection = null;
+        updateComposerState();
+      }
+    }
+  }
   const focusSidePanel = shouldSelectIntoSidePanel(agentId, metadata);
   // If this agent is already open in a side tile, jump to it instead of changing main chat
   if (focusSidePanel) {
@@ -7571,6 +8085,23 @@ async function selectAgent(agentId, agentName, metadata = {}) {
       return;
     }
   }
+
+  selectedChatContext = metadata.chatContext || null;
+  window.InPlaceChat?.setContext(selectedChatContext);
+  document.body.classList.toggle('dashboard-shared-chat', selectedChatContext?.mode === 'shared');
+  const leaveSharedButton = document.getElementById('leaveSharedConversationHeaderBtn');
+  updateSharedChatControl(selectedChatContext);
+  if (leaveSharedButton) {
+    leaveSharedButton.hidden = !selectedChatContext || selectedChatContext.role === 'owner';
+    if (!leaveSharedButton.dataset.inPlaceBound) {
+      leaveSharedButton.dataset.inPlaceBound = 'true';
+      leaveSharedButton.addEventListener('click', async () => {
+        try { if (selectedChatContext?.conversationId) await window.InPlaceChat?.leaveConversation(selectedChatContext.conversationId); }
+        catch (error) { leaveSharedButton.title = error.message || 'Could not leave this conversation.'; }
+      });
+    }
+  }
+  if (selectedChatContext) resetMainInteractiveSpace();
 
   const previousAgentId = selectedAgentId;
 
@@ -7615,7 +8146,7 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   // Auto-collapse agent list on mobile when selecting an agent
   if (isMobileListOnlyMode()) {
     clearAgentListSearch({ blur: true, update: true });
-    setMobileListExpanded(false);
+    setMobileListExpanded(false, { skipBrowserHistory: true });
   }
 
   // Update selected agent
@@ -7636,6 +8167,11 @@ async function selectAgent(agentId, agentName, metadata = {}) {
     'Agent';
   selectedAgentName = resolvedAgentName;
   selectedAgentType = metadata.agentType || 'standard';
+  const inPlaceShareButton = document.getElementById('headerShareExistingChatBtn');
+  if (inPlaceShareButton) inPlaceShareButton.hidden = Boolean(
+    selectedChatContext?.mode === 'shared' || selectedChatContext?.privateHistory ||
+    agentId === '__ALL__' || selectedAgentType === 'news_feed'
+  );
   selectedAgentExternalProvider = metadata.externalProvider || '';
   // Expose for header pin button
   window._lastSelectedAgentId = agentId;
@@ -7650,6 +8186,9 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   // Save this agent as the last opened conversation
   localStorage.setItem(LAST_AGENT_STORAGE_KEY, agentId);
   recordChatNavigation(agentId, resolvedAgentName, metadata);
+  if (metadata.skipMobileBrowserHistory !== true) {
+    writeMobileBrowserNavigationState('chat', { agentId });
+  }
 
   // Show agent panel
   const placeholder = document.getElementById('agentPanelPlaceholder');
@@ -7660,7 +8199,9 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   if (placeholder) placeholder.classList.add('hidden');
   // Header styling logic is now handled below with isNewsAgent check
 
-  const hasCachedConversation = conversationCache.has(agentId);
+  const selectedConversationId = selectedChatContext?.mode === 'shared' ? selectedChatContext.conversationId : null;
+  const conversationCacheKey = selectedConversationId || agentId;
+  const hasCachedConversation = conversationCache.has(conversationCacheKey);
   if (conversationArea) {
     conversationArea.classList.remove('hidden');
     if (!hasCachedConversation) {
@@ -7802,7 +8343,7 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   const loadToken = ++activeConversationLoadToken;
 
   if (hasCachedConversation) {
-    await displayMessages(conversationCache.get(agentId), false, { agentId, requestToken: loadToken });
+    await displayMessages(conversationCache.get(conversationCacheKey), false, { agentId, requestToken: loadToken, conversationId: selectedConversationId });
     if (isStaleConversationLoad(agentId, loadToken)) {
       return;
     }
@@ -7839,10 +8380,8 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   syncDockToSelectedAgent(agentId);
   scheduleConversationPreload(currentAgentList);
 
-  // Auto-collapse mobile list when an agent is directly selected (not via nav buttons)
-  if (metadata.shouldCollapse) {
-    setMobileListExpanded(false);
-  }
+  // The mobile list closes at selection start. A render finishing later must
+  // respect a list the user has opened while that render was in progress.
 }
 
 
@@ -7906,8 +8445,52 @@ function isStaleConversationLoad(agentId, requestToken) {
   return selectedAgentId !== agentId || activeConversationLoadToken !== requestToken;
 }
 
+async function fetchConversationPayload(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const data = response.ok ? await response.json() : await readErrorPayload(response);
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The connection is taking too long. Please try again.');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+function showConversationLoadRetry(agentId, requestToken, message) {
+  const area = document.getElementById('conversationArea');
+  if (!area) return;
+  area.innerHTML = `<div class="flex h-full flex-col items-center justify-center gap-3 text-sm text-slate-300"><p>${escapeHtml(message)}</p><button type="button" class="min-h-11 rounded-lg bg-emerald-600 px-4 font-semibold text-white" data-retry-messages>Try again</button></div>`;
+  area.querySelector('[data-retry-messages]')?.addEventListener('click', () => {
+    if (!isStaleConversationLoad(agentId, requestToken)) void loadMessages(agentId, requestToken, { forceShared: true });
+  });
+}
+
 async function loadMessages(agentId, requestToken = null, options = {}) {
-  const { renderCached = true } = options;
+  const { renderCached = true, forceShared = false } = options;
+
+  if (selectedChatContext?.mode === 'shared' && selectedChatContext.agentId === agentId) {
+    const conversationId = selectedChatContext.conversationId;
+    // Private pagination state is keyed by agent ID. A shared room for the
+    // same agent must never reuse it to fetch or append private history.
+    conversationHasMore.set(agentId, false);
+    conversationOldestCursor.delete(agentId);
+    const cachedShared = conversationCache.get(conversationId);
+    if (cachedShared && renderCached && !forceShared) await displayMessages(cachedShared, false, { agentId, requestToken, conversationId });
+    if (cachedShared && !forceShared) return;
+    isLoadingMessages = true;
+    try {
+      const messages = await window.InPlaceChat.loadTimeline();
+      if (selectedChatContext?.conversationId !== conversationId || isStaleConversationLoad(agentId, requestToken)) return;
+      conversationCache.set(conversationId, messages);
+      await displayMessages(messages, false, { agentId, requestToken, conversationId });
+    } catch (error) {
+      if (selectedChatContext?.conversationId !== conversationId) return;
+      showConversationLoadRetry(agentId, requestToken, error.message || 'Shared conversation is not ready.');
+    } finally { isLoadingMessages = false; }
+    return;
+  }
 
   // Check cache first - display cached messages immediately for responsiveness
   if (conversationCache.has(agentId)) {
@@ -7927,27 +8510,21 @@ async function loadMessages(agentId, requestToken = null, options = {}) {
     const isAllChats = agentId === '__ALL__';
     const baseUrl = isAllChats ? '/api/user/messages/all' : `/api/user/messages/${agentId}`;
     const apiUrl = isAllChats ? baseUrl : `${baseUrl}?limit=${INITIAL_MESSAGE_LIMIT}`;
-    const response = await fetch(apiUrl);
+    const { response, data } = await fetchConversationPayload(apiUrl);
 
     if (isStaleConversationLoad(agentId, requestToken)) {
       return;
     }
 
     if (!response.ok) {
-      const errorData = await readErrorPayload(response);
-      const requestError = buildRequestError(response, errorData, { fallbackMessage: 'Failed to load messages' });
+      const requestError = buildRequestError(response, data, { fallbackMessage: 'Failed to load messages' });
       console.error('Failed to fetch messages:', response.status, requestError.message);
       if (notifyRateLimit(requestError, { scope: 'load-messages' })) {
         return;
       }
-      const conversationArea = document.getElementById('conversationArea');
-      if (conversationArea) {
-        conversationArea.innerHTML = '<div class="flex items-center justify-center h-full text-slate-500"><p class="text-sm text-red-300">Failed to load messages</p></div>';
-      }
+      showConversationLoadRetry(agentId, requestToken, requestError.message);
       return;
     }
-
-    const data = await response.json();
 
     if (isStaleConversationLoad(agentId, requestToken)) {
       return;
@@ -7965,33 +8542,24 @@ async function loadMessages(agentId, requestToken = null, options = {}) {
     // On mobile/Fast Mode, avoid a second full-history render immediately after
     // opening the chat. That render can block taps and delay keyboard focus on
     // large conversations. Desktop still warms the full cache in the background.
-    if (data.hasMore && shouldAutoLoadOlderMessages(agentId)) {
-      loadOlderMessagesInBackground(agentId, requestToken);
-    }
+    // Older history is loaded on demand when the user scrolls near the top.
 
   } catch (error) {
     if (isStaleConversationLoad(agentId, requestToken)) {
       return;
     }
     console.error('Error loading messages:', error);
-    const conversationArea = document.getElementById('conversationArea');
-    if (conversationArea) {
-      conversationArea.innerHTML = '<div class="flex items-center justify-center h-full text-slate-500"><p class="text-sm text-red-300">Error loading messages</p></div>';
-    }
+    showConversationLoadRetry(agentId, requestToken, error.message || 'Error loading messages.');
   } finally {
     isLoadingMessages = false;
   }
 }
 
-function shouldAutoLoadOlderMessages(agentId) {
-  if (!agentId || agentId === '__ALL__') return false;
-  if (isDashboardFastModeActive()) return false;
-  if (isMobileListOnlyMode()) return false;
-  if (window.matchMedia?.('(pointer: coarse) and (max-width: 1180px)')?.matches) return false;
-  return true;
-}
-
 async function loadOlderMessagesInBackground(agentId, requestToken) {
+  if (selectedChatContext?.mode === 'shared') {
+    conversationHasMore.set(agentId, false);
+    return;
+  }
   if (isStaleConversationLoad(agentId, requestToken)) return;
   if (isLoadingOlderMessages) return;
   isLoadingOlderMessages = true;
@@ -8023,7 +8591,7 @@ async function loadOlderMessagesInBackground(agentId, requestToken) {
     conversationOldestCursor.delete(agentId);
 
     // Re-render with full messages, preserving scroll position near the bottom
-    const shouldStayPinnedToLatest = Date.now() < forceScrollToBottomUntil;
+    const shouldStayPinnedToLatest = false;
     const wasNearBottom = conversationArea
       ? (conversationArea.scrollHeight - conversationArea.scrollTop - conversationArea.clientHeight) < 80
       : true;
@@ -8051,8 +8619,31 @@ async function loadOlderMessagesInBackground(agentId, requestToken) {
  */
 async function pollMessages(agentId) {
   // Skip polling if we're in the middle of a full reload
-  if (isLoadingMessages) {
+  if (isLoadingMessages || isLoadingOlderMessages) {
     return;
+  }
+
+  if (selectedChatContext?.mode === 'shared' && selectedChatContext.agentId === agentId) {
+    const conversationId = selectedChatContext.conversationId;
+    try {
+      const requestToken = activeConversationLoadToken;
+      const messages = await window.InPlaceChat.loadTimeline();
+      if (selectedChatContext?.conversationId !== conversationId || isStaleConversationLoad(agentId, requestToken)) return;
+      if (isLoadingOlderMessages) return;
+      const hasPrevious = conversationCache.has(conversationId);
+      const previous = conversationCache.get(conversationId) || [];
+      const signature = list => JSON.stringify(list.map(message => [message.messageId, message.content, message.timestamp, message.type,
+        message.senderName, message.sharedSenderKind, message.sharedAudienceLabel, message.sharedAudienceMode]));
+      conversationCache.set(conversationId, messages);
+      window.DashboardHelpers?.updateMessageReceipts?.(messages);
+      if (!hasPrevious || signature(previous) !== signature(messages)) {
+        await displayMessages(messages, false, { agentId, conversationId, requestToken });
+      }
+      return;
+    } catch (error) {
+      console.warn('Shared conversation refresh failed:', error.message);
+      return;
+    }
   }
 
   if (isStaleConversationLoad(agentId, null)) {
@@ -8126,16 +8717,17 @@ async function pollMessages(agentId) {
   }
 }
 
-function buildUserMessageReadIndicator(readAt, deliveryState, deliveryFailed) {
-  if (readAt) {
-    return '<span class="message-read-indicator message-read-indicator--read" title="Read by agent">✓✓</span>';
+function messageReceiptPresentation(status = {}) {
+  if (status.readAt || status.deliveryState === 'read') return { state: 'read', text: '✓✓', title: 'Read by agent' };
+  if (status.deliveryState === 'sending' || status.serverReceived === false) {
+    if (status.deliveryState === 'failed') return { state: 'failed', text: '⚠', title: 'Message could not reach the server' };
+    return { state: 'pending', text: '✓', title: 'Sending to server' };
   }
-
-  if (deliveryState === 'failed' || deliveryFailed === true) {
-    return '<span class="message-read-indicator message-read-indicator--failed" title="Delivery failed: agent did not receive this message">⚠</span>';
-  }
-
-  return '<span class="message-read-indicator message-read-indicator--pending" title="Not yet read">✓</span>';
+  return { state: 'delivered', text: '✓✓', title: 'Received by server; not yet read by agent' };
+}
+function buildUserMessageReadIndicator(readAt, deliveryState, deliveryFailed, serverReceived = true) {
+  const receipt = messageReceiptPresentation({ readAt, deliveryState, deliveryFailed, serverReceived });
+  return `<span class="message-read-indicator message-read-indicator--${receipt.state}" data-receipt-state="${receipt.state}" role="img" aria-label="${receipt.title}" title="${receipt.title}">${receipt.text}</span>`;
 }
 
 function applyUserMessageDeliveryState(msgEl, status) {
@@ -8148,35 +8740,31 @@ function applyUserMessageDeliveryState(msgEl, status) {
     return;
   }
 
-  const isRead = !!status.readAt;
-  const isFailed = !isRead && (status.deliveryState === 'failed' || status.deliveryFailed === true);
-
-  checkSpan.classList.remove('message-read-indicator--pending', 'message-read-indicator--failed', 'message-read-indicator--read');
-
-  if (isRead) {
-    msgEl.setAttribute('data-read', 'true');
-    checkSpan.classList.add('message-read-indicator--read');
-    checkSpan.title = 'Read by agent';
-    checkSpan.textContent = '✓✓';
-    return;
-  }
-
-  msgEl.removeAttribute('data-read');
-  if (isFailed) {
-    checkSpan.classList.add('message-read-indicator--failed');
-    checkSpan.title = 'Delivery failed: agent did not receive this message';
-    checkSpan.textContent = '⚠';
-  } else {
-    checkSpan.classList.add('message-read-indicator--pending');
-    checkSpan.title = 'Not yet read';
-    checkSpan.textContent = '✓';
-  }
+  const receipt = messageReceiptPresentation(status);
+  if (receipt.state === 'read') msgEl.setAttribute('data-read', 'true');
+  else msgEl.removeAttribute('data-read');
+  if (checkSpan.dataset.receiptState === receipt.state && checkSpan.title === receipt.title) return;
+  checkSpan.classList.remove('message-read-indicator--pending', 'message-read-indicator--delivered', 'message-read-indicator--failed', 'message-read-indicator--read');
+  checkSpan.classList.add('message-read-indicator--' + receipt.state);
+  checkSpan.dataset.receiptState = receipt.state;
+  checkSpan.setAttribute('role', 'img');
+  checkSpan.setAttribute('aria-label', receipt.title);
+  checkSpan.title = receipt.title;
+  checkSpan.textContent = receipt.text;
+}
+function updateMessageReceipts(messages = []) {
+  const statuses = new Map(messages.filter(message => message.type === 'user_message').map(message => [message.messageId, message]));
+  document.getElementById('conversationArea')?.querySelectorAll('[data-message-id][data-message-type="user_message"]').forEach(node => {
+    const status = statuses.get(node.dataset.messageId);
+    if (status) applyUserMessageDeliveryState(node, status);
+  });
 }
 
 /**
  * Poll for read status updates on user messages
  */
 async function pollReadStatus(agentId) {
+  if (selectedChatContext?.mode === 'shared' && selectedChatContext.agentId === agentId) return;
   try {
     if (isStaleConversationLoad(agentId, null)) {
       return;
@@ -8228,10 +8816,18 @@ async function pollReadStatus(agentId) {
 /**
  * Display messages in conversation area
  */
+let conversationRendersInFlight = 0;
 async function displayMessages(messages, append = false, context = {}) {
+  conversationRendersInFlight += 1;
+  try {
   const renderAgentId = context.agentId || selectedAgentId;
   const renderRequestToken = context.requestToken ?? null;
-  const isRenderStale = () => isStaleConversationLoad(renderAgentId, renderRequestToken);
+  const renderConversationId = context.conversationId || null;
+  // Polling and Send can both refresh the same chat while decryption awaits.
+  const renderGeneration = append ? conversationRenderGeneration : ++conversationRenderGeneration;
+  const isRenderStale = () => isStaleConversationLoad(renderAgentId, renderRequestToken) ||
+    renderGeneration !== conversationRenderGeneration ||
+    Boolean(renderConversationId && selectedChatContext?.conversationId !== renderConversationId);
   const conversationArea = document.getElementById('conversationArea');
   const preserveScrollPosition = context.preserveScrollPosition === true;
   const previousScrollTop = conversationArea?.scrollTop ?? 0;
@@ -8269,9 +8865,16 @@ async function displayMessages(messages, append = false, context = {}) {
   }
 
   // Add messages to conversation area
-  for (const message of messages) {
+  let renderYieldAt = Date.now();
+  const pendingElements = document.createDocumentFragment();
+  // Show the newest messages first during a full refresh; prepend older ones
+  // into chronological order while leaving time for phone taps and scrolling.
+  const renderMessages = append ? messages : [...messages].reverse();
+  for (const message of renderMessages) {
+    if (isRenderStale()) return false;
     // Skip if this message already exists in the DOM (dedup for append mode)
-    if (append && document.querySelector(`[data-message-id="${message.messageId}"]`)) {
+    if (append && (document.querySelector(`[data-message-id="${message.messageId}"]`) ||
+        pendingElements.querySelector(`[data-message-id="${message.messageId}"]`))) {
       continue;
     }
 
@@ -8343,7 +8946,8 @@ async function displayMessages(messages, append = false, context = {}) {
 
     }
 
-    conversationArea.appendChild(messageElement);
+    if (append) pendingElements.appendChild(messageElement);
+    else pendingElements.prepend(messageElement);
 
     // Narrate new agent messages with a polished TTS voice
     if (append && (message.type === 'agent_message' || message.type === 'agent_question')) {
@@ -8376,11 +8980,27 @@ async function displayMessages(messages, append = false, context = {}) {
         }
       }
     }
+    if (Date.now() - renderYieldAt >= 8) {
+      // Insert small batches between yields. Inserting the whole backlog at
+      // the end leaves one large style/layout task on slower phones.
+      if (append) conversationArea.appendChild(pendingElements);
+      else conversationArea.prepend(pendingElements);
+      // Yield a task rather than waiting for the next animation frame: frames
+      // can be heavily throttled on phones and in background tabs.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (isRenderStale()) return false;
+      renderYieldAt = Date.now();
+    }
   }
 
   if (isRenderStale()) {
     return false;
   }
+
+  if (append) conversationArea.appendChild(pendingElements);
+  else conversationArea.prepend(pendingElements);
+
+  window.DashboardHelpers?.updateMessageReceipts?.(messages);
 
   updateConversationMeta(lastMessageTimestamp);
   updateComposerState();
@@ -8418,6 +9038,7 @@ async function displayMessages(messages, append = false, context = {}) {
   }
 
   return true;
+  } finally { conversationRendersInFlight -= 1; }
 }
 
 /**
@@ -8562,10 +9183,44 @@ function parseNewsMessage(content) {
 /**
  * Create message element
  */
+function renderSharedRichContent(container, richData, conversationId) {
+  const element = window.RichRendering.renderRichContent(richData, async messageText => {
+    const context = window.InPlaceChat?.getContext?.();
+    if (context?.mode !== 'shared' || context.conversationId !== conversationId) {
+      throw new Error('Open the conversation containing this form before submitting it.');
+    }
+    const result = await window.InPlaceChat.sendMessage(messageText);
+    if (window.InPlaceChat.getContext()?.conversationId === conversationId) {
+      await loadMessages(context.agentId);
+    }
+    if (result?.preserveDraft) {
+      throw new Error('Your previous message was recovered. Submit this form again to send this response.');
+    }
+  });
+  container.appendChild(element);
+}
+
+function renderSharedMessageInfo(message) {
+  const label = message.sharedAudienceLabel;
+  if (!label) return '';
+  const scope = message.ownerPrivateHistory || label === 'Owner only' ? 'owner'
+    : message.sharedAudienceMode === 'all' || label === 'Everyone' ? 'all' : 'selected';
+  const icon = scope === 'owner'
+    ? '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
+    : '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/>';
+  return `<span class="shared-message-audience shared-message-audience--${scope}" title="Who can see this message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${icon}</svg><span>Visible to ${escapeHtml(label)}</span></span>`;
+}
+
 function createMessageElement(message) {
+  const quoted = window.MessageReplies?.decode(message.content);
+  if (quoted) message = { ...message, content: quoted.text, reply: quoted.reply };
   const div = document.createElement('div');
   div.className = 'space-y-2';
   div.dataset.messageId = message.messageId; // For deduplication
+  if (['agent', 'guest', 'owner', 'participant'].includes(message.sharedSenderKind)) div.dataset.sharedSenderKind = message.sharedSenderKind;
+  // Keep long transcripts cheap to lay out while older bubbles are offscreen.
+  div.style.contentVisibility = 'auto';
+  div.style.containIntrinsicSize = 'auto 160px';
 
   if (message.type === 'agent_message' || message.type === 'agent_question') {
     // Agent message (left side)
@@ -8588,7 +9243,7 @@ function createMessageElement(message) {
       `;
     } else if (message.content && message.content.trim()) {
       // Check if this is rich HTML content from agent (forms, interactive content)
-      const richData = window.RichRendering ? window.RichRendering.detectRichContent(message.content) : null;
+      const richData = !message.ownerPrivateHistory && window.RichRendering ? window.RichRendering.detectRichContent(message.content) : null;
 
       if (richData) {
         // Rich content detected - will be rendered as DOM element below
@@ -8620,6 +9275,7 @@ function createMessageElement(message) {
       <div class="flex justify-start">
         <div>
           ${agentNameLabel}
+          ${renderSharedMessageInfo(message)}
           <div class="message-bubble p-3 ${priorityClass} ${urgentClass} ${hiddenClass}">
             ${message.urgent ? '<span class="inline-block px-2 py-0.5 text-xs font-semibold text-red-200 bg-red-500/20 rounded mb-2">URGENT</span>' : ''}
             <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${contentHtml}</div>
@@ -8642,6 +9298,9 @@ function createMessageElement(message) {
       const richData = message._richData;
       const messageContent = agentBubble.querySelector('.message-content');
       if (messageContent) {
+        if (message.sharedConversationId) {
+          renderSharedRichContent(messageContent, richData, message.sharedConversationId);
+        } else {
         // Render placeholder instead of full rich content. Show the agent's
         // real title (when supplied) so the user knows what was sent without
         // having to expand it.
@@ -8654,6 +9313,7 @@ function createMessageElement(message) {
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             ${label} 📌</div>`;
         messageContent.insertAdjacentHTML('beforeend', placeholderHtml);
+        }
       }
       delete message._richData;
     }
@@ -8670,7 +9330,7 @@ function createMessageElement(message) {
     }
 
     // Add clickable options if it's a question with options
-    if (message.type === 'agent_question' && message.options && message.options.length > 0) {
+    if (message.type === 'agent_question' && !message.ownerPrivateHistory && message.options && message.options.length > 0) {
       const optionsDiv = document.createElement('div');
       optionsDiv.className = 'ml-4 space-y-2 options-container';
       optionsDiv.dataset.questionId = message.messageId;
@@ -8695,7 +9355,7 @@ function createMessageElement(message) {
     }
 
     // Determine if message has been read by agent
-    const readIcon = buildUserMessageReadIndicator(message.readAt, message.deliveryState, message.deliveryFailed);
+    const readIcon = buildUserMessageReadIndicator(message.readAt, message.deliveryState, message.deliveryFailed, message.serverReceived !== false);
 
     // Generate content HTML - either encrypted placeholder or actual content
     let userContentHtml;
@@ -8736,11 +9396,16 @@ function createMessageElement(message) {
     const userAgentNameLabel = message.agentName
       ? `<span class="all-chats-agent-label all-chats-agent-label--user">→ ${escapeHtml(message.agentName)}</span>`
       : '';
+    const sharedSenderLabel = message.senderName
+      ? `<span class="all-chats-agent-label all-chats-agent-label--user">${message.sharedSenderKind === 'guest' ? 'Guest · ' : ''}${escapeHtml(message.senderName)}</span>`
+      : '';
 
     div.innerHTML = `
       <div class="flex justify-end">
         <div>
+          ${sharedSenderLabel}
           ${userAgentNameLabel}
+          ${renderSharedMessageInfo(message)}
           <div class="message-bubble message-bubble--user${hiddenClass} p-3 text-right">
             <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${userContentHtml}</div>
             <div class="message-footer">
@@ -8826,6 +9491,7 @@ function createMessageElement(message) {
     div.innerHTML = `
       <div class="flex ${directionClass}">
         <div class="message-bubble ${bubbleClass} ${priorityClass} p-3">
+          ${renderSharedMessageInfo(message)}
           <div class="flex items-center gap-2 mb-1 text-xs">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-medium">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -8850,6 +9516,9 @@ function createMessageElement(message) {
     attachRunCommandTimestamp(div, message);
   }
 
+  window.MessageReplies?.decorate(div, message, selectedChatContext?.conversationId || selectedAgentId,
+    selectedAgentType !== 'news_feed' && !message.ownerPrivateHistory && selectedAgentId &&
+      (!selectedChatContext || selectedChatContext.capabilities?.send));
   return div;
 }
 
@@ -8927,6 +9596,8 @@ function attachMessageTtsButton(bubble, message) {
   const copyReadyContent = (message.content || '').trim();
   if (!normalizedContent) return;
   bubble.dataset.messageText = normalizedContent;
+  const playbackKey = getMessageTtsPlaybackKey(message, normalizedContent);
+  bubble.dataset.ttsPlaybackKey = playbackKey;
 
   let footer = bubble.querySelector('.message-footer');
   if (!footer) {
@@ -8974,13 +9645,34 @@ function attachMessageTtsButton(bubble, message) {
     `;
     ttsButton.addEventListener('click', (event) => {
       event.stopPropagation();
-      if (ttsButton.classList.contains('is-playing')) {
-        stopActiveMessagePlayback();
+      const player = ensureMessageTtsPlayer(bubble, normalizedContent, playbackKey, ttsButton);
+      setMessageTtsPlayerExpanded(player, true);
+      if (activeMessageTtsSession?.key === playbackKey && activeMessageTtsSession.status === 'playing') {
+        pauseActiveMessagePlayback();
         return;
       }
-      speakMessageText(normalizedContent, ttsButton);
+      const checkpoint = getMessageTtsCheckpoint(playbackKey, normalizedContent);
+      speakMessageText(normalizedContent, ttsButton, {
+        playbackKey,
+        startOffset: checkpoint?.offset || 0,
+        rate: Number(player.dataset.rate || checkpoint?.rate || 1)
+      });
     });
     utilities.appendChild(ttsButton);
+  }
+
+  const checkpoint = getMessageTtsCheckpoint(playbackKey, normalizedContent);
+  const existingTtsButton = utilities.querySelector('.message-tts-btn');
+  if (checkpoint?.offset > 0 && existingTtsButton && activeMessageTtsSession?.key !== playbackKey) {
+    setTtsButtonState(existingTtsButton, 'paused');
+  }
+
+  if (activeMessageTtsSession?.key === playbackKey) {
+    const player = ensureMessageTtsPlayer(bubble, normalizedContent, playbackKey, existingTtsButton);
+    activeMessageTtsSession.button = existingTtsButton;
+    activeMessageTtsSession.player = player;
+    setMessageTtsPlayerExpanded(player, true);
+    updateMessageTtsUi(activeMessageTtsSession);
   }
 
   if (copyReadyContent && !utilities.querySelector('.message-copy-btn')) {
@@ -9004,7 +9696,7 @@ function attachMessageTtsButton(bubble, message) {
   }
 
   // Add delete button
-  if (!utilities.querySelector('.message-delete-btn')) {
+  if (!message.sharedConversationId && !message.ownerPrivateHistory && !utilities.querySelector('.message-delete-btn')) {
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'message-utility-btn message-delete-btn';
@@ -9030,7 +9722,7 @@ function attachMessageTtsButton(bubble, message) {
   }
 
   // Add hide from agent toggle button (for both user and agent messages)
-  if ((message.type === 'user_message' || message.type === 'agent_message' || message.type === 'agent_question') && !utilities.querySelector('.message-hide-btn')) {
+  if (!message.sharedConversationId && !message.ownerPrivateHistory && (message.type === 'user_message' || message.type === 'agent_message' || message.type === 'agent_question') && !utilities.querySelector('.message-hide-btn')) {
     const hideButton = document.createElement('button');
     hideButton.type = 'button';
     hideButton.className = 'message-utility-btn message-hide-btn relative overflow-hidden group';
@@ -9173,19 +9865,253 @@ function attachMessageTtsButton(bubble, message) {
   }
 }
 
-function resetTtsButtonState(button) {
-  if (!button) return;
-  button.classList.remove('is-playing');
-  button.removeAttribute('aria-pressed');
-  if (button.dataset.defaultLabel) {
-    button.setAttribute('aria-label', button.dataset.defaultLabel);
+function hashMessageTtsText(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-  if (button.dataset.defaultTitle) {
-    button.title = button.dataset.defaultTitle;
+  return (hash >>> 0).toString(36);
+}
+
+function getMessageTtsPlaybackKey(message, text) {
+  const messageId = String(message?.messageId || '').trim();
+  return messageId ? `message:${messageId}` : `text:${hashMessageTtsText(text)}`;
+}
+
+function readMessageTtsCheckpoints() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MESSAGE_TTS_CHECKPOINT_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_error) {
+    return {};
   }
 }
 
-function stopActiveMessagePlayback() {
+function getMessageTtsCheckpoint(key, text) {
+  const checkpoint = readMessageTtsCheckpoints()[key];
+  if (!checkpoint || checkpoint.textHash !== hashMessageTtsText(text)) return null;
+  const offset = Math.max(0, Math.min(text.length, Number(checkpoint.offset) || 0));
+  if (offset >= text.length) return null;
+  return { ...checkpoint, offset };
+}
+
+function saveMessageTtsCheckpoint(key, text, offset, rate = 1) {
+  if (!key) return;
+  try {
+    const checkpoints = readMessageTtsCheckpoints();
+    const boundedOffset = Math.max(0, Math.min(text.length, Math.floor(Number(offset) || 0)));
+    if (boundedOffset <= 0 || boundedOffset >= text.length) {
+      delete checkpoints[key];
+    } else {
+      checkpoints[key] = {
+        offset: boundedOffset,
+        rate,
+        textHash: hashMessageTtsText(text),
+        updatedAt: Date.now()
+      };
+    }
+    const entries = Object.entries(checkpoints)
+      .sort((a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0))
+      .slice(0, MESSAGE_TTS_CHECKPOINT_LIMIT);
+    localStorage.setItem(MESSAGE_TTS_CHECKPOINT_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch (_error) {
+    // Playback still works when storage is unavailable (for example, private mode).
+  }
+}
+
+function findMessageTtsWordOffset(text, requestedOffset) {
+  const bounded = Math.max(0, Math.min(text.length, Math.floor(Number(requestedOffset) || 0)));
+  if (bounded === 0 || bounded === text.length) return bounded;
+  if (/\s/.test(text[bounded] || '')) {
+    const nextWord = text.slice(bounded).search(/\S/);
+    return nextWord < 0 ? text.length : bounded + nextWord;
+  }
+  let wordStart = bounded;
+  while (wordStart > 0 && !/\s/.test(text[wordStart - 1])) wordStart -= 1;
+  return wordStart;
+}
+
+function resetTtsButtonState(button) {
+  if (!button) return;
+  button.classList.remove('is-playing', 'is-paused');
+  button.removeAttribute('aria-pressed');
+  if (button.dataset.defaultLabel) button.setAttribute('aria-label', button.dataset.defaultLabel);
+  if (button.dataset.defaultTitle) button.title = button.dataset.defaultTitle;
+}
+
+function setTtsButtonState(button, status) {
+  if (!button) return;
+  button.classList.toggle('is-playing', status === 'playing');
+  button.classList.toggle('is-paused', status === 'paused');
+  if (status === 'playing') {
+    button.setAttribute('aria-pressed', 'true');
+    button.setAttribute('aria-label', 'Pause reading this message');
+    button.title = 'Pause playback';
+  } else if (status === 'paused') {
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', 'Continue reading this message');
+    button.title = 'Continue playback';
+  } else if (status === 'finished') {
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', 'Replay this message');
+    button.title = 'Replay message';
+  } else {
+    resetTtsButtonState(button);
+  }
+}
+
+function createMessageTtsTranscript(player, text) {
+  const transcript = player.querySelector('.message-tts-transcript');
+  if (!transcript || transcript.childNodes.length > 0) return;
+  const wordPattern = /\S+/g;
+  let previousEnd = 0;
+  let match;
+  while ((match = wordPattern.exec(text))) {
+    if (match.index > previousEnd) transcript.appendChild(document.createTextNode(text.slice(previousEnd, match.index)));
+    const word = document.createElement('button');
+    word.type = 'button';
+    word.className = 'message-tts-word';
+    word.textContent = match[0];
+    word.dataset.offset = String(match.index);
+    word.setAttribute('aria-label', `Continue from ${match[0]}`);
+    transcript.appendChild(word);
+    previousEnd = match.index + match[0].length;
+  }
+  if (previousEnd < text.length) transcript.appendChild(document.createTextNode(text.slice(previousEnd)));
+}
+
+function ensureMessageTtsPlayer(bubble, text, playbackKey, button) {
+  let player = bubble.querySelector('.message-tts-player');
+  if (player) return player;
+  const checkpoint = getMessageTtsCheckpoint(playbackKey, text);
+  player = document.createElement('section');
+  player.className = 'message-tts-player';
+  player.hidden = true;
+  player.dataset.playbackKey = playbackKey;
+  player.dataset.rate = String(checkpoint?.rate || 1);
+  player.setAttribute('aria-label', 'Message audio player');
+  player.innerHTML = `
+    <div class="message-tts-controls">
+      <button type="button" class="message-tts-control message-tts-play-pause" aria-label="Play message">Play</button>
+      <button type="button" class="message-tts-control message-tts-restart" aria-label="Restart message">Restart</button>
+      <label class="message-tts-progress-label"><span class="sr-only">Playback position</span><input class="message-tts-progress" type="range" min="0" max="${text.length}" value="${checkpoint?.offset || 0}" step="1"></label>
+      <output class="message-tts-progress-text" aria-live="polite">0%</output>
+      <button type="button" class="message-tts-control message-tts-rate" aria-label="Playback speed">${checkpoint?.rate || 1}&times;</button>
+      <button type="button" class="message-tts-control message-tts-transcript-toggle" aria-expanded="false">Choose word</button>
+    </div>
+    <div class="message-tts-status sr-only" aria-live="polite">Ready</div>
+    <div class="message-tts-transcript" hidden aria-label="Choose a word to continue reading"></div>
+  `;
+  bubble.appendChild(player);
+  createMessageTtsTranscript(player, text);
+
+  const playPause = player.querySelector('.message-tts-play-pause');
+  const progress = player.querySelector('.message-tts-progress');
+  playPause.addEventListener('click', () => {
+    if (activeMessageTtsSession?.key === playbackKey && activeMessageTtsSession.status === 'playing') {
+      pauseActiveMessagePlayback();
+      return;
+    }
+    const saved = getMessageTtsCheckpoint(playbackKey, text);
+    speakMessageText(text, button, { playbackKey, startOffset: Number(progress.value || saved?.offset || 0), rate: Number(player.dataset.rate || 1) });
+  });
+  player.querySelector('.message-tts-restart').addEventListener('click', () => {
+    speakMessageText(text, button, { playbackKey, startOffset: 0, rate: Number(player.dataset.rate || 1) });
+  });
+  player.querySelector('.message-tts-rate').addEventListener('click', (event) => {
+    const rates = [0.8, 1, 1.25, 1.5];
+    const current = Number(player.dataset.rate || 1);
+    const currentIndex = rates.findIndex((rate) => rate === current);
+    const nextRate = rates[(currentIndex + 1) % rates.length];
+    player.dataset.rate = String(nextRate);
+    event.currentTarget.innerHTML = `${nextRate}&times;`;
+    if (activeMessageTtsSession?.key === playbackKey) {
+      const resumeOffset = activeMessageTtsSession.offset;
+      const wasPlaying = activeMessageTtsSession.status === 'playing';
+      pauseActiveMessagePlayback();
+      saveMessageTtsCheckpoint(playbackKey, text, resumeOffset, nextRate);
+      if (wasPlaying) speakMessageText(text, button, { playbackKey, startOffset: resumeOffset, rate: nextRate });
+    }
+  });
+  const transcriptToggle = player.querySelector('.message-tts-transcript-toggle');
+  const transcript = player.querySelector('.message-tts-transcript');
+  transcriptToggle.addEventListener('click', () => {
+    const expanded = transcript.hidden;
+    transcript.hidden = !expanded;
+    transcriptToggle.setAttribute('aria-expanded', String(expanded));
+    transcriptToggle.textContent = expanded ? 'Hide words' : 'Choose word';
+  });
+  transcript.addEventListener('click', (event) => {
+    const word = event.target.closest('.message-tts-word');
+    if (!word) return;
+    speakMessageText(text, button, { playbackKey, startOffset: Number(word.dataset.offset || 0), rate: Number(player.dataset.rate || 1) });
+  });
+  progress.addEventListener('input', () => updateMessageTtsProgress(player, text, Number(progress.value || 0)));
+  progress.addEventListener('change', () => {
+    const offset = findMessageTtsWordOffset(text, progress.value);
+    const wasPlaying = activeMessageTtsSession?.key === playbackKey && activeMessageTtsSession.status === 'playing';
+    if (activeMessageTtsSession?.key === playbackKey) pauseActiveMessagePlayback();
+    saveMessageTtsCheckpoint(playbackKey, text, offset, Number(player.dataset.rate || 1));
+    updateMessageTtsProgress(player, text, offset);
+    setTtsButtonState(button, offset > 0 ? 'paused' : 'idle');
+    if (wasPlaying) speakMessageText(text, button, { playbackKey, startOffset: offset, rate: Number(player.dataset.rate || 1) });
+  });
+  updateMessageTtsProgress(player, text, checkpoint?.offset || 0);
+  return player;
+}
+
+function setMessageTtsPlayerExpanded(player, expanded) {
+  if (player) player.hidden = !expanded;
+}
+
+function updateMessageTtsProgress(player, text, offset) {
+  if (!player) return;
+  const bounded = Math.max(0, Math.min(text.length, Number(offset) || 0));
+  const progress = player.querySelector('.message-tts-progress');
+  if (progress && document.activeElement !== progress) progress.value = String(bounded);
+  const output = player.querySelector('.message-tts-progress-text');
+  if (output) output.textContent = `${text.length > 0 ? Math.round((bounded / text.length) * 100) : 0}%`;
+  const words = [...player.querySelectorAll('.message-tts-word')];
+  let activeWord = null;
+  words.forEach((word, index) => {
+    const wordOffset = Number(word.dataset.offset || 0);
+    const nextOffset = Number(words[index + 1]?.dataset.offset || text.length);
+    const isCurrent = wordOffset <= bounded && nextOffset > bounded;
+    word.classList.toggle('is-read', wordOffset < bounded);
+    word.classList.toggle('is-current', isCurrent);
+    if (isCurrent) activeWord = word;
+  });
+  const transcript = player.querySelector('.message-tts-transcript');
+  if (activeWord && transcript && !transcript.hidden) activeWord.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+}
+
+function updateMessageTtsUi(session) {
+  if (!session) return;
+  updateMessageTtsProgress(session.player, session.text, session.offset);
+  setTtsButtonState(session.button, session.status);
+  const playPause = session.player?.querySelector('.message-tts-play-pause');
+  if (playPause) {
+    playPause.textContent = session.status === 'playing' ? 'Pause' : session.status === 'finished' ? 'Replay' : 'Play';
+    playPause.setAttribute('aria-label', session.status === 'playing' ? 'Pause message' : session.status === 'finished' ? 'Replay message' : 'Play message');
+  }
+  const status = session.player?.querySelector('.message-tts-status');
+  if (status) status.textContent = session.status === 'playing' ? 'Playing' : session.status === 'paused' ? 'Paused' : session.status === 'finished' ? 'Finished' : 'Ready';
+}
+
+function stopActiveMessagePlayback({ preserveCheckpoint = false } = {}) {
+  const session = activeMessageTtsSession;
+  if (preserveCheckpoint && session) {
+    session.status = 'paused';
+    saveMessageTtsCheckpoint(session.key, session.text, session.offset, session.rate);
+    updateMessageTtsUi(session);
+  }
+  if (activeTtsUtterance) {
+    activeTtsUtterance.onboundary = null;
+    activeTtsUtterance.onstart = null;
+    activeTtsUtterance.onend = null;
+    activeTtsUtterance.onerror = null;
+  }
   if ('speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
@@ -9193,18 +10119,32 @@ function stopActiveMessagePlayback() {
       console.error('Failed to cancel speech synthesis:', error);
     }
   }
-  if (activeTtsUtterance) {
-    activeTtsUtterance.onend = null;
-    activeTtsUtterance.onerror = null;
-    activeTtsUtterance = null;
-  }
-  if (activeTtsButton) {
-    resetTtsButtonState(activeTtsButton);
-    activeTtsButton = null;
-  }
+  if (activeTtsButton && !preserveCheckpoint) resetTtsButtonState(activeTtsButton);
+  activeTtsUtterance = null;
+  activeTtsButton = null;
+  activeMessageTtsSession = null;
 }
 
-function speakMessageText(text, controlButton = null) {
+function pauseActiveMessagePlayback() {
+  const session = activeMessageTtsSession;
+  if (!session || session.status !== 'playing') return;
+  if (activeTtsUtterance) {
+    activeTtsUtterance.onboundary = null;
+    activeTtsUtterance.onend = null;
+    activeTtsUtterance.onerror = null;
+  }
+  try {
+    window.speechSynthesis.cancel();
+  } catch (error) {
+    console.error('Failed to pause speech synthesis:', error);
+  }
+  activeTtsUtterance = null;
+  session.status = 'paused';
+  saveMessageTtsCheckpoint(session.key, session.text, session.offset, session.rate);
+  updateMessageTtsUi(session);
+}
+
+function speakMessageText(text, controlButton = null, options = {}) {
   const normalized = (text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return;
   if (!('speechSynthesis' in window)) {
@@ -9212,9 +10152,21 @@ function speakMessageText(text, controlButton = null) {
     return;
   }
   try {
-    stopActiveMessagePlayback();
-    const utterance = new SpeechSynthesisUtterance(normalized);
+    stopActiveMessagePlayback({ preserveCheckpoint: true });
+    const playbackKey = options.playbackKey || controlButton?.closest('[data-tts-playback-key]')?.dataset.ttsPlaybackKey || `text:${hashMessageTtsText(normalized)}`;
+    const startOffset = findMessageTtsWordOffset(normalized, options.startOffset || 0);
+    const rate = Math.max(0.8, Math.min(1.5, Number(options.rate) || 1));
+    const spokenText = normalized.slice(startOffset);
+    if (!spokenText) {
+      saveMessageTtsCheckpoint(playbackKey, normalized, 0, rate);
+      setTtsButtonState(controlButton, 'finished');
+      return;
+    }
+    const bubble = controlButton?.closest('.message-bubble');
+    const player = bubble ? ensureMessageTtsPlayer(bubble, normalized, playbackKey, controlButton) : null;
+    const utterance = new SpeechSynthesisUtterance(spokenText);
     activeTtsUtterance = utterance;
+    activeMessageTtsSession = { key: playbackKey, text: normalized, offset: startOffset, rate, status: 'playing', button: controlButton, player, lastSavedAt: 0 };
     const preferredVoice = voiceNotificationState?.preferredVoice;
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -9222,42 +10174,54 @@ function speakMessageText(text, controlButton = null) {
     } else {
       utterance.lang = 'en-US';
     }
-    utterance.rate = 0.98;
+    utterance.rate = rate;
     utterance.pitch = 1.05;
     utterance.volume = 0.95;
     if (controlButton) {
-      if (!controlButton.dataset.defaultLabel) {
-        controlButton.dataset.defaultLabel = controlButton.getAttribute('aria-label') || 'Read this message aloud';
-      }
-      if (!controlButton.dataset.defaultTitle) {
-        controlButton.dataset.defaultTitle = controlButton.title || 'Read this message aloud';
-      }
+      if (!controlButton.dataset.defaultLabel) controlButton.dataset.defaultLabel = controlButton.getAttribute('aria-label') || 'Read this message aloud';
+      if (!controlButton.dataset.defaultTitle) controlButton.dataset.defaultTitle = controlButton.title || 'Read this message aloud';
       utterance.onstart = () => {
         activeTtsButton = controlButton;
-        controlButton.classList.add('is-playing');
-        controlButton.setAttribute('aria-pressed', 'true');
-        controlButton.setAttribute('aria-label', 'Stop reading this message');
-        controlButton.title = 'Stop playback';
+        setMessageTtsPlayerExpanded(player, true);
+        updateMessageTtsUi(activeMessageTtsSession);
+      };
+      utterance.onboundary = (event) => {
+        if (activeTtsUtterance !== utterance || !activeMessageTtsSession) return;
+        activeMessageTtsSession.offset = Math.min(normalized.length, startOffset + Math.max(0, Number(event.charIndex) || 0));
+        updateMessageTtsUi(activeMessageTtsSession);
+        const now = Date.now();
+        if (now - activeMessageTtsSession.lastSavedAt >= 1000) {
+          activeMessageTtsSession.lastSavedAt = now;
+          saveMessageTtsCheckpoint(playbackKey, normalized, activeMessageTtsSession.offset, rate);
+        }
       };
       const cleanup = () => {
-        if (activeTtsUtterance === utterance) {
-          activeTtsUtterance = null;
+        if (activeTtsUtterance === utterance) activeTtsUtterance = null;
+        saveMessageTtsCheckpoint(playbackKey, normalized, 0, rate);
+        if (activeMessageTtsSession?.key === playbackKey) {
+          activeMessageTtsSession.offset = normalized.length;
+          activeMessageTtsSession.status = 'finished';
+          updateMessageTtsUi(activeMessageTtsSession);
         }
-        resetTtsButtonState(controlButton);
-        if (activeTtsButton === controlButton) {
-          activeTtsButton = null;
-        }
+        setTtsButtonState(controlButton, 'finished');
+        if (activeTtsButton === controlButton) activeTtsButton = null;
+        activeMessageTtsSession = null;
       };
       utterance.onend = cleanup;
-      utterance.onerror = () => {
-        cleanup();
+      utterance.onerror = (event) => {
+        if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+        if (activeTtsUtterance === utterance) activeTtsUtterance = null;
+        if (activeMessageTtsSession?.key === playbackKey) {
+          activeMessageTtsSession.status = 'paused';
+          saveMessageTtsCheckpoint(playbackKey, normalized, activeMessageTtsSession.offset, rate);
+          updateMessageTtsUi(activeMessageTtsSession);
+        }
         showErrorMessage('Could not play message aloud. Check your browser settings.');
       };
     } else {
-      utterance.onerror = () => {
-        showErrorMessage('Could not play message aloud. Check your browser settings.');
-      };
+      utterance.onerror = () => showErrorMessage('Could not play message aloud. Check your browser settings.');
     }
+    if (player) updateMessageTtsUi(activeMessageTtsSession);
     window.speechSynthesis.speak(utterance);
     voiceNotificationState.audioUnlocked = true;
   } catch (error) {
@@ -9607,14 +10571,14 @@ function createOptionElement(option, questionId, selectedOption, optionIndex = 0
   // Add click handler if not disabled
   if (!isDisabled) {
     div.addEventListener('click', () => {
-      selectOption(questionId, option.optionId, div);
+      selectOption(questionId, option.optionId, div, option);
     });
 
     // Add keyboard handler for Enter/Space to select
     div.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        selectOption(questionId, option.optionId, div);
+        selectOption(questionId, option.optionId, div, option);
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         navigateOptions(div, e.key === 'ArrowDown' ? 1 : -1);
@@ -9649,11 +10613,30 @@ function navigateOptions(currentElement, direction) {
 /**
  * Handle option selection
  */
-async function selectOption(questionId, optionId, optionElement) {
+async function selectOption(questionId, optionId, optionElement, option = {}) {
+  if (selectedChatContext?.privateHistory) {
+    showErrorMessage('Earlier private history is read-only.');
+    return;
+  }
   try {
     // Disable the option element immediately
     optionElement.style.pointerEvents = 'none';
     optionElement.style.opacity = '0.5';
+
+    if (selectedChatContext?.mode === 'shared') {
+      const conversationId = selectedChatContext.conversationId;
+      try {
+        const messages = await window.InPlaceChat.answerQuestion(questionId, { optionId, text: option.text || '' });
+        if (selectedChatContext?.conversationId !== conversationId) return;
+        conversationCache.set(conversationId, messages);
+        await displayMessages(messages, false, { agentId: selectedAgentId, conversationId });
+      } catch (error) {
+        optionElement.style.pointerEvents = '';
+        optionElement.style.opacity = '';
+        showErrorMessage(error.message || 'Failed to submit response');
+      }
+      return;
+    }
 
     const response = await csrfFetch('/api/user/responses', {
       method: 'POST',
@@ -9979,9 +10962,7 @@ function initializeVoiceNotifications() {
     const qualityKeywords = ['neural', 'wavenet', 'premium', 'studio', 'natural', 'online', 'hifi', 'hq'];
     const preferredNames = [
       'Microsoft Aria Online',
-      'Microsoft Sonia Online',
       'Microsoft Jenny Online',
-      'Google UK English Female',
       'Google US English',
       'Samantha'
     ];
@@ -9991,6 +10972,10 @@ function initializeVoiceNotifications() {
       const name = voice.name.toLowerCase();
       const lang = (voice.lang || '').toLowerCase();
 
+      // Prefer US English explicitly; regional English voices can sound
+      // noticeably different on Chrome mobile.
+      if (lang === 'en-us') score += 40;
+      else if (lang.startsWith('en-')) score -= 20;
       if (preferredNames.some(pref => name.includes(pref.toLowerCase()))) score += 25;
       if (femaleKeywords.some(keyword => name.includes(keyword))) score += 15;
       if (qualityKeywords.some(keyword => name.includes(keyword))) score += 12;
@@ -9999,13 +10984,17 @@ function initializeVoiceNotifications() {
       return score;
     };
 
-    const bestVoice = voices
+    const englishUsVoices = voices.filter(v => (v.lang || '').toLowerCase() === 'en-us');
+    const candidateVoices = englishUsVoices.length > 0
+      ? englishUsVoices
+      : voices.filter(v => (v.lang || '').toLowerCase().startsWith('en-'));
+    const bestVoice = candidateVoices
       .map(v => ({ voice: v, score: scoreVoice(v) }))
       .sort((a, b) => b.score - a.score)[0]?.voice;
 
     voiceNotificationState = {
       ready: true,
-      preferredVoice: bestVoice || voices[0]
+      preferredVoice: bestVoice || null
     };
   };
 
@@ -10175,6 +11164,7 @@ function playAgentListNotification(agent) {
   if (!notificationText) {
     return;
   }
+  if (activeMessageTtsSession?.status === 'playing') pauseActiveMessagePlayback();
   if (window.voiceControl && typeof window.voiceControl.speak === 'function') {
     window.voiceControl.speak(notificationText);
     return;
@@ -10247,6 +11237,8 @@ function playVoiceNotification(message) {
     return;
   }
 
+  if (activeMessageTtsSession?.status === 'playing') pauseActiveMessagePlayback();
+
   if (message.notificationAudioUrl) {
     try {
       // Acquire audio lock
@@ -10307,10 +11299,12 @@ function speakVoiceNotification(text) {
 
   const trimmedPreview = preview.length > 220 ? `${preview.slice(0, 220)}…` : preview;
 
+  if (activeMessageTtsSession?.status === 'playing') pauseActiveMessagePlayback();
+
   const utterance = new SpeechSynthesisUtterance(trimmedPreview);
 
   utterance.voice = voiceNotificationState.preferredVoice || null;
-  utterance.lang = utterance.voice?.lang || 'en-US';
+  utterance.lang = 'en-US';
   utterance.rate = 0.96; // Slightly slower and warmer
   utterance.pitch = 1.1; // Lifted pitch softens robotic tone
   utterance.volume = 0.9;
@@ -12078,16 +13072,34 @@ function syncMobilePaperMenuChrome({ dockCollapsed = false, compactHeader = fals
   }
 }
 
-function setMobileListExpanded(expanded) {
+function setMobileListExpanded(expanded, { skipBrowserHistory = false } = {}) {
   // Use panel toggling instead of body class
   const agentListPanel = document.getElementById('agentListPanel');
   if (agentListPanel) {
     agentListPanel.classList.toggle('mobile-expanded', expanded);
   }
 
+  // The mobile list extends below its council card. The card's base
+  // overflow-hidden would clip the expanded panel, so opt out only while open.
+  document.querySelector('.council-chamber')?.classList.toggle('mobile-agent-list-open', expanded);
+
   // Also toggle body class for other mobile styles if needed, but we prefer checking panel state
   // ideally we remove dependence on body class, but keep it for safety if unrelated things use it
   document.body.classList.toggle('mobile-list-expanded', expanded);
+
+  if (expanded && selectedAgentId && !skipBrowserHistory) {
+    writeMobileBrowserNavigationState('list');
+  } else if (
+    !expanded &&
+    selectedAgentId &&
+    !skipBrowserHistory &&
+    !handlingMobileBrowserNavigation &&
+    getMobileBrowserNavigationState()?.view === 'list'
+  ) {
+    // Closing a list that has its own history entry should consume that entry,
+    // so the next hardware Back press still reaches the state before the chat.
+    window.history.back();
+  }
 
   if (expanded) {
     // Keep top controls reachable while list is open.
@@ -13115,7 +14127,12 @@ function showSuccessToast(message) {
  * Waits for the agent list to load, then attempts to restore the previously viewed agent
  */
 function setupLastAgentRestoration() {
+  const signalReady = () => {
+    dashboardAgentRestorationReady = true;
+    signalDashboardReadyWhenInitialized();
+  };
   if (EMBEDDED_PREVIEW_MODE) {
+    signalReady();
     return;
   }
 
@@ -13130,10 +14147,12 @@ function setupLastAgentRestoration() {
 
   if (!lastAgentId) {
     // No last agent saved, nothing to restore
+    signalReady();
     return;
   }
   if (lastAgentId === '__ALL__') {
     localStorage.removeItem(LAST_AGENT_STORAGE_KEY);
+    signalReady();
     return;
   }
 
@@ -13153,11 +14172,13 @@ function setupLastAgentRestoration() {
 
       if (lastAgent) {
         // Auto-select the last agent
-        selectAgent(lastAgentId, lastAgent.agentName, {
+        Promise.resolve(selectAgent(lastAgentId, lastAgent.agentName, {
           agentType: lastAgent.agentType || 'standard',
           externalProvider: lastAgent.externalProvider || '',
           forceMainSelection: true
-        });
+        })).finally(signalReady);
+      } else {
+        signalReady();
       }
       // If agent was deleted, just skip restoration (user will see empty state)
       return;
@@ -13166,6 +14187,7 @@ function setupLastAgentRestoration() {
     // Stop polling after max attempts
     if (pollAttempts >= maxPollAttempts) {
       clearInterval(restoreInterval);
+      signalReady();
     }
   }, 500);
 }
@@ -13274,7 +14296,10 @@ function setMainInteractiveContentVisibility(isVisible, options = {}) {
 }
 
 function collapseMainInteractiveSpaceForMobileFocus() {
-  if (!isMobileListOnlyMode() || !selectedAgentId) return;
+  // Fast Mode also runs on touch-landscape shells wider than the list-only
+  // breakpoint, so check it explicitly — otherwise an expanded Agent Space
+  // would stay open behind the on-screen keyboard and crush the conversation.
+  if ((!isMobileListOnlyMode() && !isDashboardFastModeActive()) || !selectedAgentId) return;
 
   const interactiveContent = document.getElementById('mainInteractiveContent');
   if (!interactiveContent || interactiveContent.classList.contains('hidden')) return;
@@ -13324,6 +14349,10 @@ function updateMainInteractiveSpace() {
   const interactiveContent = document.getElementById('mainInteractiveContent');
 
   if (!interactiveContent || !selectedAgentId || !window.RichRendering) return;
+  if (selectedChatContext?.mode === 'shared') {
+    resetMainInteractiveSpace();
+    return;
+  }
 
   const cache = conversationCache.get(selectedAgentId) || [];
 
@@ -13752,18 +14781,101 @@ async function executeHideAllMessages(agentId, agentName) {
 
 // ─── Expose shared helpers for multi-chat.js ──────────────────────────────
 window.DashboardHelpers = {
+  updateMessageReceipts,
+  buildUserMessageReadIndicator,
+  applyUserMessageDeliveryState,
+  chatHistoryBusy: () => isLoadingMessages || isLoadingOlderMessages || conversationRendersInFlight > 0 || Date.now() < forceScrollToBottomUntil,
+  sharedHistoryLoading: (loading) => {
+    isLoadingOlderMessages = loading;
+    const notice = document.getElementById('chatHistoryStatus');
+    if (notice) {
+      if (loading) notice.textContent = 'Loading earlier messages…';
+      notice.hidden = !loading && notice.textContent === 'Loading earlier messages…';
+    }
+    document.getElementById('conversationArea')?.setAttribute('aria-busy', String(loading));
+  },
+  sharedHistoryError: (text) => {
+    const notice = document.getElementById('chatHistoryStatus');
+    if (notice) { notice.textContent = text; notice.hidden = !text; }
+  },
+  prependSharedHistory: async (context, messages) => {
+    if (selectedChatContext?.conversationId !== context.conversationId) return;
+    conversationCache.set(context.conversationId, messages);
+    await displayMessages(messages, false, { agentId: context.agentId, conversationId: context.conversationId,
+      requestToken: activeConversationLoadToken, preserveScrollPosition: true });
+  },
+  ownerHistoryStatus: (conversationId, text, failed = false) => {
+    if (conversationId && selectedChatContext?.conversationId !== conversationId) return;
+    const notice = document.getElementById('ownerHistoryNotice');
+    if (!notice) return;
+    notice.hidden = !text;
+    document.getElementById('ownerHistoryNoticeText').textContent = text;
+    document.getElementById('ownerHistoryRetry').hidden = !failed;
+  },
+  ownerHistoryUpdated: (conversationId, messages) => {
+    if (selectedChatContext?.conversationId !== conversationId) return;
+    conversationCache.set(conversationId, messages);
+    void displayMessages(messages, false, { agentId: selectedAgentId, conversationId, requestToken: activeConversationLoadToken });
+  },
+  hideAgentActionsMenu: () => hideFloatingAgentMenu(),
+  getSelectedAgentForActions: () => selectedAgentId && selectedAgentId !== '__ALL__' ? {
+    agentId: selectedAgentId, agentName: selectedAgentName, agentType: selectedAgentType
+  } : null,
   escapeHtml: (text) => escapeHtml(text),
   renderMarkdown: (text) => renderMessageMarkdown(text),
   formatTimestamp: (ts) => formatTimestamp(ts),
   formatRelativeTime: (ts) => formatRelativeTime(ts),
   looksLikeEncrypted: (text) => looksLikeEncryptedText(text),
   getEncryptionKey: () => encryptionKey,
+  unlockEncryption: () => showDecryptionPasswordModal(),
   readErrorPayload: (response) => readErrorPayload(response),
   buildRequestError: (response, errorData = {}, options = {}) => buildRequestError(response, errorData, options),
   notifyRateLimit: (error, options = {}) => notifyRateLimit(error, options),
   getServerPollDelayMs: (response, data, fallback) => getServerPollDelayMs(response, data, fallback),
   openAgentActionsMenu: (agentId, agentName, metadata = {}, anchorEl = null) =>
-    openFloatingAgentMenuForAgent(agentId, agentName, metadata, anchorEl),
+    selectedChatContext?.mode === 'shared' && selectedChatContext.role !== 'owner'
+      ? undefined
+      : openFloatingAgentMenuForAgent(agentId, agentName, metadata, anchorEl),
+  getSelectedChatContext: () => selectedChatContext,
+  refreshSelectedChatContext: (context, details) => {
+    if (context?.mode === 'shared' && context.conversationId === selectedChatContext?.conversationId) {
+      selectedChatContext = context;
+      updateComposerState();
+      if (details) updateSharedChatControl(context, details);
+    }
+  },
+  getSelectedAgentIdentity: () => selectedAgentId && selectedAgentId !== '__ALL__' ? {
+    agentId: selectedAgentId, agentName: selectedAgentName, agentType: selectedAgentType,
+    conversationId: selectedChatContext?.conversationId || null, mode: selectedChatContext?.mode || 'private',
+    role: selectedChatContext?.role || 'owner', privateHistory: Boolean(selectedChatContext?.privateHistory),
+    privateHistoryConversationId: selectedChatContext?.privateHistoryConversationId || null
+  } : null,
+  selectChatContext: async (context) => {
+    if (!context || !context.conversationId || !context.agentId || !['private', 'shared'].includes(context.mode)) {
+      throw new Error('A conversation context is required.');
+    }
+    if (context.mode === 'private') {
+      if (context.role !== 'owner') throw new Error('Only the owner can open a private agent chat.');
+      await selectAgent(context.agentId, context.agentName || 'Agent', { forceMainSelection: true, skipSharedResolve: true,
+        ...(context.privateHistory ? { chatContext: context } : {}) });
+      return;
+    }
+    selectedChatContext = context;
+    window.InPlaceChat?.setContext(context);
+    if (context.role !== 'owner') document.getElementById('floatingAgentMenu')?.classList.add('hidden');
+    await selectAgent(context.agentId, context.agentName || 'Agent', {
+      forceMainSelection: true,
+      chatContext: context,
+      agentType: 'shared'
+    });
+    try {
+      const detailsResponse = await fetch('/api/user/shared/' + encodeURIComponent(context.conversationId), { credentials: 'same-origin', cache: 'no-store' });
+      if (detailsResponse.ok && selectedChatContext?.conversationId === context.conversationId) {
+        const details = await detailsResponse.json();
+        updateSharedChatControl(context, details);
+      }
+    } catch (_) { /* The sharing control remains available while the count is loading. */ }
+  },
 };
 
 // Expose TTS helpers for multi-chat tiles

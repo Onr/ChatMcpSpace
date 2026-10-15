@@ -174,6 +174,7 @@ async function storeEncryptionKey(key) {
   const keyBase64 = uint8ArrayToBase64(new Uint8Array(exported));
   localStorage.setItem(ENCRYPTION_STORAGE_KEY, keyBase64);
   sessionStorage.setItem(LEGACY_ENCRYPTION_STORAGE_KEY, keyBase64);
+  window.dispatchEvent(new Event('encryption:unlocked'));
 }
 
 /**

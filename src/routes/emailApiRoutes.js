@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { protectRoute, requireEmailVerification } = require('../middleware/authMiddleware');
+const { authRateLimiter } = require('../middleware/rateLimitMiddleware');
 const {
   getEmailLogs,
   getAllEmailLogs,
@@ -19,7 +20,7 @@ const { query } = require('../db/connection');
  * POST /api/email/verify-token
  * Verify an email verification token (legacy link-based verification)
  */
-router.post('/verify-token', async (req, res) => {
+router.post('/verify-token', authRateLimiter, async (req, res) => {
   try {
     const token = (req.body && req.body.token) || (req.query && req.query.token);
 
@@ -58,7 +59,7 @@ router.post('/verify-token', async (req, res) => {
  * POST /api/email/verify-code
  * Verify an email with a 6-digit code
  */
-router.post('/verify-code', async (req, res) => {
+router.post('/verify-code', authRateLimiter, async (req, res) => {
   try {
     const email = req.body && req.body.email;
     const code = req.body && req.body.code;
@@ -98,7 +99,7 @@ router.post('/verify-code', async (req, res) => {
  * POST /api/email/resend-verification
  * Resend verification email/code to a given email address
  */
-router.post('/resend-verification', async (req, res) => {
+router.post('/resend-verification', authRateLimiter, async (req, res) => {
   try {
     const email = req.body && req.body.email;
 

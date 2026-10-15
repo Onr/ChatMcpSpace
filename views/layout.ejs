@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/tailwind.css?v=<%= Date.now() %>">
   <link rel="stylesheet" href="/css/style.css?v=<%= Date.now() %>">
   <link rel="stylesheet" href="/css/rich-rendering.css">
   <style>
@@ -204,35 +204,21 @@
                     as <%= user.email %></span>
                   <button id="feedbackTriggerBtn" type="button"
                     class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium">Feedback</button>
+                  <% const inPlaceSharingEnabled = typeof featureInPlaceAgentSharing === 'boolean' ? featureInPlaceAgentSharing : process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true'; %>
+                  <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && !inPlaceSharingEnabled) { %>
+                    <a href="/shared" class="px-3 py-1.5 rounded-lg border border-slate-700/50">Shared chats</a>
+                    <% if (process.env.FEATURE_GUEST_SHARING === 'true') { %>
+                      <a href="/guest-sharing" class="px-3 py-1.5 rounded-lg border border-slate-700/50">Guest sharing</a>
+                    <% } %>
+                  <% } %>
                   <div class="relative overflow-visible" id="settingsButtonWrapper">
-                    <a href="/settings" id="navToggleButton"
-                      class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium relative"
-                      data-next-text="Dashboard">
-                      <span class="button-text">Settings</span>
-                      <span class="button-text-next">Dashboard</span>
+                    <% const navIsSettings = typeof currentPath === 'string' &&
+                      (currentPath === '/settings' || currentPath.startsWith('/settings/')); %>
+                    <a href="<%= navIsSettings ? '/dashboard' : '/settings' %>" id="navToggleButton"
+                      class="px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition inline-block text-xs font-medium relative">
+                      <%= navIsSettings ? 'Dashboard' : 'Settings' %>
                     </a>
                   </div>
-                  <script nonce="<%= cspNonce %>">
-                    // Toggle button based on current page
-                    (function () {
-                      const btn = document.getElementById('navToggleButton');
-                      if (!btn) return;
-                      const path = window.location.pathname;
-                      const currentText = btn.querySelector('.button-text');
-                      const nextText = btn.querySelector('.button-text-next');
-                      const isSettingsPage = path === '/settings' || path.startsWith('/settings/');
-                      if (path === '/settings' || path.startsWith('/settings/')) {
-                        btn.href = '/dashboard';
-                        if (currentText) currentText.textContent = 'Dashboard';
-                        if (nextText) nextText.textContent = 'Settings';
-                      } else {
-                        btn.href = '/settings';
-                        if (currentText) currentText.textContent = 'Settings';
-                        if (nextText) nextText.textContent = 'Dashboard';
-                      }
-                      btn.setAttribute('data-next-text', isSettingsPage ? 'Settings' : 'Dashboard');
-                    })();
-                  </script>
                   <% if (typeof showSetupShortcut !=='undefined' && showSetupShortcut) { %>
                     <button id="navCopySetupButton" type="button" onclick="copyMainCLIScript(this)"
                       class="hidden md:inline-flex px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition items-center gap-2 text-xs font-medium">
@@ -388,7 +374,6 @@
           </main>
           <script src="/js/setup-script.js"></script>
           <script src="/js/notifications.js"></script>
-          <script src="/js/page-transitions.js"></script>
           <script nonce="<%= cspNonce %>">
             (function () {
               function initSharedMobileNavActions() {

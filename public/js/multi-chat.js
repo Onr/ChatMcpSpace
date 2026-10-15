@@ -1783,24 +1783,16 @@
                 const checkSpan = wrapper.querySelector('.message-read-indicator');
                 if (!checkSpan) return;
 
-                const isRead = !!status.readAt;
-                const isFailed = !isRead && (status.deliveryState === 'failed' || status.deliveryFailed === true);
-
-                checkSpan.classList.remove('message-read-indicator--pending', 'message-read-indicator--failed', 'message-read-indicator--read');
-
-                if (isRead) {
-                    wrapper.setAttribute('data-read', 'true');
-                    checkSpan.classList.add('message-read-indicator--read');
-                    checkSpan.title = 'Read by agent';
-                    checkSpan.textContent = '✓✓';
-                } else if (isFailed) {
-                    checkSpan.classList.add('message-read-indicator--failed');
-                    checkSpan.title = 'Delivery failed: agent did not receive this message';
-                    checkSpan.textContent = '⚠';
+                if (window.DashboardHelpers?.applyUserMessageDeliveryState) {
+                    window.DashboardHelpers.applyUserMessageDeliveryState(wrapper, status);
                 } else {
-                    checkSpan.classList.add('message-read-indicator--pending');
-                    checkSpan.title = 'Not yet read';
-                    checkSpan.textContent = '✓';
+                    const read = Boolean(status.readAt);
+                    if (read) wrapper.setAttribute('data-read', 'true');
+                    else wrapper.removeAttribute('data-read');
+                    const mode = read ? 'read' : 'delivered';
+                    checkSpan.className = 'message-read-indicator message-read-indicator--' + mode;
+                    checkSpan.title = read ? 'Read by agent' : 'Received by server; not yet read by agent';
+                    checkSpan.textContent = '✓✓';
                 }
 
                 const cached = tile.cache.find(m => m.messageId === msgId);
@@ -1932,12 +1924,11 @@
         const hiddenClass = message.hiddenFromAgent ? ' chat-tile__bubble--hidden-from-agent' : '';
 
         // Build read indicator for user messages
+        const serverReceived = message.serverReceived !== false && !String(message.messageId).startsWith('opt-');
         const readIcon = isUser
-            ? (message.readAt
-                ? '<span class="message-read-indicator message-read-indicator--read" title="Read by agent">✓✓</span>'
-                : ((message.deliveryState === 'failed' || message.deliveryFailed === true)
-                    ? '<span class="message-read-indicator message-read-indicator--failed" title="Delivery failed: agent did not receive this message">⚠</span>'
-                    : '<span class="message-read-indicator message-read-indicator--pending" title="Not yet read">✓</span>'))
+            ? (window.DashboardHelpers?.buildUserMessageReadIndicator
+                ? window.DashboardHelpers.buildUserMessageReadIndicator(message.readAt, message.deliveryState, message.deliveryFailed, serverReceived)
+                : `<span class="message-read-indicator message-read-indicator--${message.readAt ? 'read' : serverReceived ? 'delivered' : 'pending'}" title="${message.readAt ? 'Read by agent' : serverReceived ? 'Received by server; not yet read by agent' : 'Sending to server'}">${message.readAt || serverReceived ? '✓✓' : '✓'}</span>`)
             : '';
 
         // Build footer with timestamp + utility buttons placeholder
@@ -2336,6 +2327,7 @@
         // Optimistic render (we use standard placeholders since the true attachment URL needs decrypt keys)
         const optimisticMsg = {
             messageId: `opt-${Date.now()}`,
+            serverReceived: false, deliveryState: 'sending',
             type: 'user_message',
             content: isEncrypted ? contentToSend : text,
             encrypted: isEncrypted,
@@ -2390,6 +2382,23 @@
                     // reference to this object, so they must see the real server ID —
                     // deleting with the stale opt-* ID makes the API return 400.
                     optimisticMsg.messageId = result.messageId;
+                    optimisticMsg.serverReceived = true;
+                    optimisticMsg.deliveryState = 'delivered';
+                    if (opt) {
+                        if (window.DashboardHelpers?.applyUserMessageDeliveryState) {
+                            window.DashboardHelpers.applyUserMessageDeliveryState(opt, optimisticMsg);
+                        } else {
+                            const receipt = opt.querySelector('.message-read-indicator');
+                            if (receipt) {
+                                receipt.className = 'message-read-indicator message-read-indicator--delivered';
+                                receipt.dataset.receiptState = 'delivered';
+                                receipt.textContent = '✓✓';
+                                receipt.title = 'Received by server; not yet read by agent';
+                                receipt.setAttribute('role', 'img');
+                                receipt.setAttribute('aria-label', receipt.title);
+                            }
+                        }
+                    }
                     // Add to cache so polling dedup skips this message
                     tile.cache.push({ ...optimisticMsg });
                 }

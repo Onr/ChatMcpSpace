@@ -46,6 +46,7 @@
 </div>
 
 <!-- Minimal Header -->
+<% if (!locals.user) { %>
 <header class="fixed top-0 left-0 right-0 z-50 px-6 py-6 transition-all duration-300">
   <nav class="max-w-5xl mx-auto flex items-center justify-between">
     <!-- Branding -->
@@ -76,9 +77,16 @@
       <button onclick="scrollToAuth('login')" class="text-sm text-slate-400 hover:text-white transition-colors">
         Sign In
       </button>
+      <% if (locals.googleAuthEnabled) { %>
+      <a href="/auth/google" class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/10 transition-colors">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Google
+      </a>
+      <% } %>
     </div>
   </nav>
 </header>
+<% } %>
 
 <div class="min-h-screen flex flex-col relative z-10">
 
@@ -112,28 +120,24 @@
           class="px-10 py-4 rounded-full bg-white text-slate-900 font-semibold text-base hover:bg-slate-200 transition-all hover:scale-105 active:scale-95 shadow-xl shadow-white/10">
           Get Started
         </button>
+        <% if (locals.googleAuthEnabled) { %>
+        <a href="/auth/google"
+          class="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-full border border-white/15 bg-slate-800/60 text-white font-semibold text-base hover:bg-slate-700/60 transition-all">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+        </svg>
+          Continue with Google
+        </a>
+        <% } %>
         <a href="/architecture"
           class="px-8 py-4 rounded-full border border-white/15 text-slate-200 font-semibold text-base hover:bg-white/10 transition-all">
           Read the Docs
         </a>
       </div>
 
-      <% if (locals.googleAuthEnabled) { %>
-      <a href="/auth/google"
-        class="sm:hidden inline-flex w-full max-w-sm items-center justify-center gap-3 rounded-full border border-white/10 bg-slate-800/60 px-6 py-3 text-sm font-medium text-white shadow-lg transition-all hover:bg-slate-700/60">
-        <svg class="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
-          <path fill="#4285F4"
-            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-          <path fill="#34A853"
-            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-          <path fill="#FBBC05"
-            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-          <path fill="#EA4335"
-            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-        </svg>
-        Continue with Google
-      </a>
-      <% } %>
     </div>
   </section>
 
@@ -166,7 +170,8 @@
           </div>
           <h3 class="text-lg font-medium text-slate-200">Your agents, your control</h3>
           <p class="text-sm text-slate-400 leading-relaxed">
-            Run your own agents on your own infrastructure. Full ownership, no vendor lock-in, complete privacy.
+            Run agents on your own machines and choose your providers. Message content can be encrypted; account data and service metadata remain hosted.
+            <a href="/privacy" class="underline hover:text-white">See privacy details</a>.
           </p>
         </div>
 
@@ -423,7 +428,7 @@
   <!-- Getting Started Slides Section -->
   <section class="border-t border-white/5 bg-[#0f172a] relative z-20">
     <div class="px-6 text-center max-w-5xl mx-auto py-16">
-      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Get started in seconds.</h2>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Connect your first agent.</h2>
       <p class="text-lg text-slate-400">From zero to your first agent in three simple steps.</p>
     </div>
 
@@ -1051,6 +1056,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
+            ...(!isRegister ? { 'Accept': 'application/json' } : {}),
           },
           body: data,
           redirect: 'manual'
@@ -1062,6 +1068,15 @@
           const retryAfter = result.error?.retryAfter || 30;
           startButtonCountdown(button, retryAfter, originalText);
           return false;
+        }
+
+        if (!isRegister && response.ok && response.headers.get('content-type')?.includes('application/json')) {
+          const result = await response.json();
+          if (typeof result.redirectTo !== 'string') throw new Error('Missing sign-in destination');
+          const destination = new URL(result.redirectTo, window.location.origin);
+          if (destination.origin !== window.location.origin) throw new Error('Invalid sign-in destination');
+          window.location.href = destination.href;
+          return true;
         }
 
         const redirectLocation = response.headers.get('location');
