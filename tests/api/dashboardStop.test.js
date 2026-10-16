@@ -29,6 +29,13 @@ describe('Dashboard stop route', () => {
       query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
     }));
 
+    // This filesystem stop-route fixture does not use sessions or Redis quotas.
+    // Avoid opening live connections just by importing the page router.
+    jest.doMock('../../src/utils/redisClient', () => ({
+      sessionRedisClient: null,
+      rateLimitRedisClient: null,
+    }));
+
     const pageRoutes = require('../../src/routes/pageRoutes');
 
     const app = express();

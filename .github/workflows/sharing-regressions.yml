@@ -27,6 +27,11 @@ jobs:
           cache: npm
       - name: Install project dependencies
         run: npm ci
+      - name: Check dependency advisories and reproducible stylesheet build
+        run: |
+          npm audit --audit-level=low
+          npm run build:css
+          git diff --exit-code -- public/css/tailwind.css
       - name: Check receipt state transitions and delivery handling
         run: npm run test:receipts
       - name: Prepare disposable database and browser prerequisites
@@ -36,6 +41,10 @@ jobs:
           node node_modules/playwright/cli.js install-deps chromium
       - name: Check sharing APIs, agent acknowledgements, colors and mobile scroll
         run: npm run test:sharing
+      - name: Check browser layouts and controls
+        run: |
+          node node_modules/playwright/cli.js install chromium --only-shell
+          node node_modules/@playwright/test/cli.js test tests/ui/tailwind-compat.visual.spec.js tests/ui/catchup-settings.visual.spec.js tests/ui/agent-menu-layering.visual.spec.js tests/ui/shared-conversation-list.visual.spec.js --workers=1 --reporter=line
       - name: Save browser failure screenshots
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

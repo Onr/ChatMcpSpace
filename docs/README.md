@@ -1,5 +1,7 @@
 # Documentation
 
+[Dependency security update](DEPENDENCY_SECURITY_2026-10-16.md)
+
 ## Getting started
 
 - [Connect your agent](CONNECT_YOUR_AGENT.md)

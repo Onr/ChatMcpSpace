@@ -1,3 +1,18 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Keep the original unlayered cascade so app styles and utilities retain
+   their existing specificity relative to one another. */
+@import "tailwindcss/theme.css";
+@import "./tailwind-base.css";
+@import "tailwindcss/utilities.css" source(none);
+@import "./tailwind-legacy-utilities.css";
+@config "../../tailwind.config.js";
+@source "../../views";
+@source "../../public/js";
+@source not inline("-space-x-2 space-y-0.5 space-y-1 space-y-2 space-y-2.5 space-y-3 space-y-4 space-y-5 space-y-6 space-y-8 space-y-10 divide-y divide-white/10 outline-none focus:outline-none grid-cols-[35fr,65fr] lg:grid-cols-[45fr,55fr] shadow-inner");
+
+@custom-variant hover (&:hover);
+
+/* Legacy class names still used by templates and message renderers. */
+@utility flex-shrink-0 { flex-shrink: 0; }
+@utility flex-shrink { flex-shrink: 1; }
+@utility flex-grow-0 { flex-grow: 0; }
+@utility flex-grow { flex-grow: 1; }

@@ -1,9 +1,8 @@
 'use strict';
 
-// Match the existing Tailwind 3 Play CDN theme, but build its utility styles
-// once. Browser mutation observers must not recompile CSS while chats render.
+// Preserve the app's existing colors, fonts, radii, shadows, and ring sizes
+// while using the supported compiler. Values are static CSS theme data.
 module.exports = {
-  content: ['./views/**/*.ejs', './public/js/**/*.js'],
-  theme: { extend: {} },
+  theme: require('./src/styles/tailwind-compat-theme.json'),
   plugins: []
 };
