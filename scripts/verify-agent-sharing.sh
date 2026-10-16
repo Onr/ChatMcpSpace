@@ -45,7 +45,7 @@ node -e 'require("pg"); require("@playwright/test")' || {
   printf 'Install this repository\x27s Node dependencies before verification.\n' >&2
   exit 2
 }
-node node_modules/tailwindcss/lib/cli.js -c tailwind.config.js -i src/styles/tailwind.css -o public/css/tailwind.css --minify
+npm run build:css
 postgres_initdb=$(command -v initdb || true)
 if [[ -z "$postgres_initdb" ]]; then
   for candidate in /usr/lib/postgresql/*/bin/initdb; do
