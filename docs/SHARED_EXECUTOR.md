@@ -206,7 +206,7 @@ Saved results remain held if that profile disappears before delivery. Restoring
 the profile permits delivery of the retained encrypted output without rerunning
 the task. Legacy protocol-1 and private default-profile selection is unchanged.
 The selected notes agent's separate actual-runtime/credential/network and project
-prerequisites are recorded in [the compatibility target](AGENT_SHARING_NOTES_COMPATIBILITY.md).
+prerequisites are recorded in [trusted sharing verification](TRUSTED_AGENT_SHARING_VERIFICATION.md).
 
 Workspace approval compares the original directory inode with both the resolved
 path and the original pathname. The executor retains that identity and rechecks

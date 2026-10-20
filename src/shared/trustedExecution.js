@@ -3,7 +3,7 @@
 // Trusted collaborators use the owner's normal provider and tool permissions.
 // Conversation access, runtime fencing and publication still remain server checks.
 const policy = require('./executionPolicy');
-const MAX_RUNTIME_MS = 600000;
+const MAX_RUNTIME_MS = 3600000;
 const isTrusted = runtime => runtime?.capabilities?.executionMode === 'trusted';
 const one = async (client, sql, values) => (await client.query(sql, values)).rows[0];
 
@@ -49,8 +49,10 @@ async function authorizeTask(client, task, room, runtime) {
   const access = await requesterAccess(client, task.agent_id, room, task.requester_kind, task.requester_id);
   if (!access || task.requester_kind === 'guest' && (access.shareId !== context.authorization?.shareId ||
       access.shareRevision !== context.authorization?.shareRevision)) return null;
-  if (!Number.isFinite(Date.parse(task.claimed_at)) || Date.now() >= Date.parse(task.claimed_at) + MAX_RUNTIME_MS) return null;
-  return { mode: 'trusted', budget: { maxRuntimeMs: MAX_RUNTIME_MS }, expires_at: access.expiresAt };
+  const maxRuntimeMs = context.authorization?.budget?.maxRuntimeMs;
+  if (!Number.isSafeInteger(maxRuntimeMs) || maxRuntimeMs < 1000 || maxRuntimeMs > MAX_RUNTIME_MS ||
+      !Number.isFinite(Date.parse(task.claimed_at)) || Date.now() >= Date.parse(task.claimed_at) + maxRuntimeMs) return null;
+  return { mode: 'trusted', budget: { maxRuntimeMs }, expires_at: access.expiresAt };
 }
 
 module.exports = { isTrusted, requesterAccess, buildContext, authorizeTask, MAX_RUNTIME_MS };

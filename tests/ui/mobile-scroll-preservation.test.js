@@ -14,9 +14,9 @@ function mount() {
   const callbacks = [];
   const schedule = callback => callbacks.push(callback);
   const helpers = new Function('document', 'window', 'requestAnimationFrame', 'setTimeout',
-    `let selectedAgentId='one', selectedChatContext={conversationId:'room-one'}; const isMobileListOnlyMode=()=>true;
+    `let forceScrollToBottomUntil=0; let selectedAgentId='one', selectedChatContext={conversationId:'room-one'}; const isMobileListOnlyMode=()=>true;
     ${source.slice(start, end)}
-    return { preserveMobileConversationScroll, changeChat:()=>{selectedChatContext={conversationId:'room-two'};} };`)(document, window, schedule, schedule);
+    return { preserveMobileConversationScroll, pinSend:()=>{forceScrollToBottomUntil=Date.now()+2500;}, changeChat:()=>{selectedChatContext={conversationId:'room-two'};} };`)(document, window, schedule, schedule);
   return { area, callbacks, helpers };
 }
 
@@ -52,4 +52,15 @@ test('a newer composer preservation supersedes callbacks holding an older positi
   helpers.preserveMobileConversationScroll();
   while (callbacks.length) callbacks.shift()();
   expect(area.scrollTop).toBe(120);
+});
+
+ test('a mobile viewport callback cannot restore an older position during send', () => {
+  const { area, callbacks, helpers } = mount();
+  helpers.preserveMobileConversationScroll();
+  helpers.pinSend();
+  area.clientHeight = 300;
+  area.scrollTop = 900;
+  helpers.preserveMobileConversationScroll();
+  while (callbacks.length) callbacks.shift()();
+  expect(area.scrollTop).toBe(900);
 });

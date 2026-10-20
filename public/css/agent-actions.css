@@ -1,6 +1,9 @@
 .agent-actions-menu { width: 304px; border: 1px solid #334155; border-radius: 18px; background: #0f1b2c; color: #e2e8f0; box-shadow: 0 20px 70px #02061799, 0 0 0 1px #ffffff04; overflow: auto; scrollbar-width: thin; padding: 8px; }
 .agent-actions-menu.hidden { display: none; }
-.agent-actions-menu { position: fixed; z-index: 100; box-sizing: border-box; }
+/* Above the mobile composer (120), scroll button (130) and model sheet (140);
+   below the sharing notices (180) and modals (200+). */
+.agent-actions-menu { position: fixed; z-index: 170; box-sizing: border-box; }
+.agent-header-context-menu { position: fixed; z-index: 170; max-width: calc(100vw - 24px); overflow-y: auto; overscroll-behavior: contain; }
 .agent-share-option > span:last-child { flex: 0; color: #94a3b8; }
 .agent-actions-header { display: flex; align-items: center; gap: 12px; padding: 12px 8px 16px; }
 .agent-actions-heading { flex: 1; min-width: 0; }

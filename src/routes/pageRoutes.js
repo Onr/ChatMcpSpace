@@ -4,7 +4,9 @@
  */
 
 const express = require('express');
+const DeviceBadge = require('../../public/js/device-badge');
 const router = express.Router();
+require('../utils/windowsSetup').registerWindowsSetupRoutes(router);
 const passport = require('passport');
 const fs = require('fs');
 const path = require('path');
@@ -603,6 +605,15 @@ router.get('/setup', async (req, res) => {
 
     const bootstrapScript = `#!/bin/bash
 # ChatMCP Agent CLI Installer
+
+# Native Windows shells lack the POSIX runtime required by managed agents.
+case "$OSTYPE" in
+  msys*|cygwin*|win32*)
+    echo "Windows setup requires WSL 2 / Ubuntu. Open Settings > Windows setup instructions."
+    echo "Run this installer inside Ubuntu, not Git Bash or a native Windows shell."
+    exit 1
+    ;;
+esac
 
 # Cleanup on exit
 TEMP_FILE="agent-cli.sh.tmp"
@@ -1647,12 +1658,14 @@ router.get('/dashboard', protectRoute, async (req, res) => {
       console.log(`Dashboard: Generated encryption_salt for legacy user ID: ${userId}`);
     }
 
+    res.locals.DeviceBadge = DeviceBadge;
     // Fetch agent list with metadata
     const agentsResult = await query(`
       SELECT 
         a.agent_id,
         a.agent_name,
         a.agent_type,
+        a.runtime_config,
         a.position,
         a.last_seen_at,
         a.is_working,
@@ -1672,7 +1685,7 @@ router.get('/dashboard', protectRoute, async (req, res) => {
       LEFT JOIN user_responses ur ON m.message_id = ur.message_id
 
       WHERE a.user_id = $1
-      GROUP BY a.agent_id, a.agent_name, a.agent_type, a.position, a.last_seen_at, a.is_working, a.last_working_heartbeat_at
+      GROUP BY a.runtime_config, a.agent_id, a.agent_name, a.agent_type, a.position, a.last_seen_at, a.is_working, a.last_working_heartbeat_at
       ORDER BY a.position ASC
     `, [userId]);
 
@@ -1693,6 +1706,7 @@ router.get('/dashboard', protectRoute, async (req, res) => {
         agentId: row.agent_id,
         name: row.agent_name,
         agentType: row.agent_type || 'standard',
+        device: require('../utils/agentDevice').normalizeDevice(row.runtime_config?.device),
         position: row.position,
         isWorking,
         lastWorkingHeartbeatTime: lastWorkingHeartbeatTime ? lastWorkingHeartbeatTime.toISOString() : null,

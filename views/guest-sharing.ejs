@@ -1,5 +1,5 @@
-<link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
-<link rel="stylesheet" href="/css/guest-sharing.css?v=20261009">
+<link rel="stylesheet" href="<%= assetUrl('/css/sharing-theme.css') %>">
+<link rel="stylesheet" href="<%= assetUrl('/css/guest-sharing.css') %>">
 <section id="guestSharingApp" class="chat-shell" data-csrf="<%= csrfToken || '' %>" data-user-id="<%= userId || '' %>" aria-labelledby="guestSharingTitle">
   <header class="guest-sharing-header">
     <div>
@@ -94,6 +94,6 @@
     <div id="guestShares" class="guest-shares" aria-live="polite"></div>
   </section>
 </section>
-<script src="/js/encryption.js"></script>
-<script src="/js/shared-crypto.js"></script>
-<script src="/js/guest-sharing.js?v=20261009"></script>
+<script src="<%= assetUrl('/js/encryption.js') %>"></script>
+<script src="<%= assetUrl('/js/shared-crypto.js') %>"></script>
+<script src="<%= assetUrl('/js/guest-sharing.js') %>"></script>

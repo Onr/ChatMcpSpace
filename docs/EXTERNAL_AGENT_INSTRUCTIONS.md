@@ -90,6 +90,17 @@ runtime before using `ack-stop` and restarting. Stop the local listener/service
 when the user wants to disconnect, and revoke its credential in the site when
 access should end. Explain separately whether the external runtime is still running.
 
+## Reporting ChatMcpSpace bugs and feature requests
+
+If the user runs into a bug in the ChatMcpSpace website itself, wishes it had a
+feature, or has clear feedback about the site, you may ask once whether they
+would like to report it. Report only after the user explicitly agrees; if they
+decline, drop it. Point them to the dashboard **Feedback** button, or offer a
+short ready-to-paste report that describes the problem without secrets, keys,
+decrypted message content, or personal data. Agents installed with the
+ChatMcpSpace CLI can instead run
+`uv run message_helper.py report bug|feature|feedback "<description>"`.
+
 ## Boundaries
 
 The bridge does not silently import previous channel history or provide general

@@ -39,10 +39,7 @@ function setMobileListExpanded(expanded) {
     toggleBtn.title = expanded ? 'Collapse List' : 'Expand List';
     toggleBtn.setAttribute('aria-label', expanded ? 'Collapse agent list' : 'Expand agent list');
     toggleBtn.classList.toggle('expanded', expanded);
-    const svg = toggleBtn.querySelector('svg');
-    if (svg) {
-      svg.style.transform = expanded ? 'rotate(180deg)' : '';
-    }
+    toggleBtn.setAttribute('aria-expanded', String(expanded));
   }
 
   const mobileStatsToggle = document.getElementById('mobileStatsToggle');
@@ -178,10 +175,11 @@ describe('Mobile Agent List Toggle', () => {
     expect(btn.getAttribute('aria-label')).toBe('Expand agent list');
   });
 
-  it('toggle rotates the SVG chevron', () => {
+  it('toggle exposes expansion state and keeps the logo upright', () => {
     const svg = document.querySelector('#collapseMobileListBtn svg');
     setMobileListExpanded(true);
-    expect(svg.style.transform).toBe('rotate(180deg)');
+    expect(document.getElementById('collapseMobileListBtn').getAttribute('aria-expanded')).toBe('true');
+    expect(svg.style.transform).toBe('');
     setMobileListExpanded(false);
     expect(svg.style.transform).toBe('');
   });

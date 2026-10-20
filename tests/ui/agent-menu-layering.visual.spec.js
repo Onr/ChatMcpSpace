@@ -2,6 +2,8 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
+const { assetUrl } = require('../../src/utils/assetUrl');
+const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, ...data });
 const { JSDOM } = require('jsdom');
 
 const root = path.join(__dirname, '../..');
@@ -11,7 +13,7 @@ const styles = ['tailwind.css', 'style.css', 'in-place-sharing.css']
 for (const width of [390, 1280]) {
   test(`agent name menu stays above messages and accepts clicks at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    const html = await ejs.renderFile(path.join(root, 'views/dashboard.ejs'), {
+    const html = await renderTemplate(path.join(root, 'views/dashboard.ejs'), {
       agents: [], groups: [], encryptionSalt: '', isGoogleAuth: false,
       csrfToken: 'fixture', cspNonce: 'fixture',
       user: { userId: 'fixture', email: 'fixture@example.test' },

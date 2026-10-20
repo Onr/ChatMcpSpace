@@ -21,3 +21,7 @@
 
 - [Gemini MCP](GEMINI_MCP.md)
 - [MCP verification](MCP_VERIFICATION.md)
+
+## Latest release
+
+- [Device badges, Windows setup, and shared-agent galaxy](RELEASE_2026-10-20.md)

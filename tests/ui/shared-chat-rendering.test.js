@@ -87,8 +87,13 @@ test('input events cannot re-enable Send during an in-flight message', () => {
   expect(sandbox.setSendButtonLabel).toHaveBeenCalledWith('Sending...');
 });
 
-test('a long refresh shows the latest message first and yields to phone input', async () => {
+test.each([false, true])('a long render yields to phone input and keeps existing history stable (refresh=%s)', async (refresh) => {
   document.body.innerHTML = '<button id="tap">Tap</button><div id="conversationArea"></div>';
+  const area = document.getElementById('conversationArea');
+  if (refresh) {
+    area.innerHTML = '<div data-message-id="existing">Previous history</div>';
+    area.scrollTop = 600;
+  }
   let resume, clock = 0;
   class RenderClock extends Date { static now() { clock += 10; return clock; } }
   const sandbox = {
@@ -107,7 +112,8 @@ test('a long refresh shows the latest message first and yields to phone input', 
   };
   vm.runInNewContext(renderSource, sandbox);
   const rendering = sandbox.displayMessages(Array.from({ length: 30 }, (_, i) => ({ messageId: `message-${i}`, timestamp: '2026-01-01' })), false, { conversationId: 'room' });
-  expect(document.querySelector('#conversationArea').lastChild.dataset.messageId).toBe('message-29');
+  expect(area.lastChild.dataset.messageId).toBe(refresh ? 'existing' : 'message-29');
+  if (refresh) expect(area.scrollTop).toBe(600);
   const tapped = jest.fn(); document.getElementById('tap').onclick = tapped;
   document.getElementById('tap').click(); expect(tapped).toHaveBeenCalledTimes(1);
   resume(); await rendering;

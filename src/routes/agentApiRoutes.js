@@ -4,6 +4,7 @@
  */
 
 const express = require('express');
+const { normalizeDevice } = require('../utils/agentDevice');
 const crypto = require('crypto');
 const router = express.Router();
 const { requireApiKey } = require('../middleware/authMiddleware');
@@ -11,6 +12,7 @@ const {
   agentApiRateLimiter,
   agentPollingRateLimiter,
   agentMessageIngressRateLimiter,
+  feedbackRateLimiter,
   getUsageStatus,
   resolveClientIdentifier,
   resolveAgentName
@@ -649,6 +651,51 @@ function acknowledgeInboxMessage(direct) {
 
 router.post('/responses/ack', acknowledgeInboxMessage(false));
 router.post('/messages/direct/ack', acknowledgeInboxMessage(true));
+
+const AGENT_FEEDBACK_TYPES = { bug: 'Bug report', feature: 'Feature request', feedback: 'Feedback' };
+
+/**
+ * POST /api/agent/feedback
+ * Submit a bug report, feature request, or general feedback about the
+ * ChatMcpSpace website on behalf of the user. Agents must ask the user and
+ * get explicit approval before calling this. Stored like the dashboard
+ * Feedback button: anonymous (no user or agent id).
+ *
+ * Request body:
+ * - type: 'bug' | 'feature' | 'feedback' (default 'feedback')
+ * - message: string (required, max 5000 chars)
+ * - pageUrl: string (optional) - Page the report is about
+ *
+ * Response: 201 Created { success: true, feedbackId }
+ */
+router.post('/feedback', feedbackRateLimiter, async (req, res) => {
+  try {
+    const { type = 'feedback', message, pageUrl } = req.body || {};
+    const label = AGENT_FEEDBACK_TYPES[type];
+    if (!label) {
+      return validationError(res, 'Type must be one of: bug, feature, feedback');
+    }
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return validationError(res, 'Message is required');
+    }
+    if (message.length > 5000) {
+      return validationError(res, 'Message exceeds maximum length of 5000 characters');
+    }
+    if (pageUrl !== undefined && pageUrl !== null && typeof pageUrl !== 'string') {
+      return validationError(res, 'Invalid page URL');
+    }
+
+    const result = await query(
+      `INSERT INTO feedback (message, kind, page_url)
+       VALUES ($1, 'feedback', $2)
+       RETURNING feedback_id`,
+      [`[${label} via agent] ${message.trim()}`, pageUrl ? pageUrl.substring(0, 2048) : null]
+    );
+    return res.status(201).json({ success: true, feedbackId: result.rows[0].feedback_id });
+  } catch (error) {
+    return handleDatabaseError(res, error, 'saving agent feedback');
+  }
+});
 
 /**
  * GET /api/agent/models
@@ -1577,17 +1624,20 @@ router.post('/heartbeat', agentPollingRateLimiter, async (req, res) => {
       return internalError(res, 'Failed to format heartbeat timestamp');
     }
 
+    const device = normalizeDevice(req.body?.device);
     await query(
       `UPDATE agents
        SET
          last_seen_at = $2,
          is_working = $3,
+         runtime_config = CASE WHEN $4::jsonb IS NULL THEN runtime_config
+           ELSE jsonb_set(COALESCE(runtime_config, '{}'::jsonb), '{device}', $4::jsonb) END,
          last_working_heartbeat_at = CASE
            WHEN $3 = TRUE THEN $2
            ELSE last_working_heartbeat_at
          END
        WHERE agent_id = $1`,
-      [agent.agent_id, heartbeatTimestamp, working === true]
+      [agent.agent_id, heartbeatTimestamp, working === true, device ? JSON.stringify(device) : null]
     );
 
     let stopRequested = false;
@@ -2051,6 +2101,27 @@ router.get('/config', async (req, res) => {
   }
 });
 
+// Native installations use the normal private inbox without requiring the
+// shared-conversation feature. Only an owner key can enroll an owned identity.
+router.post('/runtime-enroll', async (req, res) => {
+  if (req.authContext?.type !== 'api_key') {
+    return res.status(403).json({ error: { code: 'OWNER_KEY_REQUIRED', message: 'Use the owner API key to enroll a local runtime.' } });
+  }
+  try {
+    const { agentName } = req.body;
+    const validation = validateAgentName(agentName);
+    if (!validation.valid) return validationError(res, validation.message);
+    const agent = await findAgentByName(req.user.userId, agentName);
+    if (!agent) return res.status(404).json({ error: { code: 'AGENT_NOT_FOUND', message: 'Register this agent before enrolling a runtime.' } });
+    const credential = await issueScopedCredential({ agentId: agent.agent_id, scopes: [
+      'agent.messages.write', 'agent.questions.write', 'agent.responses.read',
+      'agent.dm.read', 'agent.dm.write', 'agent.attachments.read',
+      'agent.attachments.write', 'agent.history.read', 'agent.stop.write'
+    ] });
+    res.set('Cache-Control', 'no-store').status(201).json({ agentId: agent.agent_id, token: credential.token });
+  } catch (error) { return handleDatabaseError(res, error, 'enrolling local runtime'); }
+});
+
 // Only the owner's API key may replace an agent's permission ceiling. A scoped
 // runtime token can select within its ceiling, but cannot grant itself access.
 router.post('/runtime-permissions', async (req, res) => {
@@ -2066,18 +2137,55 @@ router.post('/runtime-permissions', async (req, res) => {
         Object.keys(allowedPermissions).some(key => !SUPPORTED_PROVIDERS.has(key) && !['codex-cli', 'inter_agent', 'project_path'].includes(key))) {
       return validationError(res, 'Provide a valid CLI permission grant.');
     }
-    const agent = await findAgentByName(req.user.userId, agentName);
-    if (!agent) return res.status(404).json({ error: { code: 'AGENT_NOT_FOUND', message: 'Agent not found for the authenticated owner.' } });
-    const state = await loadAgentRuntimeState({ agentId: agent.agent_id, agentName });
+    const interAgent = allowedPermissions.inter_agent;
+    if (interAgent !== undefined && (!interAgent || typeof interAgent !== 'object' || Array.isArray(interAgent) ||
+        typeof interAgent.enabled !== 'boolean' ||
+        (interAgent.enabled && !['listen_all', 'groups'].includes(interAgent.mode)) ||
+        (interAgent.groups !== undefined && (!Array.isArray(interAgent.groups) ||
+          interAgent.groups.some(group => typeof group !== 'string' || !group.trim() || group.length > 255))))) {
+      return validationError(res, 'Provide valid inter-agent permissions.');
+    }
     const selected = {};
     for (const key of ['model_provider', 'model', 'approval_mode', 'sandbox_mode', 'thinking_effort']) {
       if (config?.[key] !== undefined) selected[key] = config[key];
     }
     const validation = require('../utils/runOverrides').validateRunOverrides(selected, allowedPermissions);
     if (!validation.valid) return validationError(res, validation.message);
-    const nextConfig = { ...state.config, ...(validation.value || {}), updated_at: new Date().toISOString() };
-    if (typeof config?.project_path === 'string' && config.project_path.length <= 4096) nextConfig.project_path = config.project_path;
-    await persistAgentRuntimeState({ agentId: agent.agent_id, config: nextConfig, allowedPermissions });
+    // The CLI saves its grant before the runner sends its first message. Register
+    // here as well so fresh installs and partially completed older installs work.
+    // Validate first, then commit registration and all settings together.
+    const client = await getClient();
+    let state, nextConfig;
+    try {
+      await client.query('BEGIN');
+      const registered = await client.query(
+        `INSERT INTO agents (user_id, agent_name, agent_type, position, can_spawn)
+         VALUES ($1, $2, 'standard',
+           COALESCE((SELECT MAX(position) + 1 FROM agents WHERE user_id = $1), 1), true)
+         ON CONFLICT (user_id, agent_name) DO UPDATE SET agent_name = EXCLUDED.agent_name
+         RETURNING agent_id`,
+        [req.user.userId, agentName]
+      );
+      const agentId = registered.rows[0].agent_id;
+      // Read through the transaction: a newly registered row is not yet visible
+      // to another connection, and the upsert locks existing rows for retries.
+      const stored = await client.query('SELECT runtime_config FROM agents WHERE agent_id = $1', [agentId]);
+      state = await loadAgentRuntimeState({ agentName });
+      nextConfig = { ...state.config, ...stored.rows[0].runtime_config,
+        ...(validation.value || {}), updated_at: new Date().toISOString() };
+      if (typeof config?.project_path === 'string' && config.project_path.length <= 4096) nextConfig.project_path = config.project_path;
+      await persistAgentRuntimeState({ agentId, config: nextConfig, allowedPermissions, dbClient: client });
+      if (interAgent !== undefined) {
+        const mode = interAgent.enabled ? interAgent.mode : 'disabled';
+        await client.query('UPDATE agents SET inter_agent_mode = $1 WHERE agent_id = $2', [mode, agentId]);
+        await client.query('DELETE FROM agent_group_members WHERE agent_id = $1', [agentId]);
+        if (mode === 'groups') await syncAgentGroups(client, req.user.userId, agentId, interAgent.groups || []);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
     syncRuntimeStateToFilesystem({ agentDir: state.agentDir, config: nextConfig, allowedPermissions });
     return res.json({ config: nextConfig, allowedPermissions });
   } catch (error) { return handleDatabaseError(res, error, 'saving owner CLI permissions'); }
@@ -2782,6 +2890,14 @@ router.get('/discover', async (req, res) => {
       }
     }
 
+    if (myAgentId) {
+      const peers = await require('../shared/a2aAccess').peers(userId, myAgentId);
+      filteredAgents.push(...peers.map(row => ({agentId: row.agent_id, agentName: row.agent_name,
+        address: row.agent_id, agentType: row.agent_type, isMe: false, shared: true,
+        isOnline: Date.now() - new Date(row.last_seen_at).getTime() < 300000,
+        lastSeenAt: row.last_seen_at, groups: [], interAgentMode: row.inter_agent_mode,
+        encryption: 'shared_dm_password'})));
+    }
     res.json({
       agents: filteredAgents,
       myInterAgentMode,
@@ -2862,7 +2978,16 @@ router.post('/messages/direct', async (req, res) => {
     `, [userId, fromAgentName.trim(), toAgentName.trim()]);
 
     const senderAgent = agentsResult.rows.find(a => a.agent_name === fromAgentName.trim());
-    const recipientAgent = agentsResult.rows.find(a => a.agent_name === toAgentName.trim());
+    let recipientAgent = agentsResult.rows.find(a => a.agent_name === toAgentName.trim());
+    let sharedRecipient = false;
+    if (senderAgent && isValidUUID(toAgentName.trim())) {
+      const peers = await require('../shared/a2aAccess').peers(userId, senderAgent.agent_id);
+      recipientAgent = peers.find(a => a.agent_id === toAgentName.trim());
+      sharedRecipient = !!recipientAgent;
+      if (sharedRecipient && (req.body.encryptionScope !== 'shared_dm_password' || !require('../shared/a2aAccess').encryptedContent(content))) {
+        return res.status(400).json({error: {code: 'SHARED_DM_KEY_REQUIRED', message: 'Use an updated helper and a shared DM password and salt for this agent.'}});
+      }
+    }
 
     if (!senderAgent) {
       return validationError(res, 'Sender agent not found');
@@ -2898,7 +3023,7 @@ router.post('/messages/direct', async (req, res) => {
     };
 
     const senderConfig = await getAgentInterAgentConfig(fromAgentName.trim());
-    const recipientConfig = await getAgentInterAgentConfig(toAgentName.trim());
+    const recipientConfig = sharedRecipient ? {mode: recipientAgent.inter_agent_mode, groups: []} : await getAgentInterAgentConfig(toAgentName.trim());
 
     // Both agents must have inter-agent enabled
     if (senderConfig.mode === 'disabled') {
@@ -2991,6 +3116,16 @@ router.post('/messages/direct', async (req, res) => {
     try {
       await client.query('BEGIN');
 
+      // Serialize bridge revocation with send admission, then recheck inside
+      // this transaction. Turning the room switch off waits for admitted sends.
+      if (sharedRecipient) {
+        await client.query('SELECT id FROM shared_conversations WHERE agent_id IN ($1,$2) FOR SHARE', [senderAgent.agent_id, recipientAgent.agent_id]);
+        const stillAllowed = (await require('../shared/a2aAccess').peers(userId, senderAgent.agent_id, client)).some(a => a.agent_id === recipientAgent.agent_id);
+        if (!stillAllowed) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({error: {code:'SHARED_ACCESS_REVOKED', message:'Shared agent messaging is no longer permitted'}});
+        }
+      }
       // Insert the message
       const insertResult = await client.query(`
         INSERT INTO agent_messages (sender_agent_id, recipient_agent_id, content, encrypted, priority, agent_message_id)
@@ -3025,6 +3160,7 @@ router.post('/messages/direct', async (req, res) => {
 
       // Write a signal file to wake up the recipient agent's polling loop early
       try {
+        if (sharedRecipient) throw new Error('Shared recipient uses remote polling');
         const recipientFolder = sanitizeFolderName(toAgentName.trim());
         const signalPath = path.join(getChatspaceRoot(), recipientFolder, 'agent_state', '.dm_pending');
         fs.writeFileSync(signalPath, `from=${fromAgentName.trim()}\ntime=${new Date().toISOString()}\n`);
@@ -3125,7 +3261,10 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
       if (!fromAgentValidation.valid) {
         return validationError(res, fromAgentValidation.message);
       }
-      const senderAgent = await findAgentByName(userId, fromAgent);
+      let senderAgent = await findAgentByName(userId, fromAgent);
+      if (!senderAgent && isValidUUID(fromAgent)) {
+        senderAgent = (await require('../shared/a2aAccess').peers(userId, myAgent.agent_id)).find(a => a.agent_id === fromAgent);
+      }
       if (senderAgent) {
         whereConditions.push(`am.sender_agent_id = $${paramIndex}`);
         queryParams.push(senderAgent.agent_id);
@@ -3145,13 +3284,19 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
         am.priority,
         am.created_at,
         sender.agent_id as sender_agent_id,
-        sender.agent_name as sender_agent_name
+        sender.agent_name as sender_agent_name, sender.user_id as sender_user_id
       FROM agent_messages am
       JOIN agents sender ON am.sender_agent_id = sender.agent_id
       WHERE ${whereConditions.join(' AND ')}
       ORDER BY am.created_at ASC
     `, queryParams);
 
+    const crossOwner = result.rows.some(row => row.sender_user_id && row.sender_user_id !== userId);
+    if (crossOwner) {
+      const peers = await require('../shared/a2aAccess').peers(userId, myAgent.agent_id);
+      const allowed = new Set(peers.map(a => a.agent_id));
+      result.rows = result.rows.filter(row => row.sender_user_id === userId || allowed.has(row.sender_agent_id));
+    }
     // Mark messages as read
     if (markRead && result.rows.length > 0) {
       const messageIds = result.rows.map(row => row.agent_message_id);
@@ -3174,7 +3319,9 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
 
     const messages = result.rows.map(row => ({
         messageId: row.agent_message_id,
-        fromAgent: row.sender_agent_name,
+        fromAgent: row.sender_user_id && row.sender_user_id !== userId ? row.sender_agent_id : row.sender_agent_name,
+        shared: !!row.sender_user_id && row.sender_user_id !== userId,
+        fromAgentName: row.sender_agent_name,
         fromAgentId: row.sender_agent_id,
         content: row.content,
         encrypted: row.encrypted || false,

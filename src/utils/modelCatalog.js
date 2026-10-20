@@ -114,15 +114,24 @@ const STATIC_PROVIDER_MODELS = {
     { value: 'openai/o3', label: 'OpenAI o3' }
   ],
   antigravity: [
-    // Only IDs `agy --model` accepted on 2026-10-15; account rosters differ,
-    // so the CLI's `agy models` sync adds anything else a user can access.
+    // IDs `agy --model` accepted on 2026-10-16 (4.6 Claude models were retired);
+    // account rosters differ, so the CLI's `agy models` sync adds the rest.
     { value: 'default', label: 'Default' },
+    { value: 'gemini-4-argon', label: 'Gemini 4 Argon' },
+    { value: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+    { value: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+    { value: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
     { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
     { value: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
     { value: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
     { value: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
-    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Thinking)' },
-    { value: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 (Thinking)' },
+    { value: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+    { value: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
+    { value: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 (Medium)' },
+    { value: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 (Low)' },
+    { value: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
+    { value: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+    { value: 'claude-sonnet-5-5-low', label: 'Claude Sonnet 5.5 (Low)' },
     { value: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' }
   ],
   kilo: [

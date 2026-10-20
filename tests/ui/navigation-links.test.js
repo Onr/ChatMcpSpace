@@ -6,7 +6,7 @@ const ejs = require('ejs');
 const layout = fs.readFileSync(path.join(__dirname, '../../views/layout.ejs'), 'utf8');
 
 function renderNavigation(currentPath, user = { email: 'navigation@example.test' }) {
-  const html = ejs.render(layout, { currentPath, user, cspNonce: 'test', body: '<p>Content</p>' });
+  const html = ejs.render(layout, { assetUrl: url => url, currentPath, user, cspNonce: 'test', body: '<p>Content</p>' }, { filename: path.join(__dirname, '../../views/layout.ejs') });
   document.documentElement.innerHTML = html;
   return document.getElementById('navToggleButton');
 }

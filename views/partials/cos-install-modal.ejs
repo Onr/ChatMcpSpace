@@ -67,6 +67,11 @@
             home for your Chief of Staff and every agent it spawns.
           </p>
 
+          <% if (process.env.WINDOWS_AGENT_SETUP_ENABLED !== 'false') { %>
+            <button type="button" data-open-agent-setup data-setup-os="windows" data-setup-cos="true"
+              class="text-sm text-emerald-300 underline">Set up a standard Windows agent</button>
+          <% } %>
+
           <div class="space-y-2">
             <p class="text-xs font-medium text-slate-300">1. Download and install the CLI</p>
             <pre class="text-[11px] bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-x-auto"><code id="cosSetupCommand">curl -sL /setup | bash</code></pre>

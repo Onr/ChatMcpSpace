@@ -102,6 +102,11 @@ users.post('/:room/decline', wrap(r => s.decline(r.user.userId, r.params.room)))
 users.post('/:room/accept', wrap(r => s.accept(r.user.userId, r.params.room)));
 users.patch('/:room/members/:user', wrap(r => s.membership(r.user.userId, r.params.room, r.params.user, r.body)));
 users.delete('/:room/members/:user', wrap(r => s.membership(r.user.userId, r.params.room, r.params.user, {})));
+users.get('/:room/agent-messaging', wrap(r => require('./a2aAccess').settings(r.user.userId, r.params.room)));
+users.put('/:room/agent-messaging', wrap(r => {
+  s.check(typeof r.body.enabled === 'boolean', 400, 'enabled must be a boolean');
+  return require('./a2aAccess').settings(r.user.userId, r.params.room, r.body.enabled);
+}));
 users.get('/:room', wrap(r => s.get(r.user.userId, r.params.room)));
 users.post('/:room/keys', wrap(r => s.provision(r.user.userId, r.params.room, r.body)));
 users.get('/:room/messages', wrap(r => s.history(r.user.userId, r.params.room, r.query.after || 0,
@@ -178,6 +183,7 @@ async function requireCurrentRuntime(req, res, next) {
 agents.post('/acquire', wrap(r => s.acquire(r.sharedAgentId, r.sharedRuntimeId, 'private', r.body.executionId, r.sharedCredentialId)));
 agents.post('/release', wrap(r => s.release(r.sharedAgentId, r.sharedRuntimeId, r.body.executionId, r.body.uncertain === true, r.sharedCredentialId)));
 agents.post('/claim', wrap(r => s.claim(r.sharedAgentId, r.sharedRuntimeId, r.sharedCredentialId)));
+agents.post('/batches/:batch/interrupted', wrap(r => s.interrupt(r.sharedAgentId, r.sharedRuntimeId, r.params.batch, r.body, r.sharedCredentialId)));
 agents.post('/batches/:batch/finish', wrap(r => s.finish(r.sharedAgentId, r.sharedRuntimeId, r.params.batch, r.body, r.sharedCredentialId)));
 agents.post('/batches/:batch/read', wrap(r => s.markBatchRead(r.sharedAgentId, r.sharedRuntimeId, r.params.batch, r.body, r.sharedCredentialId)));
 agents.get('/batches/:batch', wrap(r => s.agentBatch(r.sharedAgentId, r.sharedRuntimeId, r.params.batch, r.sharedCredentialId)));

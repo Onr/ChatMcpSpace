@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const ejs = require('ejs');
+const { assetUrl } = require('../../src/utils/assetUrl');
+const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, ...data });
 const { Pool } = require('pg');
 const { chromium } = require('@playwright/test');
 const assert = require('assert/strict');
@@ -157,7 +159,7 @@ async function main() {
       }
       res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
       try {
-        return res.send(await ejs.renderFile(path.join(ROOT, 'views/guest-shared.ejs'), { layout: false }));
+        return res.send(await renderTemplate(path.join(ROOT, 'views/guest-shared.ejs'), { layout: false }));
       } catch (error) {
         return next(error);
       }
@@ -172,10 +174,10 @@ async function main() {
     for (const [route, template] of [['/shared', 'shared.ejs'], ['/guest-sharing', 'guest-sharing.ejs']]) {
       app.get(route, csrfProtection, async (req, res, next) => {
         try {
-          const body = await ejs.renderFile(path.join(ROOT, 'views', template), {
+          const body = await renderTemplate(path.join(ROOT, 'views', template), {
             csrfToken: res.locals.csrfToken, userId: req.session.userId
           });
-          res.send(await ejs.renderFile(path.join(ROOT, 'views/layout.ejs'), {
+          res.send(await renderTemplate(path.join(ROOT, 'views/layout.ejs'), {
             body, user: { userId: req.session.userId, email: req.session.email },
             currentPath: route, pageBodyClass: route === '/shared' ? 'shared-page' : 'guest-sharing-page', cspNonce: 'fixture', title: 'Guest sharing browser test'
           }));

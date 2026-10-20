@@ -48,7 +48,9 @@ describe('modelCatalog', () => {
     expect(catalog.copilot.some(m => m.value === 'claude-opus-4.7')).toBe(true);
     // agy rejects dotted IDs like claude-opus-4.8 and gemini-3.1-pro.
     expect(catalog.antigravity.some(m => m.value === 'claude-opus-4.8')).toBe(false);
-    expect(catalog.antigravity.some(m => m.value === 'claude-opus-4-6-thinking')).toBe(true);
+    expect(catalog.antigravity.some(m => m.value === 'claude-opus-4-6-thinking')).toBe(false);
+    expect(catalog.antigravity.some(m => m.value === 'gemini-4-argon-high')).toBe(true);
+    expect(catalog.antigravity.some(m => m.value === 'claude-opus-5-5')).toBe(true);
     expect(catalog.claude.some(m => m.value === 'claude-haiku-5-5')).toBe(true);
     expect(catalog.gemini.some(m => m.value === 'gemini-4-argon')).toBe(true);
     expect(catalog.openrouter.some(m => m.value === 'google/gemini-4-argon')).toBe(true);

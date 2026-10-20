@@ -2,8 +2,8 @@
 
 Status: proposed feature; not implemented or deployed. This extends the
 [sharing review](AGENT_SHARING_COLLABORATION_REVIEW_2026-10-02.md).
-Implementation sequence: [step-by-step plan](AGENT_SHARING_IMPLEMENTATION_PLAN.md),
-tasks S01–S16 for the complete guest pilot and S17–S18 for collaboration improvements.
+Implementation details: [build specification](AGENT_SHARING_BUILD_SPEC_2026-10-09.md),
+with requirements and verification steps for the guest pilot and collaboration features.
 
 ## Product contract
 

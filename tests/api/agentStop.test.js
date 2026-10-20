@@ -59,7 +59,17 @@ async function createUserApiTestContext() {
 async function createAgentApiTestContext() {
   jest.resetModules();
 
-  const { pool, query } = createTestDatabase();
+  const { db, pool, query } = createTestDatabase();
+  // pg-mem lacks PostgreSQL's jsonb_set used by device-aware heartbeats.
+  db.public.registerFunction({
+    name: 'jsonb_set',
+    args: ['jsonb', db.public.getType('text').asArray(), 'jsonb'],
+    returns: 'jsonb',
+    implementation: (target, keys, value) => {
+      if (keys.length !== 1) throw new Error('Fixture supports top-level JSON paths only');
+      return { ...target, [keys[0]]: value };
+    },
+  });
   await applyRuntimeUserColumns(query);
   await applyArchiveSchema(query);
   await query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS stop_requested_at TIMESTAMP DEFAULT NULL');
@@ -288,6 +298,22 @@ describe('Agent stop functionality', () => {
   // ── Heartbeat returns stopRequested from DB ──────────────────────────────
 
   describe('POST /api/agent/heartbeat (stop detection)', () => {
+    it('stores device metadata without losing configuration or stop detection', async () => {
+      const { app, query, userId } = await createAgentApiTestContext();
+      const agentId = uuidv4();
+      const device = { id: 'a'.repeat(64), name: 'Fixture device' };
+      await query(
+        'INSERT INTO agents (agent_id, user_id, agent_name, position, runtime_config) VALUES ($1, $2, $3, $4, $5)',
+        [agentId, userId, 'DeviceAgent', 1, JSON.stringify({ model: 'fixture' })]
+      );
+      for (const body of [{ agentName: 'DeviceAgent', device }, { agentName: 'DeviceAgent' }]) {
+        const res = await request(app).post('/api/agent/heartbeat').send(body).expect(200);
+        expect(res.body.stopRequested).toBe(false);
+        const result = await query('SELECT runtime_config FROM agents WHERE agent_id = $1', [agentId]);
+        expect(result.rows[0].runtime_config).toEqual({ model: 'fixture', device });
+      }
+    });
+
     it('returns stopRequested:false when no stop is set', async () => {
       const { app, query, userId } = await createAgentApiTestContext();
 

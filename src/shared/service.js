@@ -286,7 +286,10 @@ async function details(c, room, principal) {
     FROM shared_members sm LEFT JOIN shared_identities si ON si.principal=('user:' || sm.user_id::text)
     WHERE sm.conversation_id=$1 AND sm.status <> 'removed'`, [room.id])).rows;
   const keys = (await c.query('SELECT key_version,wrapped_key FROM shared_key_envelopes WHERE conversation_id=$1 AND principal=$2', [room.id, principal])).rows;
-  const runtime = await one(c, 'SELECT capabilities,last_seen_at,execution_kind,execution_uncertain FROM shared_runtimes WHERE agent_id=$1', [room.agent_id]);
+  const runtime = await one(c, `SELECT r.capabilities,r.last_seen_at,r.execution_kind,r.execution_uncertain,b.id AS execution_id,
+    b.conversation_id AS execution_conversation_id FROM shared_runtimes r
+    LEFT JOIN shared_batches b ON b.id=r.execution_id AND b.agent_id=r.agent_id AND b.conversation_id=$2
+    WHERE r.agent_id=$1`, [room.agent_id, room.id]);
   if (runtime?.capabilities && typeof runtime.capabilities === 'object') delete runtime.capabilities.credentialId;
   const agentIdentity = await one(c, 'SELECT principal,public_key,display_name FROM shared_identities WHERE principal=$1', [`agent:${room.agent_id}`]);
   const guests = await eligibleGuestMembers(c, room.id);
@@ -773,6 +776,7 @@ async function acquire(agentId, runtimeId, kind, executionId, credentialId = nul
 async function release(agentId, runtimeId, executionId, uncertain = false, credentialId = null) {
   return tx(async c => {
     const r = await runtime(c, agentId, runtimeId, credentialId);
+    if (!r.execution_id && !uncertain) return { ok: true, existing: true };
     check(r.execution_id === executionId, 409, 'Execution mismatch');
     if (uncertain) {
       await c.query('UPDATE shared_runtimes SET execution_uncertain=TRUE WHERE agent_id=$1', [agentId]);
@@ -1019,6 +1023,37 @@ async function holdTaskResult(c, taskId, body) {
   await c.query(`UPDATE shared_tasks SET held_result=COALESCE(held_result,$2),result_held_at=COALESCE(result_held_at,NOW())
     WHERE task_id=$1`, [taskId, serialized]);
 }
+// Close an interrupted trusted turn without replaying tools or requiring a
+// manager decision. This only publishes a failure notice, never a task result.
+async function interrupt(agentId, runtimeId, batchId, body, credentialId = null) {
+  return tx(async c => {
+    await lockTaskShare(c, batchId);
+    const r = await runtime(c, agentId, runtimeId, credentialId);
+    check(trustedExecution.isTrusted(r), 409, 'Automatic interruption recovery requires trusted sharing');
+    const batch = await one(c, 'SELECT * FROM shared_batches WHERE id=$1 AND agent_id=$2 FOR UPDATE', [uuid(batchId), agentId]);
+    check(batch, 404, 'Batch unavailable');
+    const task = batch.task_id ? await one(c, 'SELECT * FROM shared_tasks WHERE task_id=$1 FOR UPDATE', [batch.task_id]) : null;
+    check(task?.execution_context?.execution?.mode === 'trusted' && task.connector_id === runtimeId,
+      409, 'Interrupted task does not belong to this trusted runtime');
+    if (['answered', 'skipped', 'retry'].includes(batch.status)) return { ok: true, existing: true };
+    check(r.execution_id === batchId && r.execution_kind === 'shared' &&
+      ['processing', 'uncertain'].includes(batch.status), 409, 'Batch no longer active');
+    check(['running', 'outcome_uncertain', 'failed', 'cancellation_requested'].includes(task.state), 409, 'Task cannot be closed as interrupted');
+    const room = await agentRoom(c, batch.conversation_id, agentId);
+    await writable(c, room);
+    const access = await trustedExecution.requesterAccess(c, agentId, room, task.requester_kind, task.requester_id);
+    await insertMessage(c, room, `agent:${agentId}`, {
+      id: body.message?.id, keyVersion: body.message?.keyVersion, payload: body.message?.payload,
+      kind: 'message', addressedTo: [], replyTo: [], fileIds: [],
+      audience: access ? { mode: 'selected', principals: [{ kind: task.requester_kind, id: task.requester_id }] } : { mode: 'owner' }
+    }, batchId);
+    await c.query("UPDATE shared_batches SET status='skipped',completed_at=NOW() WHERE id=$1", [batchId]);
+    await c.query("UPDATE shared_tasks SET state='failed',current_authorization=$2,completed_at=NOW() WHERE task_id=$1", [task.task_id,
+      JSON.stringify({ state: 'interrupted', recovery: 'automatic', previousState: task.state, message: 'Run interrupted; agent ready for new messages' })]);
+    await c.query('UPDATE shared_runtimes SET execution_id=NULL,execution_kind=NULL,execution_started_at=NULL,execution_uncertain=FALSE WHERE agent_id=$1', [agentId]);
+    return { ok: true };
+  });
+}
 async function finish(agentId, runtimeId, batchId, body, credentialId = null) {
   let deferredError = null;
   const result = await tx(async c => {
@@ -1110,6 +1145,7 @@ async function control(userId, roomId, body) {
     } else if (['retry', 'skip'].includes(body.action)) {
       const rt = await one(c, 'SELECT * FROM shared_runtimes WHERE agent_id=$1 FOR UPDATE', [room.agent_id]);
       check(rt?.execution_kind === 'shared' && (rt.execution_uncertain || Date.now() - new Date(rt.last_seen_at).getTime() > 120000), 409, 'No uncertain shared execution');
+      if (body.executionId !== undefined) check(rt.execution_id === uuid(body.executionId), 409, 'This request has already changed. Refresh the conversation.');
       const batch = await one(c, 'SELECT * FROM shared_batches WHERE id=$1 AND agent_id=$2 FOR UPDATE', [rt.execution_id, room.agent_id]);
       check(batch && batch.conversation_id === room.id, 409, 'No uncertain shared execution for this room');
       if (batch.task_id) {
@@ -1222,6 +1258,7 @@ module.exports = {
   release,
   claim,
   finish,
+  interrupt,
   control,
   batches,
   agentHistory,

@@ -153,6 +153,7 @@
       }
       previewNode.hidden = true;
       invitesPanel.hidden = false;
+      void root.CouncilSharing?.loadMessagingSettings(captured);
       if (guestControls) guestControls.hidden = false;
       status.textContent = 'Invite someone into this same conversation. They can join from the email or dashboard inbox.';
       void loadInvitations(epoch, captured.conversationId);

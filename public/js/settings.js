@@ -310,6 +310,7 @@ function regenerateApiKey() {
  * Copy curl command to clipboard
  */
 function copyCurlCommand() {
+  if (window.ChatMCPSetup?.open()) return;
   const text = document.getElementById('curlCommand').textContent;
   navigator.clipboard.writeText(text).then(() => {
     // Visual feedback on the button

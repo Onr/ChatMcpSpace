@@ -447,8 +447,8 @@ describe('Mobile layout regression guards', () => {
     expect(css).toMatch(/body\.dashboard-fast-mode #mobileHeader > \.flex,[\s\S]*?body\.dashboard-fast-mode #mobileHeader \.council-header-title,[\s\S]*?body\.dashboard-fast-mode #mobileHeader #headerNavLeft,[\s\S]*?body\.dashboard-fast-mode #mobileHeader #headerNavRight,[\s\S]*?body\.dashboard-fast-mode #mobileHeader #collapseMobileListBtn,[\s\S]*?body\.dashboard-fast-mode #mobileHeader #minimizeCouncilBtn,[\s\S]*?body\.dashboard-fast-mode #mobileHeader \.mobile-council-actions-toggle\s*\{[\s\S]*?display:\s*none\s*!important;/);
     // The whole agents-count row (Total / Need Attention / Urgent) is hidden.
     expect(css).toMatch(/body\.dashboard-fast-mode #mobileStatsToggle\s*\{[\s\S]*?display:\s*none\s*!important;/);
-    // Agent list title/count chip stays hidden so the list itself takes priority.
-    expect(css).toMatch(/body\.dashboard-fast-mode \.agent-list-title,[\s\S]*?body\.dashboard-fast-mode \.agent-list-count\s*\{[\s\S]*?display:\s*none\s*!important;/);
+    // Total/Active filter labels remain visible when the list is open.
+    expect(css).not.toMatch(/body\.dashboard-fast-mode \.agent-list-title,[\s\S]*?body\.dashboard-fast-mode \.agent-list-count\s*\{[\s\S]*?display:\s*none\s*!important;/);
     // #mobileHeader stays rendered (zero-height) so the council actions dropdown still anchors.
     expect(css).toMatch(/body\.dashboard-fast-mode #mobileHeader\s*\{[\s\S]*?display:\s*block\s*!important;[\s\S]*?height:\s*0\s*!important;/);
   });

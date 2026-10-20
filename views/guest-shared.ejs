@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#020617">
   <meta name="referrer" content="no-referrer">
   <link rel="icon" type="image/png" href="/images/favicon.png">
-  <link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
-  <link rel="stylesheet" href="/css/guest-workspace.css?v=20261013.4">
-  <link rel="stylesheet" href="/css/rich-rendering.css">
+  <link rel="stylesheet" href="<%= assetUrl('/css/sharing-theme.css') %>">
+  <link rel="stylesheet" href="<%= assetUrl('/css/guest-workspace.css') %>">
+  <link rel="stylesheet" href="<%= assetUrl('/css/rich-rendering.css') %>">
   <title>Shared chat · Chat MCP Space</title>
 </head>
 <body class="guest-chat-page">
@@ -65,12 +66,12 @@
       </div>
     </section>
   </main>
-  <script src="/js/shared-crypto.js"></script>
-  <script src="/js/guest-crypto.js"></script>
-  <script src="/js/vendor/dompurify.min.js"></script>
-  <script src="/js/rich-rendering.js"></script>
-  <script src="/js/sharing-ui.js?v=20261009"></script>
-  <script src="/js/guest-workspace.js?v=20261013.4"></script>
-  <script src="/js/guest-shared.js?v=20261010.2"></script>
+  <script src="<%= assetUrl('/js/shared-crypto.js') %>"></script>
+  <script src="<%= assetUrl('/js/guest-crypto.js') %>"></script>
+  <script src="<%= assetUrl('/js/vendor/dompurify.min.js') %>"></script>
+  <script src="<%= assetUrl('/js/rich-rendering.js') %>"></script>
+  <script src="<%= assetUrl('/js/sharing-ui.js') %>"></script>
+  <script src="<%= assetUrl('/js/guest-workspace.js') %>"></script>
+  <script src="<%= assetUrl('/js/guest-shared.js') %>"></script>
 </body>
 </html>

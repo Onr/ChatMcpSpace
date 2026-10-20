@@ -21,6 +21,7 @@ if [ "$APP_PORT" -lt 1024 ]; then
   APP_PORT=3000
 fi
 MAX_UPLOAD_MB="${MAX_ATTACHMENT_SIZE_MB:-${MAX_IMAGE_SIZE_MB:-20}}"
+MAINTENANCE_DIR="${NGINX_MAINTENANCE_DIR:-/var/www/chatmcp-space}"
 
 # Derive a reasonable server_name from BASE_URL if provided
 SERVER_NAME="${SERVER_NAME:-_}"
@@ -48,12 +49,21 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_intercept_errors on;
+        error_page 502 503 504 =503 /maintenance.html;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 300;
+    }
+
+    location = /maintenance.html {
+        root ${MAINTENANCE_DIR};
+        internal;
+        add_header Cache-Control "no-store" always;
+        add_header Retry-After "20" always;
     }
 }
 EOF
@@ -69,6 +79,10 @@ install_nginx() {
 }
 
 install_nginx
+
+echo "[nginx-setup] Installing the static upstream-outage page in ${MAINTENANCE_DIR}"
+sudo install -d -m 755 "$MAINTENANCE_DIR"
+sudo install -m 644 public/maintenance.html "$MAINTENANCE_DIR/maintenance.html"
 
 echo "[nginx-setup] Writing config to ${CONFIG_PATH}"
 sudo mv "$TMP_CONF" "$CONFIG_PATH"

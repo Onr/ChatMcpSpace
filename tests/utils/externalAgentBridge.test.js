@@ -78,6 +78,17 @@ describe('External agent bridge', () => {
     expect(bridge.api.mock.calls.some(([route]) => route.endsWith('/ack'))).toBe(false);
   });
 
+  it('preserves an identified timeout for recovery without replaying the provider', async () => {
+    const state = fixture();
+    const runtime = jest.fn().mockRejectedValue(Object.assign(new Error('Provider stopped'), { code: 'PROVIDER_TIMEOUT' }));
+    const bridge = new Bridge(state, { fetchImpl: runtime, runtimeKey: 'local-key' });
+    bridge.api = jest.fn().mockResolvedValue({});
+    await expect(bridge.completePending()).rejects.toThrow('Inspect the runtime');
+    expect(state.pending).toMatchObject({ phase: 'uncertain', failureReason: 'timeout' });
+    await expect(bridge.completePending()).rejects.toThrow('uncertain outcome');
+    expect(runtime).toHaveBeenCalledTimes(1);
+  });
+
   it('stops dispatch without claiming to have stopped an independent runtime', async () => {
     const runtime = jest.fn();
     const bridge = new Bridge(fixture(), { fetchImpl: runtime, runtimeKey: 'local-key' });
@@ -260,4 +271,24 @@ describe('External agent bridge', () => {
     await expect(bridge.downloadAttachment({ attachmentId: crypto.randomUUID(), encrypted: false })).rejects.toThrow('20MB');
   });
 
+});
+
+describe('shared DM bridge encryption', () => {
+  it('decrypts and replies across different account keys using a separate group key', () => {
+    const sender = new Bridge(fixture(), {groupPassword:'a-separate-dm-secret',groupSalt:Buffer.from('team-salt').toString('base64')});
+    const receiver = new Bridge(fixture(), {groupPassword:'a-separate-dm-secret',groupSalt:Buffer.from('team-salt').toString('base64')});
+    const message = {fromAgent:sender.state.agentId,fromAgentId:sender.state.agentId,shared:true,encrypted:true,content:seal('Shared task',sender.groupKey)};
+    expect(receiver.decode(message)).toBe('Shared task');
+    const pending = {kind:'direct',id:crypto.randomUUID(),message,output:'Shared result'};
+    receiver.prepareReply(pending);
+    expect(pending.reply.encryptionScope).toBe('shared_dm_password');
+    expect(open(pending.reply.content,sender.groupKey)).toContain('Shared result');
+    expect(()=>open(pending.reply.content,sender.state.key)).toThrow();
+  });
+  it('does not try group keys for user messages or send a shared reply without the key', () => {
+    const bridge = new Bridge(fixture(),{groupPassword:'secret',groupSalt:Buffer.from('salt').toString('base64')});
+    expect(()=>bridge.decode({encrypted:true,content:seal('User',bridge.groupKey)})).toThrow();
+    const noKey = new Bridge(fixture(),{groupPassword:'',groupSalt:''});
+    expect(()=>noKey.prepareReply({kind:'direct',id:'id',message:{shared:true,fromAgent:'remote'},output:'Result'})).toThrow('GROUP_PASSWORD');
+  });
 });

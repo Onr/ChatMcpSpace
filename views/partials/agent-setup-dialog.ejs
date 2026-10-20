@@ -1,0 +1,27 @@
+<dialog id="agentSetupDialog" aria-labelledby="agentSetupDialogTitle"
+  class="bg-slate-900 text-slate-300 border border-slate-700 rounded-2xl p-6 shadow-2xl"
+  style="margin:auto;max-height:85vh;width:min(42rem,calc(100% - 2rem));overflow-y:auto">
+  <div class="flex items-center justify-between gap-3 mb-4">
+    <div>
+      <p class="text-xs text-emerald-300 mb-2">CONNECT YOUR COMPUTER</p>
+      <h2 id="agentSetupDialogTitle" class="text-lg font-semibold text-slate-100">Your agents, in your workspace</h2>
+    </div>
+    <button type="button" data-setup-close aria-label="Close setup instructions"
+      class="px-3 py-1 rounded-lg border border-slate-600">Close</button>
+  </div>
+  <p class="text-sm text-slate-400 mb-4">Choose the computer where your agent will run. Copy the command and paste it into your terminal.</p>
+  <input type="hidden" data-setup-platform value="unix">
+  <div role="group" aria-label="Computer operating system" class="agent-setup-platforms mb-4">
+    <button type="button" data-setup-os-choice="unix" aria-pressed="true">Linux / macOS</button>
+    <button type="button" data-setup-os-choice="windows" aria-pressed="false">Windows</button>
+  </div>
+  <p data-setup-windows-note class="text-sm text-emerald-300 mb-4" hidden>
+    Runs directly on Windows with PowerShell. Supports Codex, Claude, and Gemini.
+  </p>
+  <p data-setup-cos-note class="text-sm text-amber-300 mb-4" hidden>
+    Windows setup creates a standard agent. Chief of Staff installation is currently available on Linux / macOS.
+  </p>
+  <div data-setup-steps class="space-y-4"></div>
+  <p class="text-xs text-slate-400 mt-4">After setup, send your agent a message here and confirm that it replies.</p>
+  <p data-setup-status role="status" aria-live="polite" class="text-sm text-emerald-300 mt-4"></p>
+</dialog>

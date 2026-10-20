@@ -27,6 +27,7 @@
   const roomRefreshes = new Map();
   let accessMaintenance = null;
   let listSignature = null;
+  let preparingContextRefresh = null;
   let viewerId = '';
   let privateKey = null;
   let identityPromise = null;
@@ -40,6 +41,7 @@
   let receiptCursor = 0;
   let ownerHistory = { roomId: null, messages: [], offset: 0, boundary: null, hasMore: false, loaded: false };
   const sendingByRoom = new Map();
+  const executionRecoveries = new Map();
   const attachmentCipherCache = new Map();
 
   function openAttachmentDb() {
@@ -178,7 +180,15 @@
     }).then(async response => {
       const data = await response.json().catch(() => ({}));
       traceSend('api:done', { path, status: response.status });
-      if (!response.ok) throw Object.assign(new Error(data.error?.message || 'Shared conversation request failed'), { status: response.status });
+      if (!response.ok) {
+        const serverMessage = typeof data.error === 'string' ? data.error : data.error?.message;
+        const fallback = response.status === 401
+          ? 'Your session has expired. Refresh the dashboard and sign in again.'
+          : response.status >= 500
+            ? 'The server is temporarily unavailable. Please try again shortly.'
+            : `Shared conversation request failed (HTTP ${response.status}). Please retry.`;
+        throw Object.assign(new Error(serverMessage || fallback), { status: response.status });
+      }
       return data;
     });
   }
@@ -359,27 +369,42 @@
   function updateExecutionNotice(context, roomData) {
     const notice = document.getElementById('sharingExecutionNotice');
     if (!notice) return;
-    notice.hidden = context?.role !== 'owner' || !roomData?.runtime?.execution_uncertain;
+    const runtime = roomData?.runtime;
+    const executionId = runtime?.execution_id;
+    const recovery = executionRecoveries.get(executionId);
+    const previousExecutionId = notice.dataset.executionId;
+    notice.hidden = context?.role !== 'owner' || !executionId || !runtime?.execution_uncertain ||
+      runtime.execution_kind !== 'shared' || runtime.execution_conversation_id !== context.conversationId || recovery === 'resolved';
+    notice.dataset.executionId = notice.hidden ? '' : executionId;
+    if (notice.hidden) return;
+    const noticeEpoch = contextEpoch;
+    const isCurrent = () => contextEpoch === noticeEpoch && activeContext?.conversationId === context.conversationId &&
+      notice.dataset.executionId === executionId;
+    const buttons = ['sharingExecutionSkip', 'sharingExecutionRetry'].map(id => document.getElementById(id)).filter(Boolean);
+    const errorText = document.getElementById('sharingExecutionError');
+    if (errorText && previousExecutionId !== executionId) errorText.textContent = '';
+    buttons.forEach(button => { button.disabled = recovery === 'pending'; });
     for (const action of ['skip', 'retry']) {
       const button = document.getElementById(action === 'skip' ? 'sharingExecutionSkip' : 'sharingExecutionRetry');
       if (!button) continue;
       button.onclick = async () => {
-        if (contextEpoch !== noticeEpoch || activeContext?.conversationId !== context.conversationId) return;
-        const warning = action === 'retry'
-          ? 'Retry the earlier request? Any actions it already performed may happen again.'
-          : 'Skip the unfinished earlier request and continue with queued messages?';
-        if (!root.confirm(warning)) return;
-        button.disabled = true;
-        const errorText = document.getElementById('sharingExecutionError');
+        if (!isCurrent() || executionRecoveries.has(executionId)) return;
+        executionRecoveries.set(executionId, 'pending');
+        buttons.forEach(control => { control.disabled = true; });
+        if (errorText) errorText.textContent = '';
         try {
-          await api('/' + context.conversationId + '/control', { action });
-          notice.hidden = true;
-          if (errorText) errorText.textContent = '';
-        } catch (error) { if (errorText) errorText.textContent = error.message; }
-        finally { button.disabled = false; }
+          await api('/' + context.conversationId + '/control', { action, executionId });
+          // An older poll may finish after recovery. Do not show that request again.
+          executionRecoveries.set(executionId, 'resolved');
+          if (isCurrent()) notice.hidden = true;
+        } catch (error) {
+          executionRecoveries.delete(executionId);
+          if (isCurrent() && errorText) errorText.textContent = error.message;
+        } finally {
+          if (isCurrent()) buttons.forEach(control => { control.disabled = false; });
+        }
       };
     }
-    const noticeEpoch = contextEpoch;
   }
   async function loadOwnerHistory(context, epoch, older = false) {
     if (context.role !== 'owner') return;
@@ -779,6 +804,16 @@
       const response = await sessionFetch('/api/user/chat-threads', { credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) { section.hidden = true; return; }
       const allContexts = await response.json();
+      root.CouncilSharing?.updateContexts(allContexts);
+      const selectedContext = root.DashboardHelpers?.getSelectedChatContext?.();
+      if (selectedContext?.state === 'preparing' && !preparingContextRefresh) {
+        const latest = allContexts.find(item => item.agentId === selectedContext.agentId && item.role === 'owner');
+        if (latest && latest.state !== 'preparing') {
+          preparingContextRefresh = Promise.resolve(root.DashboardHelpers?.selectChatContext?.(latest))
+            .catch(error => traceSend('context:refresh:error', { message: error.message }))
+            .finally(() => { preparingContextRefresh = null; });
+        }
+      }
       // Owned chats already have their ordinary agent row. Legacy rooms must
       // not appear as indistinguishable duplicate entries in that list.
       const contexts = allContexts.filter(item => item.mode === 'shared' && item.role !== 'owner');

@@ -2,6 +2,7 @@
  * API Guide Generator
  * Generates a gum-based CLI main script for agent management
  */
+const { buildDefaultLocalAgentAllowedPermissions } = require('./agentPermissionDefaults');
 const { AGENT_CLI_VERSION } = require('./agentCliVersion');
 const modelDiscoverySource = require('fs').readFileSync(require('path').join(__dirname, '../../scripts/discover-provider-models.js'), 'utf8');
 
@@ -1362,15 +1363,33 @@ select_model_provider() {
 }
 
 sync_runtime_permissions() {
-    local payload
+    local payload response_file http_status detail
     payload=$(jq -nc --arg agentName "$1" --slurpfile config "$2" --slurpfile allowed "$3" \\
         '{agentName:$agentName,config:$config[0],allowedPermissions:$allowed[0]}') || return 1
-    if ! curl -fsS --connect-timeout 5 --max-time 15 -X POST \\
+    response_file=$(mktemp) || return 1
+    if ! http_status=$(curl -sS --connect-timeout 5 --max-time 15 -X POST \\
         -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \\
-        --data-binary "$payload" "$API_BASE/agent/runtime-permissions" >/dev/null; then
-        print_error "Could not save the permission grant to the server. Check the owner API key and try again."
+        --output "$response_file" --write-out '%{http_code}' \\
+        --data-binary "$payload" "$API_BASE/agent/runtime-permissions"); then
+        rm -f "$response_file"
+        print_error "Could not reach the server to save agent permissions. Check your connection and server URL."
+        print_info "Local setup is saved. Run this CLI again and continue the same agent to retry."
         return 1
     fi
+    case "$http_status" in
+        2??) rm -f "$response_file"; return 0 ;;
+        401|403) print_error "Permission save rejected (HTTP $http_status). Use the owner's API key from Settings." ;;
+        404) print_error "Permission API unavailable (HTTP 404). Update the server, then copy a fresh setup command from Settings." ;;
+        429) print_error "Server is busy (HTTP 429). Wait briefly, then continue the same agent to retry." ;;
+        5??) print_error "Server could not save agent permissions (HTTP $http_status). Check server logs, then retry." ;;
+        *)
+            detail=$(jq -r 'if (.error | type) == "object" then .error.message // empty else empty end' "$response_file" 2>/dev/null || true)
+            print_error "Could not save agent permissions (HTTP $http_status). $detail"
+            ;;
+    esac
+    rm -f "$response_file"
+    print_info "Local setup is saved. Run this CLI again and continue the same agent to retry."
+    return 1
 }
 
 sync_models_to_backend() {
@@ -1576,12 +1595,16 @@ select_model() {
                 --header "Select Antigravity model:" \
                 --cursor "➤ " \
                 "default (Use Antigravity default model)" \
+                "gemini-4-argon (Gemini 4 Argon)" \
+                "gemini-4-argon-high (Gemini 4 Argon High)" \
+                "gemini-4-argon-medium (Gemini 4 Argon Medium)" \
+                "gemini-4-argon-low (Gemini 4 Argon Low)" \
                 "gemini-3.8-flash (Gemini 3.8 Flash)" \
                 "gemini-3.8-flash-high (Gemini 3.8 Flash High)" \
                 "gemini-3.8-flash-medium (Gemini 3.8 Flash Medium)" \
                 "gemini-3.8-flash-low (Gemini 3.8 Flash Low)" \
-                "claude-sonnet-4-6 (Claude Sonnet 4.6)" \
-                "claude-opus-4-6-thinking (Claude Opus 4.6 Thinking)" \
+                "claude-opus-5-5 (Claude Opus 5.5)" \
+                "claude-sonnet-5-5-medium (Claude Sonnet 5.5 Medium)" \
                 "gpt-oss-120b-medium (GPT-OSS 120B Medium)")
             model=$(echo "$model" | cut -d' ' -f1)
             ;;
@@ -2120,7 +2143,7 @@ run_agent() {
             # Just start the runner with existing config
             print_section ">> Starting Agent..."
             start_agent_foreground "$agent_name" "$agent_dir"
-            return 0
+            return $?
         fi
     fi
     
@@ -2683,7 +2706,7 @@ The agent will load new config at each loop iteration."
             print_section ">> Starting Agent..."
             echo ""
             start_agent_foreground "$agent_name" "$agent_dir"
-            return 0
+            return $?
             ;;
         *)
             print_info "You can start the agent later by running this script again."
@@ -3281,6 +3304,7 @@ main_menu() {
             --cursor "➤ " \\
             "🆕 Create New Agent" \\
             "▶️  Continue Existing Agent" \\
+            "🔄 Restart Existing Agent" \\
             "⏹️  Stop Running Agent" \\
             "🗑️  Delete Agent" \\
             "📊 View Agent Status" \\
@@ -3291,20 +3315,24 @@ main_menu() {
             "🆕 Create New Agent")
                 create_agent
                 ;;
-            "▶️  Continue Existing Agent")
+            "▶️  Continue Existing Agent"|"🔄 Restart Existing Agent")
                 if [ "$agent_count" -eq 0 ]; then
                     print_error "No existing agents found. Create one first!"
                     sleep 2
                 else
                     local selected_label
                     selected_label=$(printf '%s' "$labeled_agents" | sed '/^$/d' | gum choose \\
-                        --header "Select an agent to continue:" \\
+                        --header "Select an agent:" \\
                         --cursor "➤ ")
                     
                     local selected_agent
                     selected_agent=$(extract_agent_name_from_label "$selected_label")
                     if [ -n "$selected_agent" ]; then
-                        run_agent "$selected_agent"
+                        if [ "$choice" = "🔄 Restart Existing Agent" ]; then
+                            start_agent_session "$selected_agent" restart
+                        else
+                            run_agent "$selected_agent"
+                        fi
                     fi
                 fi
                 ;;
@@ -4114,6 +4142,7 @@ run_agent_headless() {
                 rm -f "$tmp_cfg"
             fi
         fi
+        sync_runtime_permissions "$agent_name" "$config_file" "$allowed_perms_file" || return 1
         if [ "$ARG_AUTO_START" = "true" ]; then
             start_agent_foreground "$agent_name" "$agent_dir"
         fi
@@ -4506,19 +4535,33 @@ show_agent_session_status() {
     [ "$found" = "true" ] || echo "(no agents running in the background)"
 }
 
-# Run the agent in this terminal. Refuses to start a second runner when the same
-# agent is already running in its background session (two runners would answer
-# every message twice), and offers the restart command instead.
+# Run in this terminal, or manage the existing supervisor without double-starting.
 start_agent_foreground() {
     local agent_name="$1"
     local agent_dir="$2"
     local session
     session=$(agent_session_name "$agent_name")
     if agent_is_running "$agent_name"; then
+        if [ "$ARG_HEADLESS" != "true" ]; then
+            local action
+            local choices=("Restart in background")
+            if agent_session_running "$session"; then
+                choices+=("Attach to running agent")
+            fi
+            choices+=("Cancel")
+            action=$(gum choose --header "Agent '$agent_name' is running. What would you like to do?" "\${choices[@]}") || return 0
+            case "$action" in
+                "Restart in background") start_agent_session "$agent_name" restart; return $? ;;
+                "Attach to running agent") tmux attach-session -t "=$session"; return $? ;;
+                *) return 0 ;;
+            esac
+        fi
         echo ""
-        echo "Agent '$agent_name' is already running (session '$session' or PID $(agent_runner_pids "$agent_dir" | tr '\\n' ' '))."
-        echo "  Attach:   tmux attach -t $session"
-        echo "  Restart:  bash $SCRIPT_DIR/agent-cli.sh --restart \\"$agent_name\\""
+        echo "Agent '$agent_name' is already running."
+        if agent_session_running "$session"; then
+            echo "  Attach:   tmux attach -t $session"
+        fi
+        echo "  Restart:  bash \\"$SCRIPT_DIR/agent-cli.sh\\" --restart \\"$agent_name\\""
         return 0
     fi
     echo ""
@@ -5369,6 +5412,11 @@ def _api_request(method: str, path: str, data: dict = None) -> dict:
         "X-Agent-Name": Config.agent_name
     }
 
+    if method.upper() == "POST" and clean_path == "agent/messages/direct":
+        runtime_id = os.environ.get("CHATSPACE_SHARED_A2A_RUNTIME", "")
+        if runtime_id:
+            headers["X-Shared-Runtime"] = runtime_id
+
     try:
         if method.upper() == "GET":
             response = requests.get(url, headers=headers, timeout=30)
@@ -6027,8 +6075,15 @@ def send_dm(target_agent: str, message: str, priority: int = 0) -> dict:
     """
     path = "/agent/messages/direct"
     
-    # Inter-agent messages share the same encryption key as user-facing messages.
-    encrypted_content = _encrypt_inter_agent_message(message)
+    # UUID addresses identify shared peers without colliding with local names.
+    shared_target = next((a for a in discover_agents().get("agents", [])
+                          if a.get("shared") and a.get("address") == target_agent), None) if len(target_agent) == 36 else None
+    if shared_target:
+        if not Config.group_password or not Config.group_salt:
+            return {"error": {"message": "Configure the same separate GROUP_PASSWORD and GROUP_SALT on both agents. Never share your account password."}}
+        encrypted_content = _group_encrypt_message(message)
+    else:
+        encrypted_content = _encrypt_inter_agent_message(message)
     is_encrypted = (encrypted_content != message)
     
     payload = {
@@ -6037,6 +6092,8 @@ def send_dm(target_agent: str, message: str, priority: int = 0) -> dict:
         "priority": priority,
         "encrypted": is_encrypted
     }
+    if shared_target:
+        payload["encryptionScope"] = "shared_dm_password"
     return _api_request("POST", path, payload)
 
 
@@ -6182,6 +6239,7 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
     if Config.user_password:
         payload["parentPassword"] = Config.user_password
 
+    _spawn_started = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
     result = _api_request("POST", "/agent/spawn", payload)
     if result.get("success") and result.get("childAgent"):
         child = result["childAgent"]
@@ -6237,14 +6295,22 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
                 with open(_child_summary, "w") as _sf:
                     _sf.write(f"# Inherited Context (from parent)\\n\\n{_parent_content}")
 
-            # allowed_permissions.json — prefer server-provided inherited permissions, else fall back to parent copy
+            # Always persist permissions before launch, including on older servers.
             _parent_perms = os.path.join(_parent_dir, "agent_state", "allowed_permissions.json")
             _child_perms = os.path.join(_child_state, "allowed_permissions.json")
-            if _runtime_perms:
-                with open(_child_perms, "w") as _pf:
-                    _pf.write(json.dumps(_runtime_perms, indent=2))
-            elif os.path.exists(_parent_perms) and not os.path.exists(_child_perms):
-                _shutil.copy2(_parent_perms, _child_perms)
+            _perms = _runtime_perms.copy()
+            if not _perms:
+                if os.path.exists(_child_perms):
+                    with open(_child_perms) as _pf:
+                        _perms = json.load(_pf)
+                elif os.path.exists(_parent_perms):
+                    with open(_parent_perms) as _pf:
+                        _perms = json.load(_pf)
+                if not any(k not in ("inter_agent", "project_path") for k in _perms):
+                    _perms.update(json.loads('${JSON.stringify(buildDefaultLocalAgentAllowedPermissions())}'))
+                _perms["inter_agent"] = {**_perms.get("inter_agent", {}), "enabled": True, "mode": "listen_all"}
+            with open(_child_perms, "w") as _pf:
+                json.dump(_perms, _pf, indent=2)
 
             # agent_config.json — prefer the runtime contract returned by the API, else inherit locally
             _cfg = {"model_provider": model_provider or "claude", "model": model or "default",
@@ -6326,7 +6392,7 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
                     _child_env = os.environ.copy()
                     _child_env.pop("CLAUDECODE", None)
                     _proc = subprocess.Popen(
-                        ["bash", _runner_path],
+                        ["bash", "-lc", 'exec bash "$1"', "chatspace-agent", _runner_path],
                         cwd=child.get("_localFolderCreated", ""),
                         env=_child_env,
                         stdout=_log_handle,
@@ -6377,7 +6443,7 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
                 child["_verifyError"] = f"Agent process (PID {loop_pid}) exited within {_verify_wait}s of launch."
             else:
                 # 2. Check log file for fatal errors
-                _fatal_patterns = ["CLI is missing", "Configuration Error", "not installed", "command not found"]
+                _fatal_patterns = ["CLI is missing", "Configuration Error", "not installed", "command not found", "unexpected argument", "error sending request"]
                 if log_file and os.path.exists(log_file):
                     try:
                         with open(log_file, "r") as _lf:
@@ -6392,17 +6458,20 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
                     # 3. Check if child sent any message (intro or DM reply)
                     try:
                         _child_name_encoded = urllib.parse.quote(resolved_child_name)
-                        _msgs = _api_request("GET", f"/agent/messages/history?agentName={_child_name_encoded}&limit=1")
-                        _msg_list = _msgs.get("messages", [])
+                        _msgs = _api_request("GET", f"/agent/messages/history?agentName={_child_name_encoded}&limit=10")
+                        _msg_list = [m for m in _msgs.get("messages", [])
+                                     if m.get("type") in ("agent_message", "agent_question")
+                                     and m.get("from") == resolved_child_name
+                                     and m.get("timestamp", "") >= _spawn_started]
                         if _msg_list and len(_msg_list) > 0:
                             child["_verified"] = True
                             child["_firstMessage"] = _msg_list[0].get("content", "")[:200]
                         else:
                             # No messages yet — process alive but hasn't responded
-                            child["_verifyError"] = "Agent process running but no messages sent yet. It may be starting up or stuck."
+                            child["_verifyError"] = "Agent process running but no fresh child response verified yet. It may be starting up or stuck."
                     except Exception as _msg_err:
                         # API call failed — process alive, just can't check messages
-                        child["_verified"] = True  # give benefit of doubt
+                        child["_verifyError"] = "Could not verify a child response: " + str(_msg_err)
 
         # Build the user-visible notice based on verification results
         if child.get("_verified"):
@@ -6483,6 +6552,14 @@ def get_lineage() -> dict:
         dict with keys: ancestors (list), descendants (list)
     """
     return _api_request("GET", "/agent/lineage")
+
+
+def send_site_feedback(report_type: str, message: str) -> dict:
+    """
+    Send a bug report, feature request, or feedback about the ChatMcpSpace
+    website itself. Only call after the user explicitly approved sending it.
+    """
+    return _api_request("POST", "/agent/feedback", {"type": report_type, "message": message})
 
 
 def _wait_for_responses(poll_interval: int = 10, timeout: int = 0):
@@ -6712,6 +6789,7 @@ ${hasEncryption ? `def main():
   uv run message_helper.py dm <agentName> <message> [--priority 0|1|2] [--provider <p>] [--model <m>]
   uv run message_helper.py dm check [--from <agentName>]
   uv run message_helper.py set-model <agentName> [--provider <p>] [--model <m>]   (Chief of Staff only)
+  uv run message_helper.py report bug|feature|feedback <description>   (only after the user agrees)
   uv run message_helper.py upload <file-path>
   uv run message_helper.py download <attachment-id> <save-path> --iv <iv-base64> --tag <tag-base64>
 
@@ -7072,6 +7150,8 @@ Attachment Commands:
                 group_str = f" (groups: {', '.join(groups)})" if groups else ""
                 mode = agent.get("interAgentMode", "unknown")
                 print(f"  - {agent.get('agentName')} ({agent.get('agentType', 'standard')}) [{status}] mode={mode}{group_str}")
+                if agent.get("shared"):
+                    print(f"    Shared DM address: {agent.get('address')} (requires shared DM password and salt)")
 
     elif command == "dm":
         # dm <agent> <message> OR dm check [--from <agent>]
@@ -7248,6 +7328,22 @@ Attachment Commands:
             print("Self-terminate failed: " + str(result.get('error', 'Unknown error')))
             sys.exit(1)
 
+    elif command == "report":
+        report_type = message_parts[0] if message_parts else ""
+        report_text = " ".join(message_parts[1:]).strip()
+        if report_type not in ("bug", "feature", "feedback") or not report_text:
+            print("Usage: uv run message_helper.py report bug|feature|feedback <description>")
+            print("Only send after the user explicitly agreed to report it.")
+            sys.exit(1)
+        result = send_site_feedback(report_type, report_text)
+        if result.get("_statusCode") == 201:
+            print("Report sent to the ChatMcpSpace team. Thank you!")
+        else:
+            error = result.get("error")
+            detail = error.get("message") if isinstance(error, dict) else error
+            print(f"Error: could not send report: {detail or result}")
+            sys.exit(1)
+
     elif command == "lineage":
         result = get_lineage()
         ancestors = result.get("ancestors", [])
@@ -7300,6 +7396,7 @@ def main():
   uv run message_helper.py dm <agentName> <message> [--priority 0|1|2] [--provider <p>] [--model <m>]
   uv run message_helper.py dm check [--from <agentName>]
   uv run message_helper.py set-model <agentName> [--provider <p>] [--model <m>]   (Chief of Staff only)
+  uv run message_helper.py report bug|feature|feedback <description>   (only after the user agrees)
 
 Agent Spawning:
   uv run message_helper.py spawn <childName> [instructions] [--provider <p>] [--model <m>] [--project-path <dir>] [--group <id-or-name>] [--no-inherit-groups] [--can-spawn]
@@ -7522,6 +7619,8 @@ Agent Spawning:
                 group_str = f" (groups: {', '.join(groups)})" if groups else ""
                 mode = agent.get("interAgentMode", "unknown")
                 print(f"  - {agent.get('agentName')} ({agent.get('agentType', 'standard')}) [{status}] mode={mode}{group_str}")
+                if agent.get("shared"):
+                    print(f"    Shared DM address: {agent.get('address')} (requires shared DM password and salt)")
 
     elif command == "dm":
         # dm <agent> <message> OR dm check [--from <agent>]
@@ -7696,6 +7795,22 @@ Agent Spawning:
             print("  Orphan action: " + str(result.get('orphanAction', 'none')))
         else:
             print("Self-terminate failed: " + str(result.get('error', 'Unknown error')))
+            sys.exit(1)
+
+    elif command == "report":
+        report_type = message_parts[0] if message_parts else ""
+        report_text = " ".join(message_parts[1:]).strip()
+        if report_type not in ("bug", "feature", "feedback") or not report_text:
+            print("Usage: uv run message_helper.py report bug|feature|feedback <description>")
+            print("Only send after the user explicitly agreed to report it.")
+            sys.exit(1)
+        result = send_site_feedback(report_type, report_text)
+        if result.get("_statusCode") == 201:
+            print("Report sent to the ChatMcpSpace team. Thank you!")
+        else:
+            error = result.get("error")
+            detail = error.get("message") if isinstance(error, dict) else error
+            print(f"Error: could not send report: {detail or result}")
             sys.exit(1)
 
     elif command == "lineage":
@@ -7886,6 +8001,22 @@ uv run message_helper.py wait
 Commands auto-return after ~90 seconds to avoid sandbox timeouts.
 If you get **CONTINUE_WAITING**, run the \`wait\` command to keep waiting.
 
+## Reporting Bugs, Feature Requests & Feedback about ChatMcpSpace
+You can help improve the ChatMcpSpace website (dashboard, chat, sharing, agent CLI) itself:
+
+\`\`\`bash
+uv run message_helper.py report bug "What happened, what you expected, steps to reproduce"
+uv run message_helper.py report feature "What the user wants and why"
+uv run message_helper.py report feedback "General feedback about the site"
+\`\`\`
+
+Rules:
+- **Always ask the user first.** When something looks relevant — a ChatMcpSpace error, a UI glitch the user mentions, a missing feature they wish for, or clear praise/complaints about the site — ask once, briefly, e.g. "This looks like a ChatMcpSpace bug. Would you like me to report it to the ChatMcpSpace team?"
+- Send the report **only after the user explicitly says yes.** If they decline or do not answer, do not send it and do not ask again about the same issue.
+- Only report issues about ChatMcpSpace itself, not about the user's own project or tasks.
+- Describe the problem in your own words. Never include secrets, API keys, passwords, decrypted message content, file contents, or personal data unless the user explicitly asks you to include a specific detail.
+- Reports are anonymous (no user or agent id is stored). Tell the user once it has been sent.
+
 ## Self-Update Flow
 - During \`check\` / \`wait\`, the backend may send a system message that an update is available.
 - When that appears, ask the user for explicit approval before updating.
@@ -7995,7 +8126,7 @@ uv run message_helper.py lineage
 ### Spawn Rules
 - Max depth: 3 levels (root → child → grandchild → great-grandchild)
 - Max 10 children per agent
-- Max 75 total agents per user
+- Max 100 total agents per user
 - Cooldown: 1 spawn per minute per agent
 - Child inherits your model/provider config unless overridden
 - Child inherits all of your groups by default (recommended)
@@ -9289,7 +9420,7 @@ load_config() {
         # Only override PROJECT_ROOT if the configured path actually exists on
         # this machine. Otherwise the config may carry a stale server-side path
         # (e.g. a CoS installed on a different machine where the server lives
-        # in /home/ubuntu/projects/AgentsMCPspace) and the cd "$PROJECT_ROOT"
+        # on a different machine) and the cd "$PROJECT_ROOT"
         # later in run_agent_command would fail with 'No such file or directory'.
         if [ -n "$new_project_path" ] && [ -d "$new_project_path" ]; then
             PROJECT_ROOT="$new_project_path"
@@ -9589,7 +9720,7 @@ validate_config() {
                 fi
             fi
 
-            if [ "$APPROVAL_MODE" = "full-auto" ] && [ "$SANDBOX_MODE" = "none" ]; then
+            if { [ "$APPROVAL_MODE" = "full-auto" ] || [ "$APPROVAL_MODE" = "bypassPermissions" ]; } && [ "$SANDBOX_MODE" = "none" ]; then
                 local skip_allowed
                 skip_allowed=$(echo "$ALLOWED_PERMISSIONS" | jq -r ".antigravity.\\"--dangerously-skip-permissions\\" // false" 2>/dev/null)
                 if [ "$skip_allowed" != "true" ]; then
@@ -9928,9 +10059,9 @@ check_for_messages() {
     fi
 
     # Only check for inter-agent DMs if enabled in allowed permissions
-    if [ -n "$ALLOWED_PERMISSIONS" ] && [ "$ALLOWED_PERMISSIONS" != "{}" ]; then
+    if [ -n "$ALLOWED_PERMISSIONS" ]; then
         local inter_agent_enabled
-        inter_agent_enabled=$(echo "$ALLOWED_PERMISSIONS" | jq -r '.inter_agent.enabled // false' 2>/dev/null)
+        inter_agent_enabled=$(echo "$ALLOWED_PERMISSIONS" | jq -r 'if . == {} then true else .inter_agent.enabled // false end' 2>/dev/null)
 
         if [ "$inter_agent_enabled" = "true" ]; then
             local dm_messages
@@ -10158,12 +10289,26 @@ send_working_heartbeat() {
         return 11
     fi
 
+    # Cache the fingerprint for this listener; never send the raw machine identifier.
+    if [ -z "\${CHATSPACE_DEVICE_NAME:-}" ]; then
+        CHATSPACE_DEVICE_NAME=$(hostname 2>/dev/null || echo unknown)
+        local device_identity="$CHATSPACE_DEVICE_NAME"
+        if [ -s /etc/machine-id ]; then device_identity=$(cat /etc/machine-id); fi
+        if command -v sha256sum >/dev/null 2>&1; then
+            CHATSPACE_DEVICE_ID=$(printf '%s' "$device_identity" | sha256sum | cut -d ' ' -f 1)
+        else
+            CHATSPACE_DEVICE_ID=$(printf '%s' "$device_identity" | shasum -a 256 2>/dev/null | cut -d ' ' -f 1)
+        fi
+    fi
+
     local payload
     payload=$(jq -nc \\
+        --arg deviceId "$CHATSPACE_DEVICE_ID" \\
+        --arg deviceName "$CHATSPACE_DEVICE_NAME" \\
         --arg agent "$AGENT_NAME" \\
         --arg note "$WORKING_HEARTBEAT_NOTE" \\
         --argjson working "$working_flag" \\
-        '{agentName:$agent, isWorking:$working, noteType:"working_status", note:$note}' 2>/dev/null || echo "")
+        '{agentName:$agent, isWorking:$working, noteType:"working_status", note:$note, device:{id:$deviceId,name:$deviceName}}' 2>/dev/null || echo "")
 
     if [ -z "$payload" ]; then
         return 11
@@ -10373,6 +10518,11 @@ build_agent_prompt() {
         response_instructions="Write your response to $STATE_DIR/.agent_response.txt (format: \\"message\\" or \\"message|priority\\")\\n   Example: echo \\"Task completed\\" > $STATE_DIR/.agent_response.txt"
     elif [ "$SANDBOX_MODE" = "workspace-write" ]; then
         sandbox_info="You have FILE SYSTEM ACCESS (Workspace). \\n- You CANNOT access the network directly.\\n- You can READ and WRITE files within your workspace using standard bash commands.\\n- Use local tools only."
+        case "$MODEL_PROVIDER" in
+            codex|codex-cli|default|openai|openrouter|ollama|lmstudio)
+                sandbox_info="You have workspace file access and network access. You can call external APIs and use message_helper.py. File writes are limited to the workspace."
+                ;;
+        esac
         response_instructions="Write your response to $STATE_DIR/.agent_response.txt (format: \\"message\\" or \\"message|priority\\")\\n   Example: echo \\"Task completed\\" > $STATE_DIR/.agent_response.txt"
     else
         sandbox_info="You are in READ-ONLY SANDBOX mode. You cannot access the network or write files."
@@ -11100,7 +11250,7 @@ run_agent() {
 
             case "$SANDBOX_MODE" in
                 none)
-                    if [ "$APPROVAL_MODE" = "full-auto" ]; then
+                    if [ "$APPROVAL_MODE" = "full-auto" ] || [ "$APPROVAL_MODE" = "bypassPermissions" ]; then
                         agy_args+=("--dangerously-skip-permissions")
                     fi
                     ;;
@@ -11308,7 +11458,7 @@ run_agent() {
             else
                 # Handle approval mode separately
                 if [ "$APPROVAL_MODE" = "full-auto" ]; then
-                    codex_args+=("--full-auto")
+                    codex_args+=("-c" 'approval_policy="never"')
                 fi
                 
                 # Handle sandbox mode
@@ -11317,7 +11467,7 @@ run_agent() {
                         codex_args+=("--sandbox" "danger-full-access")
                         ;;
                     workspace-write)
-                        codex_args+=("--sandbox" "workspace-write")
+                        codex_args+=("--sandbox" "workspace-write" "-c" "sandbox_workspace_write.network_access=true")
                         ;;
                     read-only)
                         codex_args+=("--sandbox" "read-only")
@@ -11384,6 +11534,12 @@ run_agent() {
                 log WARN "Agent command interrupted by stop request"
                 rm -f "$stdout_capture"
                 return 143
+            fi
+            if [ "$cli_exit" -ne 0 ]; then
+                log ERROR "Codex CLI failed (exit $cli_exit); see provider diagnostics in runner log"
+                send_error_message "Codex CLI failed (exit $cli_exit). Check the runner log for diagnostics." "1"
+                rm -f "$stdout_capture" "$AGENT_RESPONSE_FILE"
+                return "$cli_exit"
             fi
             log SUCCESS "Agent session completed"
             
@@ -11462,7 +11618,7 @@ run_agent() {
             else
                 # Handle approval mode separately
                 if [ "$APPROVAL_MODE" = "full-auto" ]; then
-                    codex_args+=("--full-auto")
+                    codex_args+=("-c" 'approval_policy="never"')
                 fi
                 
                 # Handle sandbox mode
@@ -11470,7 +11626,7 @@ run_agent() {
                     none)
                         codex_args+=("--sandbox" "danger-full-access")
                         ;;
-                    workspace-write) codex_args+=("--sandbox" "workspace-write") ;;
+                    workspace-write) codex_args+=("--sandbox" "workspace-write" "-c" "sandbox_workspace_write.network_access=true") ;;
                     read-only) codex_args+=("--sandbox" "read-only") ;;
                 esac
             fi
@@ -11563,6 +11719,12 @@ run_agent() {
                 log WARN "Agent command interrupted by stop request"
                 rm -f "$stdout_capture"
                 return 143
+            fi
+            if [ "$cli_exit" -ne 0 ]; then
+                log ERROR "Codex CLI failed (exit $cli_exit); see provider diagnostics in runner log"
+                send_error_message "Codex CLI failed (exit $cli_exit). Check the runner log for diagnostics." "1"
+                rm -f "$stdout_capture" "$AGENT_RESPONSE_FILE"
+                return "$cli_exit"
             fi
             log SUCCESS "Agent session completed"
             
@@ -11752,9 +11914,9 @@ main() {
     fi
 
     # Auto-discover peer agents on startup if inter-agent is enabled
-    if [ -n "$ALLOWED_PERMISSIONS" ] && [ "$ALLOWED_PERMISSIONS" != "{}" ]; then
+    if [ -n "$ALLOWED_PERMISSIONS" ]; then
         local ia_enabled
-        ia_enabled=$(echo "$ALLOWED_PERMISSIONS" | jq -r '.inter_agent.enabled // false' 2>/dev/null)
+        ia_enabled=$(echo "$ALLOWED_PERMISSIONS" | jq -r 'if . == {} then true else .inter_agent.enabled // false end' 2>/dev/null)
         if [ "$ia_enabled" = "true" ]; then
             log INFO "Discovering available agents..."
             local peers
@@ -12105,8 +12267,24 @@ if [ "\${CHATSPACE_TRUSTED_SHARING:-1}" = "1" ] && command -v node >/dev/null 2>
         chmod 700 "$sharing_bundle"
         mv "$sharing_bundle" "$STATE_DIR/shared-runner.js"
         export CHATSPACE_BRIDGE_STATE="$STATE_DIR/shared-agent.json"
-        export CHATSPACE_SHARED_PROFILES="$STATE_DIR/shared-profiles.json"
-        export CHATSPACE_SHARED_EXPORT_DIR="$STATE_DIR/shared-exports"
+        # Windows-mounted WSL folders can ignore chmod. Resolve credential
+        # storage before launch while keeping the original project workspace.
+        if ! sharing_storage=$(node "$STATE_DIR/shared-runner.js" storage-directory); then
+            log ERROR "Could not prepare private sharing storage"
+            exit 1
+        fi
+        export CHATSPACE_BRIDGE_STATE="$sharing_storage/shared-agent.json"
+        export CHATSPACE_SHARED_PROFILES="$sharing_storage/shared-profiles.json"
+        export CHATSPACE_SHARED_EXPORT_DIR="$sharing_storage/shared-exports"
+        sharing_lock="$CHATSPACE_BRIDGE_STATE.lock"
+        if [ -f "$sharing_lock" ]; then
+            lock_pid=$(tr -cd '0-9' < "$sharing_lock" 2>/dev/null || true)
+            if [ -n "$lock_pid" ] && ps -p "$lock_pid" -o args= 2>/dev/null | grep -q "shared-runner.js"; then
+                log ERROR "This agent's shared listener is already running (PID $lock_pid). Use agent-cli.sh --restart <agent> to replace it."
+                exit 0
+            fi
+            rm -f "$sharing_lock"
+        fi
         export CHATSPACE_SHARED_MANAGED_RUNNER="$SCRIPT_DIR/$(basename "\${BASH_SOURCE[0]}")"
         export CHATSPACE_SHARED_PROJECT="$PROJECT_ROOT"
         export CHATSPACE_SHARED_PROVIDER="$MODEL_PROVIDER"

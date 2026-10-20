@@ -742,6 +742,7 @@ router.get('/agents', async (req, res) => {
           agents.agent_id,
           agents.agent_name,
           agents.agent_type,
+          agents.runtime_config,
           ebc.provider as external_provider,
           agents.position,
           agents.last_seen_at,
@@ -770,6 +771,7 @@ router.get('/agents', async (req, res) => {
           agents.agent_id,
           agents.agent_name,
           agents.agent_type,
+          agents.runtime_config,
           ebc.provider,
           agents.position,
           agents.last_seen_at,
@@ -795,6 +797,7 @@ router.get('/agents', async (req, res) => {
           agents.agent_id,
           agents.agent_name,
           agents.agent_type,
+          agents.runtime_config,
           NULL::text as external_provider,
           agents.position,
           agents.last_seen_at,
@@ -821,6 +824,7 @@ router.get('/agents', async (req, res) => {
           agents.agent_id,
           agents.agent_name,
           agents.agent_type,
+          agents.runtime_config,
           agents.position,
           agents.last_seen_at,
           agents.is_working,
@@ -859,6 +863,7 @@ router.get('/agents', async (req, res) => {
         agentId: row.agent_id,
         name: row.agent_name,
         agentType: row.agent_type || 'standard',
+        device: require('../utils/agentDevice').normalizeDevice(row.runtime_config?.device),
         externalProvider: row.external_provider || null,
         position: row.position,
         isWorking,
@@ -3582,7 +3587,7 @@ router.get('/agent-messages', async (req, res) => {
       SELECT 
         am.agent_message_id,
         am.sender_agent_id,
-        sender.agent_name as sender_name,
+        sender.agent_name as sender_name, sender.user_id as sender_owner, recipient.user_id as recipient_owner,
         am.recipient_agent_id,
         recipient.agent_name as recipient_name,
         am.content,
@@ -3592,11 +3597,23 @@ router.get('/agent-messages', async (req, res) => {
       FROM agent_messages am
       JOIN agents sender ON am.sender_agent_id = sender.agent_id
       JOIN agents recipient ON am.recipient_agent_id = recipient.agent_id
-      WHERE sender.user_id = $1
-        AND recipient.user_id = $1
+      WHERE (sender.user_id = $1 OR recipient.user_id = $1)
         AND am.created_at > (NOW()::timestamp - INTERVAL '${hours} hours')
       ORDER BY am.created_at DESC
     `, [userId]);
+
+    // Account-private DMs stay scoped to this user. Cross-account metadata is
+    // included only for currently permitted peers, and never includes content.
+    const peerCache = new Map();
+    const visible = [];
+    for (const row of result.rows) {
+      if (row.sender_owner === row.recipient_owner) { visible.push(row); continue; }
+      const ownedId = row.sender_owner === userId ? row.sender_agent_id : row.recipient_agent_id;
+      const otherId = row.sender_owner === userId ? row.recipient_agent_id : row.sender_agent_id;
+      if (!peerCache.has(ownedId)) peerCache.set(ownedId, new Set((await require('../shared/a2aAccess').peers(userId, ownedId)).map(a => a.agent_id)));
+      if (peerCache.get(ownedId).has(otherId)) visible.push({...row, content: null});
+    }
+    result.rows = visible;
 
     // Build connections summary (unique pairs of communicating agents)
     const connectionMap = new Map();
@@ -3621,6 +3638,7 @@ router.get('/agent-messages', async (req, res) => {
       conn.messageCount++;
       if (!conn.lastMessage || new Date(row.created_at) > new Date(conn.lastMessage)) {
         conn.lastMessage = row.created_at.toISOString();
+        conn.lastSenderId = row.sender_agent_id;
       }
     }
 

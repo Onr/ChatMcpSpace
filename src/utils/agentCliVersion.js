@@ -8,7 +8,7 @@
  *   2) Agent self-reporting during message polling
  *   3) Outdated-agent detection and update prompting in the dashboard
  */
-const AGENT_CLI_VERSION = '1.5.11';
+const AGENT_CLI_VERSION = '1.5.19';
 
 function normalizeCliVersion(value) {
   if (typeof value !== 'string') return null;

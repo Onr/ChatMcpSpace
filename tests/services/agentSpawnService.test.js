@@ -262,7 +262,7 @@ describe('agentSpawnService', () => {
         path.join(parentStateDir, 'allowed_permissions.json'),
         JSON.stringify({
           codex: { '--sandbox': ['workspace-write'] },
-          inter_agent: { enabled: true, mode: 'listen_all', groups: [] }
+          inter_agent: { enabled: false, mode: 'disabled', groups: [] }
         }, null, 2)
       );
 
@@ -278,6 +278,7 @@ describe('agentSpawnService', () => {
         ['permission-aligned-child', userId]
       );
 
+      expect(childRow.rows[0].allowed_permissions.inter_agent).toMatchObject({ enabled: true, mode: 'listen_all' });
       expect(childRow.rows[0].runtime_config.model_provider).toBe('codex');
       expect(childRow.rows[0].runtime_config.sandbox_mode).toBe('workspace-write');
       expect(childRow.rows[0].allowed_permissions.codex['--sandbox']).toContain('workspace-write');
@@ -390,30 +391,30 @@ describe('agentSpawnService', () => {
       })).rejects.toThrow(/children/i);
     });
 
-    it('should allow up to 75 total agents per user and reject the 76th', async () => {
+    it('should allow up to 100 total agents per user and reject the 101st', async () => {
       const parent = await createAgent('global-cap-parent', { canSpawn: true });
       const { validateSpawnRequest, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
 
-      expect(SPAWN_LIMITS.GLOBAL_AGENT_CAP).toBe(75);
+      expect(SPAWN_LIMITS.GLOBAL_AGENT_CAP).toBe(100);
 
       let activeCount = Number((await queryFn(
         'SELECT COUNT(*)::int AS count FROM agents WHERE user_id = $1',
         [userId]
       )).rows[0].count);
 
-      // Fill to 74 active agents, so one more spawn is valid.
+      // Fill to 99 active agents, so one more spawn is valid.
       for (let i = 0; activeCount < SPAWN_LIMITS.GLOBAL_AGENT_CAP - 1; i++, activeCount++) {
         await createAgent(`global-cap-filler-${i}`);
       }
 
-      const validAtCapMinusOne = await validateSpawnRequest(userId, parent.agent_id, 'agent-75');
+      const validAtCapMinusOne = await validateSpawnRequest(userId, parent.agent_id, 'agent-100');
       expect(validAtCapMinusOne).toMatchObject({ valid: true });
 
-      await createAgent('agent-75');
+      await createAgent('agent-100');
 
-      await expect(validateSpawnRequest(userId, parent.agent_id, 'agent-76')).resolves.toMatchObject({
+      await expect(validateSpawnRequest(userId, parent.agent_id, 'agent-101')).resolves.toMatchObject({
         valid: false,
-        error: 'Global agent cap reached (75 active agents).'
+        error: 'Global agent cap reached (100 active agents).'
       });
     });
 

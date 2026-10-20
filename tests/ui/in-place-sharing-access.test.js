@@ -207,6 +207,7 @@ test('the first successful poll clears pending access even when the shared conve
     selectedChatContext: { mode: 'shared', conversationId: 'room', agentId: 'agent' },
     window: { InPlaceChat: { loadTimeline } },
     conversationCache: new Map(),
+    liveRefreshScrollOptions: () => ({}),
     isStaleConversationLoad: () => false,
     displayMessages,
     console: { warn: jest.fn() }

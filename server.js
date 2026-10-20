@@ -28,6 +28,7 @@ const { sessionRedisClient } = require('./src/utils/redisClient');
 const { requestLogger } = require('./src/middleware/loggingMiddleware');
 const { csrfProtection, validateCsrfToken } = require('./src/middleware/csrfMiddleware');
 const { safeJsonForScript } = require('./src/utils/safeJsonHelper');
+const { assetUrl } = require('./src/utils/assetUrl');
 const { isLocalAuthMode, isLocalModeRequested, isGoogleAuthConfigured } = require('./src/utils/localMode');
 
 // Check for Google Cloud Service Account Key
@@ -50,6 +51,8 @@ const { isPublicHttpsConfigured } = require('./src/utils/publicHttps');
 
 // Create Express app
 const app = express();
+// Templates stamp local CSS/JS URLs with the file's mtime (see assetUrl.js).
+app.locals.assetUrl = assetUrl;
 
 // Get port from environment or use default
 const PORT = parseInt(process.env.PORT || '3000', 10);

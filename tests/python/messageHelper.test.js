@@ -448,7 +448,7 @@ def fake_api(method, path, data=None):
             }
         }
     if method == "GET" and path.startswith("/agent/messages/history"):
-        return {"messages": [{"content": "local child ready"}]}
+        return {"messages": [{"content": "local child ready", "type": "agent_message", "from": "IdeaBot", "timestamp": mod.time.strftime("%Y-%m-%dT%H:%M:%SZ", mod.time.gmtime())}]}
     if method == "POST" and path == "/agent/messages/direct":
         return {"status": "sent", "messageId": "dm-1"}
     if method == "POST" and path == "/agent/messages":
@@ -505,6 +505,60 @@ print(json.dumps({"spawned": spawned, "calls": call_log, "decryptedNotice": decr
     expect(payload.childCfg.project_path).toBe('/tmp/work-from-api');
     expect(payload.childCfg.model).toBe('gpt-5');
     expect(payload.childPerms.codex['--sandbox']).toContain('workspace-write');
+    expect(payload.calls.find(call => call.localRunnerCmd).localRunnerCmd.slice(0, 4)).toEqual(['bash', '-lc', 'exec bash "$1"', 'chatspace-agent']);
+  });
+
+  it.each([false, true])('spawn writes DM permissions without API runtime (parent permissions present: %s)', (withParentPermissions) => {
+    const fixture = createHelperFixture({ encryptionEnabled: false });
+    const result = runHelper(fixture.helperPath, `
+import os, shutil
+parent_state = os.path.join(os.path.dirname(mod.__file__), "agent_state")
+os.makedirs(parent_state, exist_ok=True)
+if ${withParentPermissions ? 'True' : 'False'}:
+    with open(os.path.join(parent_state, "allowed_permissions.json"), "w") as f:
+        json.dump({"codex": {"--sandbox": ["read-only"]}, "inter_agent": {"enabled": False}}, f)
+mod.send_dm = lambda *args, **kwargs: {"status": "sent"}
+mod.send_message = lambda *args, **kwargs: {"status": "sent"}
+mod._api_request = lambda *args, **kwargs: {"success": True, "childAgent": {"agentName": os.path.basename(os.path.dirname(mod.__file__)) + "-child"}}
+child = mod.spawn_agent("child", "Review this")
+with open(os.path.join(child["_localFolderCreated"], "agent_state", "allowed_permissions.json")) as f:
+    print(json.dumps(json.load(f)))
+shutil.rmtree(child["_localFolderCreated"])
+`);
+    expect(result.status).toBe(0);
+    const permissions = JSON.parse(result.stdout.trim());
+    expect(permissions.inter_agent).toMatchObject({ enabled: true, mode: 'listen_all' });
+    expect(permissions.codex['--sandbox']).toEqual(withParentPermissions ? ['read-only'] : ['workspace-write', 'read-only']);
+  });
+
+  it.each(['error', 'old', 'user'])('does not verify a living spawn on %s history', (historyCase) => {
+    const fixture = createHelperFixture({ encryptionEnabled: false });
+    const result = runHelper(fixture.helperPath, `
+import os, shutil
+child_name = os.path.basename(os.path.dirname(mod.__file__)) + "-health-child"
+mod.time.sleep = lambda seconds: None
+mod.os.kill = lambda *args: None
+mod.send_dm = lambda *args, **kwargs: {"status": "sent"}
+mod.send_message = lambda *args, **kwargs: {"status": "sent"}
+def fake_api(method, path, data=None):
+    if path == "/agent/spawn":
+        return {"success": True, "childAgent": {"agentName": child_name, "loopPid": 123}}
+    if "history" in path:
+        if "${historyCase}" == "error":
+            raise RuntimeError("history unavailable")
+        return {"messages": [{"content": "not a fresh child response", "from": child_name,
+            "type": "user_response" if "${historyCase}" == "user" else "agent_message",
+            "timestamp": "2000-01-01T00:00:00Z" if "${historyCase}" == "old" else "2099-01-01T00:00:00Z"}]}
+    return {}
+mod._api_request = fake_api
+child = mod.spawn_agent(child_name, "Review this")
+print(json.dumps({"verified": child["_verified"], "error": child["_verifyError"]}))
+shutil.rmtree(child["_localFolderCreated"])
+`);
+    expect(result.status).toBe(0);
+    const outcome = JSON.parse(result.stdout.trim());
+    expect(outcome.verified).toBe(false);
+    expect(outcome.error).toBeTruthy();
   });
 
   it('spawn CLI parsing keeps provider/model flags out of instructions', () => {
@@ -894,4 +948,51 @@ print(json.dumps(cases))
       expect(forced.title).toBe('T');
     });
   });
+});
+
+describe('shared-agent DM encryption', () => {
+  it('uses a separate DM key across account passwords and requires it before sending', () => {
+    const fixture = createHelperFixture({ encryptionEnabled: true });
+    const result = runHelper(fixture.helperPath, `
+address = "11111111-1111-4111-8111-111111111111"
+mod.discover_agents = lambda: {"agents": [{"shared": True, "address": address}]}
+sent = []
+mod._api_request = lambda method, path, payload: sent.append(payload) or {"status": "sent"}
+mod.Config.group_password = ""
+mod.Config.group_salt = ""
+blocked = mod.send_dm(address, "Do the task")
+assert not sent and "error" in blocked
+mod.Config.group_password = "separate-team-secret"
+mod.Config.group_salt = "MTIzNDU2Nzg5MDEyMzQ1Ng=="
+mod.send_dm(address, "Do the task")
+payload = sent[0]
+assert payload["encryptionScope"] == "shared_dm_password"
+assert payload["encrypted"] and payload["content"] != "Do the task"
+mod.Config.user_password = "a-completely-different-account-password"
+assert mod._decrypt_inter_agent_message(payload["content"]) == "Do the task"
+print("shared-roundtrip-ok")
+`);
+    expect(result.status).toBe(0);expect(result.stdout).toContain('shared-roundtrip-ok');
+  });
+});
+
+it('trusted runtime helpers attach the runtime fence only to outbound DMs', () => {
+  const fixture = createHelperFixture({ encryptionEnabled: true });
+  const result = runHelper(fixture.helperPath, `
+from types import SimpleNamespace
+calls = []
+def fake(url, **kwargs):
+    calls.append(kwargs["headers"])
+    return SimpleNamespace(json=lambda: {}, status_code=200, headers={})
+mod.requests.post = fake
+mod.requests.get = fake
+mod._api_request("POST", "/agent/messages/direct", {})
+mod._api_request("GET", "/agent/messages/direct")
+mod._api_request("POST", "/agent/messages", {})
+assert calls[0]["X-Shared-Runtime"] == "runtime-fixture"
+assert "X-Shared-Runtime" not in calls[1]
+assert "X-Shared-Runtime" not in calls[2]
+print("fence-ok")
+`, {CHATSPACE_SHARED_A2A_RUNTIME:'runtime-fixture'});
+  expect(result.status).toBe(0);expect(result.stdout).toContain('fence-ok');
 });

@@ -12,7 +12,7 @@ pnpm-debug.log*
 *.pid
 *.seed
 *.pid.lock
-data/
+data/db/
 
 # Environment files
 .env
@@ -125,3 +125,7 @@ keys/*.crt
 
 # Provider model cache (runtime metadata)
 data/provider-model-cache/
+
+# Generated launch video and browser verification output
+brag-output/
+test-results/

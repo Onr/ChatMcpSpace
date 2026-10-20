@@ -784,6 +784,12 @@ test('recovery controls stay bound to the requested room', async () => {
   const batchId = uid();
   await fixture.query("INSERT INTO shared_batches(id,conversation_id,agent_id,status) VALUES($1,$2,$3,'uncertain')", [batchId, secondRoom.id, agent]);
   await fixture.query("UPDATE shared_runtimes SET execution_id=$2,execution_kind='shared',execution_uncertain=TRUE WHERE agent_id=$1", [agent, batchId]);
+  expect((await s.get(alice.userId, room.id)).runtime).toMatchObject({
+    execution_id: null,
+    execution_conversation_id: null,
+    execution_kind: 'shared',
+    execution_uncertain: true
+  });
   await expect(s.control(alice.userId, room.id, {
     action: 'retry'
   })).rejects.toMatchObject({
@@ -799,6 +805,17 @@ test('recovery controls stay bound to the requested room', async () => {
     execution_id: batchId,
     execution_uncertain: true
   });
+});
+test('a recovery click cannot skip a different execution that started after the notice loaded', async () => {
+  await join();
+  const batchId = uid();
+  await fixture.query("INSERT INTO shared_batches(id,conversation_id,agent_id,status) VALUES($1,$2,$3,'uncertain')", [batchId, room.id, agent]);
+  await fixture.query("UPDATE shared_runtimes SET execution_id=$2,execution_kind='shared',execution_uncertain=TRUE WHERE agent_id=$1", [agent, batchId]);
+  await expect(s.control(alice.userId, room.id, { action: 'skip', executionId: uid() })).rejects.toMatchObject({ status: 409 });
+  expect((await s.agentBatch(agent, runtimeId, batchId)).status).toBe('uncertain');
+  await s.control(alice.userId, room.id, { action: 'skip', executionId: batchId });
+  expect((await s.agentBatch(agent, runtimeId, batchId)).status).toBe('skipped');
+  expect((await s.get(alice.userId, room.id)).runtime).toMatchObject({ execution_id: null, execution_uncertain: false });
 });
 test('shared operations require the current runtime credential epoch', async () => {
   const currentCredential = uid();

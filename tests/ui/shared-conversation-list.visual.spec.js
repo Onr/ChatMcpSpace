@@ -2,6 +2,8 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
+const { assetUrl } = require('../../src/utils/assetUrl');
+const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, ...data });
 const { JSDOM } = require('jsdom');
 
 const project = path.join(__dirname, '../..');
@@ -21,7 +23,7 @@ const contexts = [
 async function mount(page) {
   process.env.FEATURE_SHARED_CONVERSATIONS = 'true';
   process.env.FEATURE_IN_PLACE_AGENT_SHARING = 'true';
-  const html = await ejs.renderFile(path.join(project, 'views/dashboard.ejs'), {
+  const html = await renderTemplate(path.join(project, 'views/dashboard.ejs'), {
     agents: ['Personal Agent', 'Notes Agent'].map((name, i) => ({ agentId: `own-${i}`, name, position: i,
       highestPriority: 'low', unreadCount: 0, marbleSvg: '' })),
     groups: [], encryptionSalt: '', isGoogleAuth: false, csrfToken: 'fixture', cspNonce: 'fixture',

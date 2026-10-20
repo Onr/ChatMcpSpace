@@ -19,6 +19,7 @@ const AGENT_SCOPE_RULES = [
   { method: 'POST', path: /^\/messages$/, scope: 'agent.messages.write' },
   { method: 'POST', path: /^\/questions$/, scope: 'agent.questions.write' },
   { method: 'GET', path: /^\/responses$/, scope: 'agent.responses.read' },
+  { method: 'GET', path: /^\/config$/, scope: 'agent.responses.read' },
   { method: 'POST', path: /^\/responses\/ack$/, scope: 'agent.responses.read' },
   { method: 'POST', path: /^\/heartbeat$/, scope: 'agent.responses.read' },
   { method: 'GET', path: /^\/discover$/, scope: 'agent.discover.read' },

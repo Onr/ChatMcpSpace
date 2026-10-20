@@ -14,6 +14,26 @@ jest.mock('../../src/services/authService');
 jest.mock('../../src/services/emailService');
 jest.mock('../../src/utils/securityLogger');
 jest.mock('../../src/db/connection');
+jest.mock('../../src/services/agentCredentialService');
+
+describe('scoped agent config reads', () => {
+  const { verifyScopedCredential } = require('../../src/services/agentCredentialService');
+  test.each([
+    ['Native Agent', ['agent.responses.read'], true],
+    ['Other Agent', ['agent.responses.read'], false],
+    ['Native Agent', ['agent.messages.write'], false]
+  ])('config request for %s with %j has access=%s', async (agentName, scopes, allowed) => {
+    verifyScopedCredential.mockResolvedValue({ agentName: 'Native Agent', agentId: 'agent-id',
+      credentialId: 'credential-id', user: { userId: 'owner-id' }, scopes });
+    query.mockResolvedValue({ rows: [] });
+    const req = { method: 'GET', path: '/config', query: { agentName }, body: {},
+      headers: { 'x-agent-token': 'test-only' } };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() }, next = jest.fn();
+    await requireApiKey(req, res, next);
+    if (allowed) expect(next).toHaveBeenCalledTimes(1);
+    else { expect(next).not.toHaveBeenCalled(); expect(res.status).toHaveBeenCalledWith(403); }
+  });
+});
 
 describe('Auth Middleware', () => {
   let req, res, next;

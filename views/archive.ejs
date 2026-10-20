@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="<%= assetUrl('/css/style.css') %>">
   <style>
     .glass-panel {
       background: rgba(15, 23, 42, 0.5);
@@ -256,8 +256,8 @@
   <script nonce="<%= cspNonce %>">
     window.csrfToken = '<%= csrfToken %>';
   </script>
-  <script src="/js/notifications.js"></script>
-  <script src="/js/archive.js?v=<%= Date.now() %>"></script>
+  <script src="<%= assetUrl('/js/notifications.js') %>"></script>
+  <script src="<%= assetUrl('/js/archive.js') %>"></script>
 </body>
 
 </html>

@@ -87,6 +87,30 @@ function mount({ pending = false, activateOnRoom = false, delayRoom = false, inc
   return { calls, messages, waitForRoomRequest: () => roomStarted, releaseRoom: () => releaseRoom?.() };
 }
 
+test('access setup explains a maintenance response and clears the notice after recovery', async () => {
+  mount();
+  document.body.insertAdjacentHTML('beforeend', '<div id="sharingAccessNotice" hidden><span id="sharingAccessNoticeText"></span></div>');
+  const fetchRoom = window.fetch;
+  window.fetch = jest.fn().mockResolvedValueOnce({
+    ok: false, status: 503, json: async () => { throw new SyntaxError('Maintenance HTML'); }
+  }).mockImplementation(fetchRoom);
+  const owner = { ...context(), role: 'owner' };
+  const failed = await window.InPlaceChat.maintainOwnedAccess([owner]);
+  expect(failed[0].reason).toMatchObject({ status: 503, message: 'The server is temporarily unavailable. Please try again shortly.' });
+  expect(document.getElementById('sharingAccessNotice').hidden).toBe(false);
+  expect(document.getElementById('sharingAccessNoticeText').textContent).toContain('temporarily unavailable');
+
+  await window.InPlaceChat.maintainOwnedAccess([owner]);
+  expect(document.getElementById('sharingAccessNotice').hidden).toBe(true);
+});
+
+test('access setup retains a server error supplied as a string', async () => {
+  mount();
+  window.fetch = jest.fn().mockResolvedValue(response({ error: 'Please sign in again.' }, 401));
+  const failed = await window.InPlaceChat.maintainOwnedAccess([{ ...context(), role: 'owner' }]);
+  expect(failed[0].reason).toMatchObject({ status: 401, message: 'Please sign in again.' });
+});
+
 test('ordinary dashboard transport decrypts one shared timeline, attributes its sender, and advances the viewer read cursor', async () => {
   const { calls } = mount();
   const messages = await window.InPlaceChat.loadTimeline();
@@ -306,32 +330,82 @@ test('an accepted send remains successful if refreshing the transcript fails aft
   expect(window.sessionStorage.getItem('shared-dashboard-outbox:viewer-one:room-one')).toBeNull();
 });
 
-test('an uncertain execution gives the owner explicit recovery controls and hides them after switching', async () => {
+function mountRecoveryNotice(runtime = {}, control = async () => response({ ok: true })) {
   mount();
   document.body.insertAdjacentHTML('beforeend', '<aside id="sharingExecutionNotice" hidden><span id="sharingExecutionError"></span><button id="sharingExecutionSkip"></button><button id="sharingExecutionRetry"></button></aside>');
   const originalFetch = window.fetch;
   window.confirm = jest.fn().mockReturnValue(true);
   window.fetch = jest.fn(async (url, options) => {
     if (String(url).includes('/owner-history?')) return response({ messages: [], nextOffset: 0 });
-    if (String(url).endsWith('/control')) return response({ ok: true });
+    if (String(url).endsWith('/control')) return control(url, options);
     const result = await originalFetch(url, options);
     if (String(url) === '/api/user/shared/room-one') {
       const value = await result.json();
-      return response({ ...value, runtime: { execution_uncertain: true } });
+      return response({ ...value, runtime: { execution_uncertain: true, execution_kind: 'shared',
+        execution_id: 'batch-one', execution_conversation_id: 'room-one', ...runtime } });
     }
     return result;
   });
   window.InPlaceChat.setContext({ ...context(), role: 'owner' });
+}
+
+test.each(['skip', 'retry'])('%s recovers once without a browser confirmation and stale polls cannot show it again', async action => {
+  const runtime = {};
+  mountRecoveryNotice(runtime);
   await window.InPlaceChat.loadTimeline();
   expect(document.getElementById('sharingExecutionNotice').hidden).toBe(false);
-  const skip = document.getElementById('sharingExecutionSkip').onclick;
-  await skip();
-  expect(window.fetch.mock.calls.some(([url, options]) => url.endsWith('/control') && JSON.parse(options.body).action === 'skip')).toBe(true);
+  const recover = document.getElementById(action === 'skip' ? 'sharingExecutionSkip' : 'sharingExecutionRetry').onclick;
+  await recover();
+  const requests = window.fetch.mock.calls.filter(([url]) => url.endsWith('/control'));
+  expect(requests).toHaveLength(1);
+  expect(JSON.parse(requests[0][1].body)).toEqual({ action, executionId: 'batch-one' });
+  expect(window.confirm).not.toHaveBeenCalled();
   expect(document.getElementById('sharingExecutionNotice').hidden).toBe(true);
+  await window.InPlaceChat.loadTimeline();
+  expect(document.getElementById('sharingExecutionNotice').hidden).toBe(true);
+  runtime.execution_id = 'batch-two';
+  await window.InPlaceChat.loadTimeline();
+  expect(document.getElementById('sharingExecutionNotice').hidden).toBe(false);
   window.InPlaceChat.setContext({ ...context(), conversationId: 'another-room' });
   const count = window.fetch.mock.calls.length;
-  await skip();
+  await recover();
   expect(window.fetch.mock.calls).toHaveLength(count);
+});
+
+test.each([
+  { execution_conversation_id: 'another-room' },
+  { execution_kind: 'private' },
+  { execution_id: null },
+  { execution_uncertain: false }
+])('recovery stays hidden for unrelated or finished executions: %j', async runtime => {
+  mountRecoveryNotice(runtime);
+  await window.InPlaceChat.loadTimeline();
+  expect(document.getElementById('sharingExecutionNotice').hidden).toBe(true);
+  expect(window.fetch.mock.calls.some(([url]) => url.endsWith('/control'))).toBe(false);
+});
+
+test('recovery disables both actions across polls and an error permits another attempt', async () => {
+  let finish;
+  const control = jest.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValue(response({ ok: true }));
+  mountRecoveryNotice({}, control);
+  await window.InPlaceChat.loadTimeline();
+  const retry = document.getElementById('sharingExecutionRetry');
+  const skip = document.getElementById('sharingExecutionSkip');
+  const first = retry.onclick();
+  await window.InPlaceChat.loadTimeline();
+  expect(retry.disabled).toBe(true);
+  expect(skip.disabled).toBe(true);
+  await skip.onclick();
+  expect(control).toHaveBeenCalledTimes(1);
+  finish(response({ error: { message: 'Connection interrupted' } }, 503));
+  await first;
+  expect(document.getElementById('sharingExecutionError').textContent).toBe('Connection interrupted');
+  expect(retry.disabled).toBe(false);
+  expect(skip.disabled).toBe(false);
+  await retry.onclick();
+  expect(control).toHaveBeenCalledTimes(2);
+  expect(document.getElementById('sharingExecutionNotice').hidden).toBe(true);
 });
 
 test('ordinary shared chat advances its timeline cursor between polls', async () => {

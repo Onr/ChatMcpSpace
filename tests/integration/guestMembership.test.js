@@ -747,6 +747,22 @@ test('trusted guest messages run and publish without a device grant', async () =
   });
 });
 
+test('trusted coding tasks can pass ten minutes while retaining their originally issued deadline', async () => {
+  await useTrustedRuntime();
+  await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    const batch = await service.claim(agent, runtimeId);
+    await fixture.query('UPDATE shared_tasks SET claimed_at=$2 WHERE task_id=$1', [batch.id, new Date(Date.now() - 1200000)]);
+    const tasks = require('../../src/shared/taskAuthority');
+    expect(await tasks.authorize({ agentId: agent, runtimeId }, batch.id)).toMatchObject({ authorized: true });
+
+    const stored = (await fixture.query('SELECT execution_context FROM shared_tasks WHERE task_id=$1', [batch.id])).rows[0].execution_context;
+    stored.authorization.budget.maxRuntimeMs = 600000;
+    await fixture.query('UPDATE shared_tasks SET execution_context=$2 WHERE task_id=$1', [batch.id, JSON.stringify(stored)]);
+    expect(await tasks.authorize({ agentId: agent, runtimeId }, batch.id)).toMatchObject({ authorized: false });
+  });
+});
+
 test('trusted guest access revocation holds the result instead of publishing it', async () => {
   await useTrustedRuntime();
   await queuedGuestMessage();
@@ -978,4 +994,54 @@ test('agent delivery always includes the owner and excludes unselected users and
   expect(await threads.getChatContext(alice.userId, original.conversationId)).toMatchObject({ mode: 'private', state: 'preparing' });
   expect(await threads.getChatContext(alice.userId, room)).toMatchObject({ privateHistoryConversationId: original.conversationId });
   expect((await fixture.query('SELECT state,is_primary FROM agent_chat_threads WHERE conversation_id=$1', [original.conversationId])).rows[0]).toEqual({ state: 'preparing', is_primary: true });
+});
+
+test.each(['outcome_uncertain', 'cancellation_requested'])('trusted %s work automatically notifies its requester, releases the inbox, and is idempotent', async state => {
+  await useTrustedRuntime();
+  await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    const batch = await service.claim(agent, runtimeId);
+    await service.release(agent, runtimeId, batch.id, true);
+    // Notification recovery must work even after the execution deadline expired.
+    await fixture.query("UPDATE shared_tasks SET claimed_at=$2,state=$3 WHERE task_id=$1", [batch.id, new Date(Date.now() - 900000), state]);
+    const body = { message: trustedReply().messages[0] };
+    await expect(service.interrupt(agent, runtimeId, batch.id, body)).resolves.toEqual({ ok: true });
+    await expect(service.interrupt(agent, runtimeId, batch.id, body)).resolves.toEqual({ ok: true, existing: true });
+    expect((await fixture.query('SELECT execution_id,execution_uncertain FROM shared_runtimes WHERE agent_id=$1', [agent])).rows[0])
+      .toMatchObject({ execution_id: null, execution_uncertain: false });
+    expect((await fixture.query('SELECT state,current_authorization FROM shared_tasks WHERE task_id=$1', [batch.id])).rows[0])
+      .toMatchObject({ state: 'failed', current_authorization: { state: 'interrupted', recovery: 'automatic' } });
+    expect((await fixture.query('SELECT id FROM shared_messages WHERE id=$1', [body.message.id])).rows).toHaveLength(1);
+    const next = await queuedGuestMessage();
+    expect((await service.claim(agent, runtimeId)).messages.map(m => m.id)).toContain(next.id);
+  });
+});
+test('a different runtime cannot automatically close an interrupted trusted task', async () => {
+  await useTrustedRuntime(); await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    const batch = await service.claim(agent, runtimeId);
+    await expect(service.interrupt(agent, uid(), batch.id, { message: trustedReply().messages[0] }))
+      .rejects.toMatchObject({ status: 409 });
+    expect((await fixture.query('SELECT execution_id FROM shared_runtimes WHERE agent_id=$1', [agent])).rows[0].execution_id).toBe(batch.id);
+  });
+});
+test('automatic interruption recovery rejects restricted runtimes', async () => {
+  await useTrustedRuntime(); await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    const batch = await service.claim(agent, runtimeId);
+    await fixture.query('UPDATE shared_runtimes SET capabilities=$2 WHERE agent_id=$1', [agent, JSON.stringify({ executionMode: 'restricted' })]);
+    await expect(service.interrupt(agent, runtimeId, batch.id, { message: trustedReply().messages[0] }))
+      .rejects.toMatchObject({ status: 409 });
+  });
+});
+test('interruption after a guest is revoked sends the notice only to the owner', async () => {
+  await useTrustedRuntime(); await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    const batch = await service.claim(agent, runtimeId);
+    await fixture.query("UPDATE guest_principals SET status='revoked' WHERE guest_id=$1", [guestId]);
+    const message = trustedReply().messages[0];
+    await service.interrupt(agent, runtimeId, batch.id, { message });
+    const saved = (await fixture.query('SELECT recipient_principals FROM shared_messages WHERE id=$1', [message.id])).rows[0];
+    expect(saved.recipient_principals).toEqual([{ kind: 'user', id: alice.userId }]);
+  });
 });

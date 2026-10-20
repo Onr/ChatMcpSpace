@@ -19,9 +19,10 @@ Before publishing:
 2. Set your own repository URL in `README.md` and `package.json` if needed.
 3. Create fresh credentials for SMTP, Google OAuth, Redis, PostgreSQL, and session signing.
 4. If you want TTS support, provide your own `keys/service-account.json` outside git or use `GOOGLE_APPLICATION_CREDENTIALS`.
-5. Run `npm install` — `package.json` was updated (newer dependency versions, migrations
-   through 041) since `node_modules/` in this working copy was last installed.
-6. Run the database migrations in `src/db/migrations/` in order (up to `041_add_message_idempotency.sql`).
+5. Run `npm ci` to install the dependencies pinned in `package-lock.json`.
+6. Run `npm run migrate` to apply the migrations in `src/db/migrations/`, including
+   `060_shared_agent_a2a.sql`. Back up your database and configuration first.
+7. Review [the latest release notes](docs/RELEASE_2026-10-20.md).
 
 ## Self-hosting with built-in account verification
 

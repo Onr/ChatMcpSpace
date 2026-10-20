@@ -4,7 +4,7 @@
  *
  * Features:
  * - Spawn a new child agent with its own folder, config, and chat thread
- * - Enforce depth (max 3), fan-out (max 10), and global cap (max 75) limits
+ * - Enforce depth (max 3), fan-out (max 10), and global cap (max 100) limits
  * - Permission inheritance (child ≤ parent)
  * - Self-termination with safe child re-parenting
  * - Lineage tracking via DB + lineage.json
@@ -36,7 +36,7 @@ const {
 const SPAWN_LIMITS = {
   MAX_DEPTH: 3,            // 0=root → 3=great-grandchild
   MAX_CHILDREN: 10,        // per agent
-  GLOBAL_AGENT_CAP: 75,    // per user, total active agents
+  GLOBAL_AGENT_CAP: 100,   // per user, total active agents
   SPAWN_COOLDOWN_MS: 60000 // 1 minute between spawns per agent
 };
 
@@ -45,49 +45,7 @@ const SPAWN_LIMITS = {
 // the flags that drop the sandbox or skip the provider's permission system
 // entirely (--dangerously-*, --no-sandbox, --allow-all, danger-full-access)
 // must be granted explicitly per agent via the dashboard or agent-cli.
-const DEFAULT_LOCAL_AGENT_ALLOWED_PERMISSIONS = {
-  inter_agent: { enabled: true, mode: 'listen_all', groups: [] },
-  claude: {
-    '--permission-mode': ['default', 'acceptEdits', 'plan', 'bypassPermissions'],
-    '--dangerously-skip-permissions': false
-  },
-  codex: {
-    '--sandbox': ['workspace-write', 'read-only'],
-    '--dangerously-bypass-approvals-and-sandbox': false
-  },
-  gemini: {
-    '--sandbox': true,
-    '--no-sandbox': false,
-    '--yolo': true
-  },
-  copilot: {
-    '--allow-all': false,
-    '--allow-all-tools': false,
-    '--allow-all-paths': false
-  },
-  antigravity: {
-    '--sandbox': ['workspace-write', 'read-only'],
-    '--dangerously-skip-permissions': false
-  },
-  pi: { enabled: true },
-  kilo: { '--auto': true },
-  ollama: {
-    '--sandbox': ['workspace-write', 'read-only'],
-    '--dangerously-bypass-approvals-and-sandbox': false
-  },
-  openrouter: {
-    '--sandbox': ['workspace-write', 'read-only'],
-    '--dangerously-bypass-approvals-and-sandbox': false
-  },
-  lmstudio: {
-    '--sandbox': ['workspace-write', 'read-only'],
-    '--dangerously-bypass-approvals-and-sandbox': false
-  }
-};
-
-function buildDefaultLocalAgentAllowedPermissions() {
-  return JSON.parse(JSON.stringify(DEFAULT_LOCAL_AGENT_ALLOWED_PERMISSIONS));
-}
+const { buildDefaultLocalAgentAllowedPermissions, DEFAULT_LOCAL_AGENT_ALLOWED_PERMISSIONS } = require('../utils/agentPermissionDefaults');
 
 /**
  * Keep sandbox_mode 'none' (no OS sandbox) only when the permissions ceiling
@@ -713,10 +671,10 @@ function buildChildRuntimeState({
 
   const permissions = normalizeAllowedPermissions(parentPerms);
   permissions.inter_agent = {
+    ...(permissions.inter_agent || {}),
     enabled: true,
     mode: 'listen_all',
-    groups: [],
-    ...(permissions.inter_agent || {})
+    groups: []
   };
 
   const providerKeys = Object.keys(permissions).filter(
@@ -810,10 +768,10 @@ async function initializeChildFolder({
   // Inherit parent permissions ceiling, ensure inter-agent is enabled
   const permissions = JSON.parse(JSON.stringify(parentConfig.allowedPermissions || {}));
   permissions.inter_agent = {
+    ...(permissions.inter_agent || {}),
     enabled: true,
     mode: 'listen_all',
-    groups: [],
-    ...(permissions.inter_agent || {})
+    groups: []
   };
 
   // Ensure the child's configured provider is allowed.
@@ -1068,7 +1026,7 @@ function launchAgentLoop(agentName) {
     const out = fs.openSync(logFile, 'a');
     const err = fs.openSync(logFile, 'a');
 
-    const child = spawn('bash', [runnerPath], {
+    const child = spawn('bash', ['-lc', 'exec bash "$1"', 'chatspace-agent', runnerPath], {
       cwd: agentDir,
       stdio: ['ignore', out, err],
       detached: true,

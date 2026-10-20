@@ -8,6 +8,8 @@ const C = require('../../public/js/shared-crypto');
 const express = require('express');
 const session = require('express-session');
 const ejs = require('ejs');
+const { assetUrl } = require('../../src/utils/assetUrl');
+const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, ...data });
 const {
   Pool
 } = require('pg');
@@ -125,14 +127,14 @@ async function main() {
     app.get('/fixture/dashboard', csrfProtection, async (req, res, next) => {
       try {
         const dashboardUser = req.session.userId === bob.userId ? bob : alice;
-        const body = await ejs.renderFile(path.join(__dirname, '../../views/dashboard.ejs'), {
+        const body = await renderTemplate(path.join(__dirname, '../../views/dashboard.ejs'), {
           agents: (await query('SELECT agent_id,agent_name,position FROM agents WHERE user_id=$1 ORDER BY position', [dashboardUser.userId])).rows.map(row => ({ agentId: row.agent_id, name: row.agent_name, position: row.position, highestPriority: 'low', unreadCount: 0, marbleSvg: '' })),
           encryptionSalt: '', isGoogleAuth: false, groups: [], csrfToken: res.locals.csrfToken, cspNonce: 'fixture',
           user: { userId: dashboardUser.userId, email: dashboardUser.email },
           featureInPlaceAgentSharing: req.query.legacy !== '1',
           safeJsonForScript: require('../../src/utils/safeJsonHelper').safeJsonForScript
         });
-        res.send(await ejs.renderFile(path.join(__dirname, '../../views/layout.ejs'), {
+        res.send(await renderTemplate(path.join(__dirname, '../../views/layout.ejs'), {
           body: req.query.locked === '1'
             ? '<script nonce="fixture">localStorage.removeItem("encryptionKey");sessionStorage.removeItem("encryptionKey");</script>' + body
             : body,
@@ -147,15 +149,15 @@ async function main() {
       res.redirect('/shared');
     });
     app.get('/guest', async (_req, res, next) => {
-      try { res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }); res.send(await ejs.renderFile(path.join(__dirname, '../../views/guest-shared.ejs'), {})); }
+      try { res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }); res.send(await renderTemplate(path.join(__dirname, '../../views/guest-shared.ejs'), {})); }
       catch (error) { next(error); }
     });
     app.get('/shared', csrfProtection, async (req, res, next) => {
       try {
-        const body = await ejs.renderFile(path.join(__dirname, '../../views/shared.ejs'), {
+        const body = await renderTemplate(path.join(__dirname, '../../views/shared.ejs'), {
           csrfToken: res.locals.csrfToken
         });
-        const html = await ejs.renderFile(path.join(__dirname, '../../views/layout.ejs'), {
+        const html = await renderTemplate(path.join(__dirname, '../../views/layout.ejs'), {
           body,
           user: {
             userId: req.session.userId,

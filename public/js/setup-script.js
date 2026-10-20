@@ -98,6 +98,7 @@
   }
 
   window.copyMainCLIScript = async function copyMainCLIScript(trigger) {
+    if (window.ChatMCPSetup?.open()) return;
     const button = resolveTriggerButton(trigger);
     const originalLabel = button ? button.innerHTML : null;
     const originalDisabled = button ? button.disabled : null;

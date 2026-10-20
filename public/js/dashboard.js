@@ -473,6 +473,9 @@ function preserveMobileConversationScroll() {
     return;
   }
 
+  // A viewport resize during send must not capture a transient render position.
+  if (Date.now() < forceScrollToBottomUntil) return;
+
   const preservedScrollTop = conversationArea.scrollTop;
   const generation = (preserveMobileConversationScroll.generation || 0) + 1;
   preserveMobileConversationScroll.generation = generation;
@@ -484,7 +487,8 @@ function preserveMobileConversationScroll() {
   let lastClientHeight = conversationArea.clientHeight;
   let cancelled = false;
   const restore = () => {
-    if (cancelled || Date.now() > preserveUntil || preserveMobileConversationScroll.generation !== generation) return;
+    if (cancelled || Date.now() > preserveUntil || preserveMobileConversationScroll.generation !== generation ||
+        Date.now() < forceScrollToBottomUntil) return;
     if (selectedAgentId !== preservedAgentId || (selectedChatContext?.conversationId || selectedAgentId) !== preservedConversationId) return;
     if (document.body.dataset.allChatsView === 'true' || selectedAgentId === '__ALL__') return;
     if (!document.getElementById('messageInputArea')) return;
@@ -511,6 +515,13 @@ function preserveMobileConversationScroll() {
   setTimeout(restore, 120);
   setTimeout(restore, 320);
   setTimeout(restore, 650);
+}
+
+function cancelMobileConversationScrollPreservation() {
+  // A send can add enough content to move the latest message below the
+  // preserved viewport. Do not let delayed keyboard-layout callbacks restore
+  // the pre-send position after the send has started.
+  preserveMobileConversationScroll.generation = (preserveMobileConversationScroll.generation || 0) + 1;
 }
 
 function focusMobileComposerFromBottomOverscroll(conversationArea, options = {}) {
@@ -671,6 +682,7 @@ let numberInputTimeout = null; // Timeout for resetting number buffer
 let nameInputBuffer = ''; // Buffer for agent name typeahead
 let nameInputTimeout = null; // Timeout for resetting name buffer
 let agentListSearchQuery = '';
+let agentListStatusFilter = 'all';
 let agentListCache = { agents: [], timestamp: 0 }; // Cache agent list to avoid redundant API calls
 const AGENT_CACHE_TTL = 3000; // Agent cache time-to-live in milliseconds
 const DASHBOARD_MIN_POLL_INTERVAL_MS = 3000;
@@ -745,6 +757,7 @@ function buildAgentListRenderSignature(agents) {
     activeGroupId || '',
     selectedAgentId || '',
     agentListSearchQuery || '',
+    agentListStatusFilter || 'all',
     agentSignature,
     groupSignature
   ].join('||');
@@ -817,11 +830,13 @@ function shouldRenderAgentListPanelInFastMode() {
   if (!isDashboardFastModeActive()) return true;
   const panel = document.getElementById('agentListPanel');
   const hasActiveSearch = normalizeAgentListSearchQuery(agentListSearchQuery).length > 0;
+  const hasStatusFilter = agentListStatusFilter && agentListStatusFilter !== 'all';
   return (
     !selectedAgentId ||
     selectedAgentId === '__ALL__' ||
     panel?.classList.contains('mobile-expanded') ||
-    hasActiveSearch
+    hasActiveSearch ||
+    hasStatusFilter
   );
 }
 
@@ -1714,6 +1729,51 @@ if (typeof marked !== 'undefined') {
   marked.setOptions(MARKDOWN_RENDER_OPTIONS);
 }
 
+// Keep keyboard sizing separate from the browser's full-height, closed-keyboard layout.
+function initializeMobileViewport() {
+  if (window.visualViewport) {
+    const isTextInputFocused = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
+      if (el.isContentEditable) return true;
+      return false;
+    };
+
+    const adjustMobileViewport = () => {
+      // Let CSS track browser chrome when the keyboard is closed. A stale
+      // visualViewport measurement during blur must not leave a short app shell.
+      // Pinch zoom also must not resize the layout to the magnified viewport.
+      const focused = isTextInputFocused();
+      const viewport = window.visualViewport;
+      const height = focused && viewport.scale === 1 ? `${viewport.height}px` : '100dvh';
+      document.documentElement.style.setProperty('--vh', height);
+      document.documentElement.style.setProperty('--mobile-visual-bottom-offset', '0px');
+      const dashRoot = document.getElementById('dashboardRoot');
+      if (dashRoot && window.matchMedia('(max-width: 1023px)').matches) {
+        const shouldPreserveScroll = isTextInputFocused();
+        ensureMobileComposerVisible();
+        if (shouldPreserveScroll) {
+          setMobileChromeCollapsed(false);
+          preserveMobileConversationScroll();
+        }
+      }
+    };
+    window.visualViewport.addEventListener('resize', adjustMobileViewport);
+    window.visualViewport.addEventListener('scroll', adjustMobileViewport);
+    window.addEventListener('resize', adjustMobileViewport);
+    window.addEventListener('pageshow', adjustMobileViewport);
+    // Re-evaluate on focus changes so the composer snaps back to bottom: 0 when keyboard closes
+    document.addEventListener('focusin', adjustMobileViewport);
+    document.addEventListener('focusout', () => {
+      // focusout fires before activeElement updates; defer one tick
+      setTimeout(adjustMobileViewport, 0);
+    });
+    adjustMobileViewport();
+  }
+}
+
 /**
  * Initialize dashboard when DOM is loaded
  */
@@ -1741,44 +1801,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, { passive: false });
   }
 
-  // Handle mobile virtual keyboard resize - keep viewport measurements current without
-  // translating browser chrome deltas into composer offsets. Chrome handles keyboard
-  // resizing via interactive-widget=resizes-content; moving the fixed composer manually
-  // can push the send/stop/config buttons fully off-screen on some mobile browsers.
-  if (window.visualViewport) {
-    const isTextInputFocused = () => {
-      const el = document.activeElement;
-      if (!el) return false;
-      const tag = el.tagName;
-      if (tag === 'TEXTAREA' || tag === 'INPUT') return true;
-      if (el.isContentEditable) return true;
-      return false;
-    };
-
-    const adjustMobileViewport = () => {
-      const vh = window.visualViewport.height;
-      document.documentElement.style.setProperty('--vh', `${vh}px`);
-      document.documentElement.style.setProperty('--mobile-visual-bottom-offset', '0px');
-      const dashRoot = document.getElementById('dashboardRoot');
-      if (dashRoot && window.matchMedia('(max-width: 1023px)').matches) {
-        const shouldPreserveScroll = isTextInputFocused();
-        ensureMobileComposerVisible();
-        if (shouldPreserveScroll) {
-          setMobileChromeCollapsed(false);
-          preserveMobileConversationScroll();
-        }
-      }
-    };
-    window.visualViewport.addEventListener('resize', adjustMobileViewport);
-    window.visualViewport.addEventListener('scroll', adjustMobileViewport);
-    // Re-evaluate on focus changes so the composer snaps back to bottom: 0 when keyboard closes
-    document.addEventListener('focusin', adjustMobileViewport);
-    document.addEventListener('focusout', () => {
-      // focusout fires before activeElement updates; defer one tick
-      setTimeout(adjustMobileViewport, 0);
-    });
-    adjustMobileViewport();
-  }
+  initializeMobileViewport();
 
   // Mobile: keep chrome stable while scrolling. Scroll-driven collapsing caused
   // missing controls and jumpy layout in mobile browsers.
@@ -1865,6 +1888,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.updateScrollToBottomButton = updateScrollBtn;
 
     convArea.addEventListener('scroll', updateScrollBtn, { passive: true });
+
+    // A send briefly pins a chat that was already at the bottom while its
+    // refreshed history settles. If the reader starts scrolling in that
+    // window, drop the pin immediately so a later render cannot pull them
+    // back to the newest message.
+    const releaseSendScrollPin = () => {
+      if (!pendingSendScrollGuard && Date.now() >= forceScrollToBottomUntil) return;
+      pendingSendScrollGuard = null;
+      forceScrollToBottomOnNextRender = false;
+      forceScrollToBottomUntil = 0;
+    };
+    convArea.addEventListener('wheel', releaseSendScrollPin, { passive: true });
+    convArea.addEventListener('touchmove', releaseSendScrollPin, { passive: true });
+    convArea.addEventListener('keydown', (event) => {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) releaseSendScrollPin();
+    });
 
     convArea.addEventListener('scroll', () => {
       if (convArea.scrollTop > 300) return;
@@ -2481,14 +2520,19 @@ function showAgentCliUpdateBatchDialog(agents) {
     return false;
   }
 
-  pendingAgentUpdateBatch = agents.filter(agent => agent?.agentId);
+  pendingAgentUpdateBatch = agents
+    .filter(agent => agent?.agentId && agent.needsCliUpdate === true && agent.latestCliVersion)
+    .map(agent => ({ agent, active: isAgentActive(agent) }))
+    .sort((a, b) => Number(b.active) - Number(a.active) ||
+      (a.agent.name || '').localeCompare(b.agent.name || ''))
+    .map(({ agent }) => agent);
   if (pendingAgentUpdateBatch.length === 0) return false;
 
   const latestVersions = new Set(pendingAgentUpdateBatch.map(agent => agent.latestCliVersion).filter(Boolean));
   const latestLabel = latestVersions.size === 1 ? [...latestVersions][0] : 'the latest available version';
   summary.textContent =
     `${pendingAgentUpdateBatch.length} agent${pendingAgentUpdateBatch.length === 1 ? '' : 's'} can update to ${latestLabel}. ` +
-    'Select the agents to update now.';
+    'Active agents are listed first. Only checked agents will be updated.';
 
   list.innerHTML = pendingAgentUpdateBatch.map((agent) => {
     const currentVersion = agent.reportedCliVersion || 'unknown';
@@ -2497,20 +2541,48 @@ function showAgentCliUpdateBatchDialog(agents) {
       <label class="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left hover:border-cyan-500/50 hover:bg-slate-800 transition">
         <input type="checkbox"
                class="agent-cli-update-checkbox mt-1 rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50"
-               value="${escapeHtml(agent.agentId)}"
-               checked>
+               value="${escapeHtml(agent.agentId)}">
         <span class="min-w-0 flex-1">
           <span class="block truncate text-sm font-semibold text-slate-100">${escapeHtml(agent.name || 'Agent')}</span>
-          <span class="block text-xs text-slate-400">agent-cli ${escapeHtml(currentVersion)} -> ${escapeHtml(latestVersion)}</span>
+          <span class="block text-xs text-slate-400">${isAgentActive(agent) ? 'Active' : 'Inactive'} · agent-cli ${escapeHtml(currentVersion)} -> ${escapeHtml(latestVersion)}</span>
         </span>
       </label>
     `;
   }).join('');
 
-  selectAll.checked = true;
+  selectAll.checked = false;
   modal.classList.remove('hidden');
   updateAgentCliUpdateModalSelectionState();
   return true;
+}
+
+function updateAgentCliMenuButton(buttonId, agentId) {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+  const agent = findCachedAgentRecord(agentId);
+  const available = agent?.needsCliUpdate === true && Boolean(agent.latestCliVersion);
+  button.classList.toggle('hidden', !available);
+  button.hidden = !available;
+  button.title = available ? `Update agent-cli to ${agent.latestCliVersion}` : '';
+}
+
+function setupAgentCliMenuButtons() {
+  for (const buttonId of ['updateAgentBtn', 'floatingUpdateAgentBtn']) {
+    document.getElementById(buttonId)?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const agentId = buttonId === 'floatingUpdateAgentBtn'
+        ? document.getElementById('floatingAgentMenu')?.dataset.agentId
+        : selectedAgentId;
+      const agent = findCachedAgentRecord(agentId);
+      document.getElementById('agentContextMenu')?.classList.add('hidden');
+      hideFloatingAgentMenu();
+      if (agent?.needsCliUpdate === true && agent.latestCliVersion) {
+        showAgentCliUpdateBatchDialog([agent]);
+      } else {
+        showErrorMessage('This agent has no available update.');
+      }
+    });
+  }
 }
 
 function hideAgentCliUpdateBatchDialog() {
@@ -2962,6 +3034,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
           <span class="text-[10px] font-mono font-bold text-sky-400/70 bg-slate-900/80 px-1.5 py-0.5 rounded border border-sky-400/30">${safePosition}</span>
         </div>
         <div class="agent-avatar relative group flex justify-center">
+          ${DeviceBadge.render(agent.device)}
           ${isNewsAgent ? `
             <div class="agent-badge-news" title="News Feed">
               <span>i</span>
@@ -3031,14 +3104,19 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
 function updateAgentListUI(agents) {
   const agentSeatsContainer = document.getElementById('agentSeats');
   const statsTotal = document.getElementById('statsTotal');
+  const statsActive = document.getElementById('statsActive');
   const statsAttention = document.getElementById('statsAttention');
   const statsUrgent = document.getElementById('statsUrgent');
+  const listActiveCount = document.getElementById('agentListActiveCount');
 
   if (!agentSeatsContainer) {
     return;
   }
 
   currentAgentList = Array.isArray(agents) ? agents : [];
+  window.CouncilSharing?.updateOrbit(currentAgentList, currentGroups, activeGroupId);
+  updateAgentCliMenuButton('updateAgentBtn', selectedAgentId);
+  updateAgentCliMenuButton('floatingUpdateAgentBtn', document.getElementById('floatingAgentMenu')?.dataset.agentId);
   pruneChatNavigationHistory();
   const fastModeActive = isDashboardFastModeActive();
 
@@ -3047,12 +3125,16 @@ function updateAgentListUI(agents) {
   }
 
   // Update stats
+  const activeCount = currentAgentList.filter(isAgentActive).length;
   const urgentCount = currentAgentList.filter(a => getOrbitRingKey(a) === 'urgent').length;
   const attentionCount = currentAgentList.filter(a => getOrbitRingKey(a) === 'attention').length;
   const unreadMessageCount = getFastModeUnreadMessageCount(currentAgentList);
   if (statsTotal) statsTotal.textContent = currentAgentList.length;
+  if (statsActive) statsActive.textContent = activeCount;
+  if (listActiveCount) listActiveCount.textContent = activeCount;
   if (statsAttention) statsAttention.textContent = attentionCount;
   if (statsUrgent) statsUrgent.textContent = urgentCount;
+  syncAgentListFilterControls();
   updateFastModeNavCluster({ urgent: urgentCount, attention: unreadMessageCount });
 
   // Update minimized stats (desktop)
@@ -3861,6 +3943,20 @@ function setupGroupUIHandlers() {
 }
 
 /**
+ * Keep the animated working dot's hover hint (title + CSS tooltip) in sync.
+ */
+function setWorkingDotHint(workingDot, lastHeartbeat) {
+  const hint = lastHeartbeat
+    ? `Agent is working \u2022 heartbeat ${formatRelativeTime(lastHeartbeat)}`
+    : 'Agent is working';
+  // The CSS ::after tooltip renders data-hint; no title, so the browser
+  // tooltip does not double up with it.
+  workingDot.removeAttribute('title');
+  workingDot.dataset.hint = hint;
+  workingDot.setAttribute('aria-label', hint);
+}
+
+/**
  * Sync the main chat header for the currently selected agent
  * with the latest working/status data from the agent list poll.
  */
@@ -3886,9 +3982,7 @@ function syncSelectedChatHeader(agents) {
 
   if (workingDot) {
     workingDot.style.display = isWorking ? '' : 'none';
-    if (isWorking && agent.lastWorkingHeartbeatTime) {
-      workingDot.title = `Working \u2022 heartbeat ${formatRelativeTime(agent.lastWorkingHeartbeatTime)}`;
-    }
+    setWorkingDotHint(workingDot, isWorking ? agent.lastWorkingHeartbeatTime : null);
   }
 
   if (statusPill) {
@@ -3910,13 +4004,52 @@ function normalizeAgentListSearchQuery(query) {
   return String(query || '').trim().toLowerCase();
 }
 
+function isAgentActive(agent) {
+  if (!agent) return false;
+  if (agent.isWorking === true) return true;
+  if (getAgentAvailability(agent) === 'online') return true;
+  const recentTimestamps = [agent.lastSeenAt, agent.lastWorkingHeartbeatTime]
+    .map((ts) => (ts ? new Date(ts).getTime() : NaN))
+    .filter((ms) => Number.isFinite(ms));
+  if (recentTimestamps.some((ms) => Date.now() - ms <= 5 * 60 * 1000)) {
+    return true;
+  }
+  return false;
+}
+
+function filterAgentListByStatus(agents) {
+  const list = Array.isArray(agents) ? agents : [];
+  if (agentListStatusFilter === 'active') {
+    return list.filter(isAgentActive);
+  }
+  return list;
+}
+
+function syncAgentListFilterControls() {
+  const currentFilter = agentListStatusFilter === 'active' ? 'active' : 'all';
+  document.querySelectorAll('[data-agent-status-filter]').forEach((btn) => {
+    const targetFilter = btn.getAttribute('data-agent-status-filter') || 'all';
+    const isActive = targetFilter === currentFilter;
+    btn.classList.toggle('is-active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
+}
+
+function setAgentListStatusFilter(nextFilter) {
+  const normalized = nextFilter === 'active' ? 'active' : 'all';
+  agentListStatusFilter = normalized;
+  syncAgentListFilterControls();
+  updateAgentListPanel(currentAgentList);
+}
+
 function filterAgentListBySearch(agents) {
+  const statusFiltered = filterAgentListByStatus(agents);
   const normalizedQuery = normalizeAgentListSearchQuery(agentListSearchQuery);
   if (!normalizedQuery) {
-    return Array.isArray(agents) ? agents : [];
+    return statusFiltered;
   }
 
-  return (Array.isArray(agents) ? agents : []).filter((agent) => {
+  return statusFiltered.filter((agent) => {
     const haystack = [
       agent?.name,
       agent?.externalProvider,
@@ -3965,32 +4098,52 @@ function getAgentListEmptyStateHtml(message) {
 function updateAgentListPanel(agents) {
   const listScroll = document.getElementById('agentListScroll');
   const listCount = document.getElementById('agentListCount');
+  const listActiveCount = document.getElementById('agentListActiveCount');
+  const statsTotal = document.getElementById('statsTotal');
+  const statsActive = document.getElementById('statsActive');
 
   if (!listScroll) return;
 
   const agentList = Array.isArray(agents) ? agents : [];
+  const activeCount = agentList.filter(isAgentActive).length;
   const filteredAgentList = filterAgentListBySearch(agentList);
   const normalizedSearchQuery = normalizeAgentListSearchQuery(agentListSearchQuery);
   const hasActiveSearch = normalizedSearchQuery.length > 0;
+  const hasActiveFilter = hasActiveSearch || agentListStatusFilter === 'active';
   const searchLabel = escapeHtml(agentListSearchQuery.trim());
 
-  // Update count badge
+  // Update count badges
   if (listCount) {
     listCount.textContent = hasActiveSearch ? `${filteredAgentList.length}/${agentList.length}` : `${agentList.length}`;
   }
+  if (listActiveCount) {
+    listActiveCount.textContent = `${activeCount}`;
+  }
+  if (statsTotal) {
+    statsTotal.textContent = `${agentList.length}`;
+  }
+  if (statsActive) {
+    statsActive.textContent = `${activeCount}`;
+  }
+  syncAgentListFilterControls();
 
   if (agentList.length === 0) {
     listScroll.innerHTML = getAgentListEmptyStateHtml('No agents connected');
     return;
   }
 
-  // If in group view, show group members — but when searching, search across ALL agents
+  const getEmptyMatchMessage = () => {
+    if (hasActiveSearch) return `No agents match "${searchLabel}"`;
+    if (agentListStatusFilter === 'active') return 'No active agents right now';
+    return 'No agents connected';
+  };
+
+  // If in group view, show group members — but when searching or filtering by active, show matching agents
   if (activeGroupId) {
-    if (hasActiveSearch) {
-      // Search breaks out of the group view to show all matching agents
+    if (hasActiveFilter) {
       const agentsHtml = filteredAgentList.length > 0
         ? renderAgentListItemsHtml(filteredAgentList)
-        : getAgentListEmptyStateHtml(`No agents match "${searchLabel}"`);
+        : getAgentListEmptyStateHtml(getEmptyMatchMessage());
       listScroll.innerHTML = agentsHtml;
       setupAgentListHandlers();
       return;
@@ -4057,9 +4210,9 @@ function updateAgentListPanel(agents) {
       </div>
     `;
 
-    // While searching, show the matching members inline instead of hiding
-    // them behind the collapsed group header (which would need an extra click).
-    if (hasActiveSearch) {
+    // While searching or filtering by active status, show the matching members inline
+    // instead of hiding them behind the collapsed group header.
+    if (hasActiveFilter) {
       html += renderAgentListItemsHtml(filteredGroupAgents);
     }
   }
@@ -4084,7 +4237,7 @@ function updateAgentListPanel(agents) {
   if (orderedAgents.length > 0) {
     html += renderAgentListItemsHtml(orderedAgents);
   } else if (!hasAnyGroupSection) {
-    html += getAgentListEmptyStateHtml(hasActiveSearch ? `No agents match "${searchLabel}"` : 'No agents connected');
+    html += getAgentListEmptyStateHtml(getEmptyMatchMessage());
   }
 
   listScroll.innerHTML = html;
@@ -4144,6 +4297,7 @@ function renderAgentListItemsHtml(orderedAgents) {
            data-agent-last-heartbeat="${agent.lastWorkingHeartbeatTime || ''}"
            data-agent-working="${isWorking ? 'true' : 'false'}">
         <div class="agent-list-item__avatar">
+          ${DeviceBadge.render(agent.device)}
           ${isOpenClaw ? `
             <div class="agent-list-item__marble flex items-center justify-center bg-gradient-to-br from-slate-950 via-orange-950/30 to-slate-900 border border-orange-400/30">
               ${getOpenClawIconSvg('w-6 h-6 text-orange-300')}
@@ -4341,7 +4495,28 @@ function setupAgentListHandlers() {
   });
 }
 
+function bindAgentListStatusFilters() {
+  document.querySelectorAll('[data-agent-status-filter]').forEach((btn) => {
+    if (btn.dataset.filterBound === 'true') return;
+    btn.dataset.filterBound = 'true';
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetFilter = btn.getAttribute('data-agent-status-filter') || 'all';
+      const nextFilter = (targetFilter === 'active' && agentListStatusFilter === 'active')
+        ? 'all'
+        : targetFilter;
+      setAgentListStatusFilter(nextFilter);
+      if (isMobileListOnlyMode()) {
+        setMobileListExpanded(true);
+      }
+    });
+  });
+  syncAgentListFilterControls();
+}
+
 function bindAgentListSearch() {
+  bindAgentListStatusFilters();
   const searchInput = document.getElementById('agentListSearchInput');
   if (!searchInput || searchInput.dataset.bound === 'true') {
     return;
@@ -4953,6 +5128,7 @@ function showFloatingAgentMenu(event, seatElement) {
 function positionFloatingAgentMenu(rect, agentId = null) {
   if (!rect) return;
   const agent = findCachedAgentRecord(agentId);
+  updateAgentCliMenuButton('floatingUpdateAgentBtn', agentId);
   const seat = findAgentSeat(agentId);
   window.AgentActionsUI?.position(rect, agentId, {
     name: agent?.name || seat?.dataset.agentName || selectedAgentName || 'Agent',
@@ -5675,6 +5851,7 @@ function updateComposerState() {
   const imageUploadLabel = document.getElementById('imageUploadLabel');
   const generalFileInput = document.getElementById('generalFileInput');
   const generalFileUploadLabel = document.getElementById('generalFileUploadLabel');
+  if (imageUploadLabel && !pendingImages.length) imageUploadLabel.style.position = '';
 
   // For news feed agents, show read-only activity log placeholder
   if (isNewsFeed) {
@@ -5778,9 +5955,14 @@ function updateComposerState() {
       configContainer.style.display = '';
     }
   }
-  if (selectedChatContext?.privateHistory || selectedChatContext?.mode === 'shared' && !selectedChatContext.capabilities?.send) {
+  const chatPreparing = selectedChatContext?.state === 'preparing';
+  if (chatPreparing || selectedChatContext?.privateHistory || selectedChatContext?.mode === 'shared' && !selectedChatContext.capabilities?.send) {
     userMessageInput.disabled = true;
-    userMessageInput.placeholder = selectedChatContext.privateHistory ? 'Private history — select the agent again to return to the shared chat' : 'Waiting for encrypted conversation access…';
+    userMessageInput.placeholder = chatPreparing
+      ? 'Conversation setup in progress — you can send when it is ready…'
+      : selectedChatContext.privateHistory
+        ? 'Private history — select the agent again to return to the shared chat'
+        : 'Waiting for encrypted conversation access…';
     userMessageSendButton.disabled = true;
     if (imageFileInput) imageFileInput.disabled = true;
     if (generalFileInput) generalFileInput.disabled = true;
@@ -6074,6 +6256,10 @@ function setupAgentControls() {
           model: model
         };
 
+        if (provider === 'codex' || provider === 'default') {
+          configData.thinking_effort = document.getElementById('configCodexThinkingEffort')?.value || 'medium';
+        }
+
         // Add provider-specific settings
         if (provider === 'codex' || provider === 'default' || provider === 'ollama' || provider === 'openrouter') {
           let sandbox = document.getElementById('configCodexSandbox')?.value || 'workspace-write';
@@ -6293,6 +6479,10 @@ async function loadAgentConfig() {
         statusMode.textContent = modeStr;
       }
       const mobileModeStr = statusMode?.textContent || config.approval_mode || 'default';
+
+      // Reset effort when switching agents so a previous agent's choice cannot leak.
+      const codexThinkingEffort = document.getElementById('configCodexThinkingEffort');
+      if (codexThinkingEffort) codexThinkingEffort.value = config.thinking_effort || 'medium';
 
       // Set provider-specific values
       if (config.model_provider === 'codex' || config.model_provider === 'default') {
@@ -6824,6 +7014,8 @@ async function sendUserMessage() {
     return;
   }
 
+  cancelMobileConversationScrollPreservation();
+
   playSendFlight(trimmedContent);
 
   const sendScrollGuard = captureSendScrollGuard();
@@ -6844,6 +7036,7 @@ async function sendUserMessage() {
       if (selectedChatContext?.conversationId !== conversationId) return;
       const messages = sendResult.messages;
       conversationCache.set(conversationId, messages);
+      rearmSendScrollGuard(sendScrollGuard);
       await displayMessages(messages, false, { agentId: selectedAgentId, conversationId });
       if (!sendResult.preserveDraft && userMessageInput.value.trim() === trimmedContent &&
           JSON.stringify(pendingImages.map(entry => entry.id)) === JSON.stringify(sentFiles.map(entry => entry.id))) {
@@ -6947,6 +7140,7 @@ async function sendUserMessage() {
       conversationCache.delete(selectedAgentId);
       // Clear saved scroll position so we scroll to bottom after sending
       agentScrollPositions.delete(selectedAgentId);
+      rearmSendScrollGuard(sendScrollGuard);
       await loadMessages(selectedAgentId);
       settleScrollAfterSend(sendScrollGuard);
     }
@@ -6976,6 +7170,20 @@ async function sendUserMessage() {
     if (notifyRateLimit(error, { scope: 'send-message', title: 'Send Delayed' })) {
       return;
     }
+    if (error.status === 409 && /chat is preparing or shared/i.test(error.message || '') && window.InPlaceChat?.resolveAgentContext) {
+      try {
+        const context = await window.InPlaceChat.resolveAgentContext(selectedAgentId);
+        if (selectedAgentId === context.agentId) {
+          await window.DashboardHelpers?.selectChatContext?.(context);
+          showErrorMessage(context.state === 'preparing'
+            ? 'Conversation setup is still in progress. Your draft is safe; send it when setup finishes.'
+            : 'Conversation context refreshed. Your draft is safe; send again to continue.');
+          return;
+        }
+      } catch (refreshError) {
+        console.warn('Could not refresh chat context after a send conflict:', refreshError);
+      }
+    }
     showErrorMessage(error.message || 'Failed to send message');
   } finally {
     isSendingMessage = false;
@@ -7004,6 +7212,7 @@ function setupImageUpload() {
     console.warn('Image upload elements not found');
     return;
   }
+  if (imageUploadLabel) imageUploadLabel.style.position = '';
 
   // Handle file selection
   imageFileInput.addEventListener('change', (event) => {
@@ -7303,6 +7512,7 @@ function renderImagePreviews() {
     // Remove count badge from upload button
     const existingBadge = imageUploadLabel?.querySelector('.image-upload-count');
     if (existingBadge) existingBadge.remove();
+    if (imageUploadLabel) imageUploadLabel.style.position = '';
     return;
   }
 
@@ -7314,10 +7524,14 @@ function renderImagePreviews() {
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'image-upload-count';
-      imageUploadLabel.style.position = 'relative';
+      // The label is already absolutely positioned (desktop) or relative
+      // (mobile CSS), so it anchors the badge. Forcing an inline
+      // position:relative here dropped it out of the textarea and pushed
+      // both attach buttons below the composer.
       imageUploadLabel.appendChild(badge);
     }
     badge.textContent = pendingImages.length;
+    imageUploadLabel.style.position = '';
   }
 
   // Render each image preview
@@ -8056,7 +8270,7 @@ async function selectAgent(agentId, agentName, metadata = {}) {
     try {
       const context = await window.InPlaceChat.resolveAgentContext(agentId);
       if (selection !== sharedChatSelectionRequest) return;
-      if (context.mode === 'shared') metadata = { ...metadata, chatContext: context, forceMainSelection: true };
+      if (context.mode === 'shared' || context.state === 'preparing') metadata = { ...metadata, chatContext: context, forceMainSelection: true };
     } catch (error) {
       if (selection !== sharedChatSelectionRequest) return;
       showErrorMessage(error.message || 'Could not open this conversation.');
@@ -8311,9 +8525,7 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   const workingDot = document.getElementById('selectedAgentWorkingIndicator');
   if (workingDot) {
     workingDot.style.display = metadata.isWorking ? '' : 'none';
-    if (metadata.isWorking && metadata.lastHeartbeat) {
-      workingDot.title = `Working \u2022 heartbeat ${formatRelativeTime(metadata.lastHeartbeat)}`;
-    }
+    setWorkingDotHint(workingDot, metadata.isWorking ? metadata.lastHeartbeat : null);
   }
   if (lastActiveEl) {
     if (metadata.isWorking && metadata.lastHeartbeat) {
@@ -8331,7 +8543,10 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   }
   if (unreadBadge) {
     if (metadata.unread > 0) {
-      unreadBadge.textContent = `${metadata.unread} unread`;
+      const unreadLabel = `${metadata.unread} unread message${metadata.unread === 1 ? '' : 's'}`;
+      unreadBadge.textContent = `\u{1F4E9} ${metadata.unread}`;
+      unreadBadge.title = unreadLabel;
+      unreadBadge.setAttribute('aria-label', unreadLabel);
       unreadBadge.classList.remove('hidden');
     } else {
       unreadBadge.classList.add('hidden');
@@ -8615,6 +8830,20 @@ async function loadOlderMessagesInBackground(agentId, requestToken) {
 }
 
 /**
+ * Scroll options for a full re-render of the chat that is already open
+ * (shared timeline polls, history updates). Without them displayMessages
+ * restores the position saved when the user last switched away from this
+ * chat, which jumps the conversation upward after sending or on a reply.
+ */
+function liveRefreshScrollOptions(agentId) {
+  const conversationArea = document.getElementById('conversationArea');
+  const wasNearBottom = !conversationArea ||
+    (conversationArea.scrollHeight - conversationArea.scrollTop - conversationArea.clientHeight) < 120;
+  agentScrollPositions.delete(agentId);
+  return { preserveScrollPosition: !wasNearBottom };
+}
+
+/**
  * Poll messages for selected agent (with 'since' parameter)
  */
 async function pollMessages(agentId) {
@@ -8637,7 +8866,7 @@ async function pollMessages(agentId) {
       conversationCache.set(conversationId, messages);
       window.DashboardHelpers?.updateMessageReceipts?.(messages);
       if (!hasPrevious || signature(previous) !== signature(messages)) {
-        await displayMessages(messages, false, { agentId, conversationId, requestToken });
+        await displayMessages(messages, false, { agentId, conversationId, requestToken, ...liveRefreshScrollOptions(agentId) });
       }
       return;
     } catch (error) {
@@ -8854,6 +9083,10 @@ async function displayMessages(messages, append = false, context = {}) {
     return true;
   }
 
+  // Keep an existing transcript mounted while decryption and yielding rebuild
+  // it. Clearing or prepending partial history collapses/moves the viewport.
+  const replaceExistingTranscript = !append && Boolean(conversationArea.querySelector('[data-message-id]'));
+
   // Clear conversation area if not appending
   if (!append) {
     if (isRenderStale()) {
@@ -8861,7 +9094,7 @@ async function displayMessages(messages, append = false, context = {}) {
     }
     // Clean up attachment object URLs from previous messages
     revokeAllAttachmentUrls();
-    conversationArea.innerHTML = '';
+    if (!replaceExistingTranscript) conversationArea.innerHTML = '';
   }
 
   // Add messages to conversation area
@@ -8984,7 +9217,7 @@ async function displayMessages(messages, append = false, context = {}) {
       // Insert small batches between yields. Inserting the whole backlog at
       // the end leaves one large style/layout task on slower phones.
       if (append) conversationArea.appendChild(pendingElements);
-      else conversationArea.prepend(pendingElements);
+      else if (!replaceExistingTranscript) conversationArea.prepend(pendingElements);
       // Yield a task rather than waiting for the next animation frame: frames
       // can be heavily throttled on phones and in background tabs.
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -8998,6 +9231,7 @@ async function displayMessages(messages, append = false, context = {}) {
   }
 
   if (append) conversationArea.appendChild(pendingElements);
+  else if (replaceExistingTranscript) conversationArea.replaceChildren(pendingElements);
   else conversationArea.prepend(pendingElements);
 
   window.DashboardHelpers?.updateMessageReceipts?.(messages);
@@ -10789,6 +11023,22 @@ function captureSendScrollGuard() {
   };
 }
 
+/**
+ * Re-arm the send scroll guard once the server has answered. Encrypted,
+ * shared, or upload sends can take longer than the guard window measured
+ * from the click, and a full re-render would otherwise restore the stale
+ * scroll position saved when the user last left this chat.
+ */
+function rearmSendScrollGuard(guard) {
+  if (!guard) return;
+  guard.expiresAt = Date.now() + 2500;
+  agentScrollPositions.delete(guard.agentId);
+  if (guard.wasNearBottom) {
+    forceScrollToBottomOnNextRender = true;
+    forceScrollToBottomUntil = guard.expiresAt;
+  }
+}
+
 function settleScrollAfterSend(guard) {
   if (!guard) return;
 
@@ -11705,6 +11955,7 @@ function showDecryptionPasswordModal() {
  */
 function setupKeyboardNavigation() {
   document.addEventListener('keydown', (e) => {
+    if (e.target.closest?.('.shared-galaxy, .shared-galaxy-dialog, .a2a-group-gateway')) return;
     // Ignore if user is typing in an input (except Esc and Arrows for scrolling)
     const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
     const isEditableTarget = isInput || e.target.isContentEditable === true;
@@ -12108,9 +12359,20 @@ function setupKeyboardNavigation() {
         break;
       case 'Enter':
         if (focusedAgentIndex >= 0 && focusedAgentIndex < seats.length) {
+          e.preventDefault();
           const seat = seats[focusedAgentIndex];
+          const groupId = seat.getAttribute('data-group-id');
+          if (groupId) {
+            hideFloatingAgentMenu();
+            enterGroupView(groupId);
+            focusedAgentIndex = getVisibleAgentSeats().length > 0 ? 0 : -1;
+            previousFocusedIndex = -1;
+            updateAgentFocus();
+            break;
+          }
           const agentId = seat.getAttribute('data-agent-id');
           const agentName = seat.getAttribute('data-agent-name');
+          if (!agentId) break;
 
           // If agent is not already selected, select it
           if (agentId !== selectedAgentId) {
@@ -12235,7 +12497,7 @@ function updateAgentFocus() {
   const seats = getVisibleAgentSeats();
 
   // Remove focus class from all (but keep selected class)
-  document.querySelectorAll('.agent-seat').forEach(seat => {
+  document.querySelectorAll('.agent-seat, .group-seat').forEach(seat => {
     seat.classList.remove('agent-seat--focused');
   });
 
@@ -12485,16 +12747,46 @@ function setupCopyButtons() {
   const agentHeaderInfo = document.getElementById('agentHeaderInfo');
   const contextMenu = document.getElementById('agentContextMenu');
   const floatingMenu = document.getElementById('floatingAgentMenu');
+  setupAgentCliMenuButtons();
 
   // Toggle menu on header click
   if (agentHeaderInfo && contextMenu) {
+    // The chat tile's glass/blur layers and contained conversation can paint
+    // over a menu nested in the header, so the menu lives on <body> as a
+    // fixed overlay placed under the agent name.
+    document.body.append(contextMenu);
+    contextMenu.classList.remove('absolute', 'top-full', 'left-0', 'mt-2', 'z-50', 'overflow-hidden');
+    contextMenu.classList.add('agent-header-context-menu');
+    // Inline so a stale cached agent-actions.css cannot drop the overlay
+    // back under the conversation.
+    contextMenu.style.position = 'fixed';
+    contextMenu.style.zIndex = '170';
+    contextMenu.style.overflowY = 'auto';
+    const placeContextMenu = () => {
+      if (contextMenu.classList.contains('hidden')) return;
+      const margin = 12;
+      const anchor = agentHeaderInfo.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const width = viewport?.width || window.innerWidth;
+      const height = viewport?.height || window.innerHeight;
+      contextMenu.style.maxHeight = `${Math.max(160, height - anchor.bottom - 8 - margin)}px`;
+      const menuWidth = contextMenu.getBoundingClientRect().width;
+      contextMenu.style.left = `${Math.max(margin, Math.min(anchor.left, width - menuWidth - margin))}px`;
+      contextMenu.style.top = `${Math.min(anchor.bottom + 8, height - 160 - margin)}px`;
+    };
+    const closeContextMenu = () => contextMenu.classList.add('hidden');
+    window.addEventListener('resize', closeContextMenu);
+    window.visualViewport?.addEventListener('resize', closeContextMenu);
+
     agentHeaderInfo.addEventListener('click', (e) => {
       // Don't toggle if clicking the buttons themselves
       if (e.target.closest('button')) return;
 
       e.stopPropagation();
+      updateAgentCliMenuButton('updateAgentBtn', selectedAgentId);
       const openingContextMenu = contextMenu.classList.contains('hidden');
       contextMenu.classList.toggle('hidden');
+      placeContextMenu();
       // Hide floating menu when opening header menu
       hideFloatingAgentMenu();
       if (openingContextMenu && selectedAgentId) {
@@ -12511,13 +12803,38 @@ function setupCopyButtons() {
       const isFloatingMenuClick = floatingMenu && floatingMenu.contains(e.target);
 
       // Close header context menu
-      if (!contextMenu.classList.contains('hidden') && !agentHeaderInfo.contains(e.target) && !isAgentSeatClick) {
+      if (!contextMenu.classList.contains('hidden') && !agentHeaderInfo.contains(e.target)
+        && !contextMenu.contains(e.target) && !isAgentSeatClick) {
         contextMenu.classList.add('hidden');
       }
 
       // Close floating menu when clicking outside (but not on itself or agent seats)
       if (floatingMenu && !floatingMenu.classList.contains('hidden') && !isAgentSeatClick && !isFloatingMenuClick) {
         hideFloatingAgentMenu();
+      }
+    });
+  }
+
+  // Copy the name belonging to the menu that was opened.
+  for (const buttonId of ['copyAgentNameBtn', 'floatingCopyAgentNameBtn']) {
+    const button = document.getElementById(buttonId);
+    button?.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const name = buttonId === 'floatingCopyAgentNameBtn'
+        ? document.getElementById('floatingAgentName')?.textContent
+        : selectedAgentName;
+      if (!name) return;
+      try {
+        if (!navigator.clipboard?.writeText) {
+          showErrorMessage('Clipboard access is not supported in this browser.');
+          return;
+        }
+        await navigator.clipboard.writeText(name);
+        showSuccessMessage('Agent name copied');
+        contextMenu?.classList.add('hidden');
+        hideFloatingAgentMenu();
+      } catch (error) {
+        showErrorMessage('Could not copy agent name. Please try again.');
       }
     });
   }
@@ -13124,13 +13441,10 @@ function setMobileListExpanded(expanded, { skipBrowserHistory = false } = {}) {
     toggleBtn.title = expanded ? 'Collapse List' : 'Expand List';
     toggleBtn.setAttribute('aria-label', expanded ? 'Collapse agent list' : 'Expand agent list');
     toggleBtn.classList.toggle('expanded', expanded);
+  }
 
-    // Rotate the chevron inside the button
-    const svg = toggleBtn.querySelector('svg');
-    if (svg) {
-      svg.style.transform = expanded ? 'rotate(180deg)' : '';
-      svg.style.transition = 'transform 0.3s';
-    }
+  for (const id of ['collapseMobileListBtn', 'fastModeChatListToggle', 'fastModePlaceholderOpenChats']) {
+    document.getElementById(id)?.setAttribute('aria-expanded', String(expanded));
   }
 
   const mobileStatsToggle = document.getElementById('mobileStatsToggle');
@@ -13677,6 +13991,7 @@ function renderDockAgents() {
           `}
           ${statusIndicator}
         </div>
+        ${DeviceBadge.render(agent.device)}
         <span class="dock-agent-name">${escapeHtml(agent.name)}</span>
       </div>
     `;
@@ -14055,6 +14370,7 @@ function removeAgentFromUI(agentId) {
     const messageInputArea = document.getElementById('messageInputArea');
 
     if (agentPanelHeader) agentPanelHeader.classList.add('hidden');
+    document.getElementById('agentContextMenu')?.classList.add('hidden');
     if (agentPanelPlaceholder) agentPanelPlaceholder?.classList.remove('hidden');
     if (conversationArea) conversationArea.classList.add('hidden');
     if (messageInputArea) messageInputArea.classList.add('hidden');
@@ -14815,7 +15131,8 @@ window.DashboardHelpers = {
   ownerHistoryUpdated: (conversationId, messages) => {
     if (selectedChatContext?.conversationId !== conversationId) return;
     conversationCache.set(conversationId, messages);
-    void displayMessages(messages, false, { agentId: selectedAgentId, conversationId, requestToken: activeConversationLoadToken });
+    void displayMessages(messages, false, { agentId: selectedAgentId, conversationId, requestToken: activeConversationLoadToken,
+      ...liveRefreshScrollOptions(selectedAgentId) });
   },
   hideAgentActionsMenu: () => hideFloatingAgentMenu(),
   getSelectedAgentForActions: () => selectedAgentId && selectedAgentId !== '__ALL__' ? {
@@ -14857,7 +15174,7 @@ window.DashboardHelpers = {
     if (context.mode === 'private') {
       if (context.role !== 'owner') throw new Error('Only the owner can open a private agent chat.');
       await selectAgent(context.agentId, context.agentName || 'Agent', { forceMainSelection: true, skipSharedResolve: true,
-        ...(context.privateHistory ? { chatContext: context } : {}) });
+        ...(context.privateHistory || context.state === 'preparing' ? { chatContext: context } : {}) });
       return;
     }
     selectedChatContext = context;

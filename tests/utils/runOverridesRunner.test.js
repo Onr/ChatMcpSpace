@@ -111,4 +111,65 @@ describe('per-message run overrides in the generated runner', () => {
       expect(JSON.parse(result.stdout)).toEqual(reply);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 15000);
+  it.each(['codex-cli', 'openai'])('runs %s autonomously with explicit sandbox/network settings and rejects failed CLI output', (provider) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-spawn-regression-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'codex'), `#!/bin/bash
+printf '%s\\n' "$@" > "$TEST_DIR/args"
+cat >/dev/null
+if [ "$FAIL_CLI" = 1 ]; then echo "error: unexpected argument"; exit 2; fi
+echo 'real response'
+`, { mode: 0o700 });
+      const harness = [
+        'log() { :; }', 'send_message() { :; }', 'send_error_message() { :; }',
+        'should_send_command_preview() { return 1; }', 'send_working_heartbeat() { return 0; }',
+        'check_stop_flag() { return 1; }', 'resolve_codex_bin() { command -v codex; }',
+        'STATE_DIR="$TEST_DIR"; PROJECT_ROOT="$TEST_DIR"; SCRIPT_DIR="$TEST_DIR"',
+        'AGENT_RESPONSE_FILE="$TEST_DIR/response"; AGENT_PID_FILE="$TEST_DIR/pid"',
+        'LAST_INTERRUPTED_OUTPUT_FILE="$TEST_DIR/interrupted"; WORKING_HEARTBEAT_INTERVAL=10',
+        'MODEL=fixture; APPROVAL_MODE=full-auto; THINKING_EFFORT=""',
+        extractFunction(runner, 'run_cli_in_background'), extractFunction(runner, 'run_agent'),
+        'run_agent "Reply to the briefing"'
+      ].join('\n');
+      for (const sandbox of ['workspace-write', 'read-only', 'none']) {
+        const result = spawnSync('bash', ['-c', harness], { encoding: 'utf8', timeout: 10000,
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TEST_DIR: dir,
+            MODEL_PROVIDER: provider, SANDBOX_MODE: sandbox, FAIL_CLI: '0' } });
+        expect(result.status).toBe(0);
+        const args = fs.readFileSync(path.join(dir, 'args'), 'utf8').trim().split('\n');
+        expect(args).not.toContain('--full-auto');
+        if (sandbox === 'none') {
+          expect(args).toContain('--dangerously-bypass-approvals-and-sandbox');
+        } else {
+          expect(args).toContain('approval_policy="never"');
+          expect(args[args.indexOf('--sandbox') + 1]).toBe(sandbox);
+        }
+        expect(args.includes('sandbox_workspace_write.network_access=true')).toBe(sandbox === 'workspace-write');
+        fs.rmSync(path.join(dir, 'response'), { force: true });
+      }
+      const failed = spawnSync('bash', ['-c', harness], { encoding: 'utf8', timeout: 10000,
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TEST_DIR: dir,
+          MODEL_PROVIDER: provider, SANDBOX_MODE: 'workspace-write', FAIL_CLI: '1' } });
+      expect(failed.status).toBe(2);
+      expect(fs.existsSync(path.join(dir, 'response'))).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 20000);
+
+  it.each([
+    ['{}', true],
+    ['{"inter_agent":{"enabled":true}}', true],
+    ['{"inter_agent":{"enabled":false}}', false]
+  ])('polls DMs with legacy or explicit permissions: %s', (permissions, enabled) => {
+    const harness = [
+      'SCRIPT_DIR=/tmp',
+      'uv() { if [[ "$*" == *"dm check"* ]]; then echo "Briefing from parent"; else echo "No new messages."; fi; }',
+      extractFunction(runner, 'check_for_messages'), 'check_for_messages'
+    ].join('\n');
+    const result = spawnSync('bash', ['-c', harness], {
+      encoding: 'utf8', env: { ...process.env, ALLOWED_PERMISSIONS: permissions }
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.includes('Briefing from parent')).toBe(enabled);
+  });
+
 });

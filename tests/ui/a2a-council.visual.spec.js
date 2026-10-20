@@ -1,0 +1,51 @@
+const {test,expect}=require('@playwright/test');
+const fs=require('fs');const path=require('path');
+const root=path.join(__dirname,'../..');
+for(const width of [390,760]) test(`shared galaxy and cross-group trails at ${width}px`,async({page})=>{
+  await page.setViewportSize({width,height:800});
+  const html = `<style>body{margin:0;background:#020617;color:white;font:14px system-ui}#councilCircle{position:relative;width:100%;height:480px}.agent-seat,.group-seat{position:absolute;width:48px;height:48px;border-radius:50%;background:#0e7490}.agent-avatar{width:48px;height:48px;position:relative}.group-seat{background:#6d28d9}#agentConnectionLines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}</style><div id="councilCircle"><div class="agent-seat" data-agent-id="a" style="left:48%;top:90px"><div class="agent-avatar">Mine</div></div><div class="group-seat" data-group-id="g" style="left:60%;top:330px">Work</div></div>`;
+  await page.route('https://a2a.test/',route=>route.fulfill({contentType:'text/html',body:html}));
+  await page.goto('https://a2a.test/');
+  await page.addStyleTag({path:path.join(root,'public/css/council-sharing.css')});
+  await page.evaluate(()=>{window.__dashboardLoopPaused=true;window.DashboardHelpers={selectChatContext:async c=>window.selected=c};});
+  await page.addScriptTag({path:path.join(root,'public/js/council-sharing.js')});
+  await page.addScriptTag({path:path.join(root,'public/js/agentConnections.js')});
+  await page.route('**/api/user/agent-messages*',route=>route.fulfill({json:{connections:[{agent1Id:'a',agent2Id:'b',agent1Name:'Mine',agent2Name:'Work',messageCount:5,lastMessage:new Date().toISOString(),lastSenderId:'b'},{agent1Id:'a',agent2Id:'remote',agent1Name:'Mine',agent2Name:'Remote',messageCount:2,lastMessage:new Date().toISOString()}],messages:[]}}));
+  await page.route('**/api/user/chat-threads/room',route=>route.fulfill({json:{agentId:'remote',agentName:'Remote',conversationId:'room',mode:'shared',role:'participant',membershipStatus:'active'}}));
+  await page.evaluate(()=>{
+    window.CouncilSharing.updateOrbit([{agentId:'a'}],[{groupId:'g',groupName:'Work',memberIds:['b']}],null);
+    window.CouncilSharing.updateContexts([{agentId:'a',mode:'shared',role:'owner'},{agentId:'remote',agentName:'Remote collaborative agent with a long name',conversationId:'room',mode:'shared',role:'participant',membershipStatus:'active'}]);
+  });
+  await expect(page.locator('#sharedGalaxy')).toBeVisible();await page.evaluate(()=>window.AgentConnections.refresh());
+  await expect(page.locator('.a2a-link')).toHaveCount(2);
+  expect(await page.locator('.a2a-link__flow').evaluateAll(paths=>paths.every(p=>!p.getAttribute('d').includes('NaN')))).toBe(true);
+  await expect(page.locator('.agent-share-badge')).toHaveCount(1);
+  await page.screenshot({path:test.info().outputPath('council.png')});
+  await page.locator('#sharedGalaxy').focus();await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const bounds=await page.locator('.shared-galaxy-card').boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);
+  await page.keyboard.press('Escape');await expect(page.locator('#sharedGalaxy')).toBeFocused();
+  await page.emulateMedia({reducedMotion:'reduce'});
+  expect(await page.locator('.a2a-link__flow').first().evaluate(el=>getComputedStyle(el).animationName)).toBe('none');
+  await page.locator('#sharedGalaxy').click();await page.locator('.shared-galaxy-agent').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);expect(await page.evaluate(()=>window.selected.conversationId)).toBe('room');
+});
+test('galaxy fits the real desktop dashboard template',async({page})=>{
+  const ejs=require('ejs');
+  const locals={agents:[],groups:[],encryptionSalt:'',isGoogleAuth:false,csrfToken:'fixture',cspNonce:'fixture',assetUrl:p=>p,safeJsonForScript:JSON.stringify,user:{userId:'fixture',displayName:'Council test',email:'fixture@example.test'},currentPath:'/dashboard'};
+  const body=await ejs.renderFile(path.join(root,'views/dashboard.ejs'),locals);
+  let html=await ejs.renderFile(path.join(root,'views/layout.ejs'),{...locals,body});
+  html=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<link\b[^>]*>/gi,'');
+  html=html.replace('</head>',`<style>${['tailwind','style','agent-actions','council-sharing'].map(f=>fs.readFileSync(path.join(root,`public/css/${f}.css`),'utf8')).join('\n')}</style></head>`);
+  await page.setViewportSize({width:1440,height:1000});await page.setContent(html);
+  await page.addScriptTag({path:path.join(root,'public/js/council-sharing.js')});
+  await page.evaluate(()=>{
+    window.CouncilSharing.updateContexts([{agentId:'remote',agentName:'Remote Agent',conversationId:'room',mode:'shared',role:'participant',membershipStatus:'active'}]);
+    window.CouncilSharing.updateOrbit([],[],null);
+  });
+  await expect(page.locator('#sharedGalaxy')).toBeVisible();
+  const circle=await page.locator('#councilCircle').boundingBox(),galaxy=await page.locator('#sharedGalaxy').boundingBox();
+  expect(galaxy.x).toBeGreaterThanOrEqual(circle.x);expect(galaxy.x+galaxy.width).toBeLessThanOrEqual(circle.x+circle.width);
+  await page.locator('#sharedGalaxy').click();await expect(page.getByRole('dialog',{name:'Shared galaxy'})).toBeVisible();
+  await page.screenshot({path:test.info().outputPath('real-dashboard-galaxy.png')});
+});

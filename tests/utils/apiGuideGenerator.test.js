@@ -398,7 +398,7 @@ printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', tim
     // ran agent-runner.sh on their own machine, fetch_config_from_api returned
     // that path and load_config wrote it straight into PROJECT_ROOT, so the
     // next `cd "$PROJECT_ROOT"` (in run_agent_command) crashed with:
-    //   ./agent-runner.sh: line NNNN: cd: /home/ubuntu/projects/AgentsMCPspace: No such file or directory
+    //   ./agent-runner.sh: line NNNN: cd: /some/server/project: No such file or directory
     // and the spawned codex CLI itself reported "Error: No such file or
     // directory (os error 2)". The agent-runner must defend itself by only
     // honoring a configured project_path when the directory actually exists.
@@ -702,7 +702,8 @@ printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', tim
     it('offers Antigravity provider/model choices and runs agy in print mode', () => {
       expect(cliScript).toContain('antigravity (Antigravity CLI - direct, uses agy -p)');
       expect(cliScript).toContain('Select Antigravity model:');
-      expect(cliScript).toContain('claude-opus-4-6-thinking (Claude Opus 4.6 Thinking)');
+      expect(cliScript).toContain('gemini-4-argon (Gemini 4 Argon)');
+      expect(cliScript).toContain('claude-opus-5-5 (Claude Opus 5.5)');
       expect(cliScript).toContain('gemini-3.8-flash (Gemini 3.8 Flash)');
       expect(cliScript).toContain('prompt_text=$(cat "$prompt_file")');
       expect(cliScript).toContain('agy models');

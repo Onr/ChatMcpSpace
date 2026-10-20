@@ -4,6 +4,7 @@
 // Opt-in replacement listener for one paired identity. Does not alter provider permissions.
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const {
   spawn
@@ -35,6 +36,15 @@ const { ExecutionSupervisor } = require('../src/shared/executorSupervisor');
 const { BoundActionBroker, hash, canonical } = require('../src/shared/boundActionBroker');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_OUTPUT_BYTES = 20 * 1000 * 1000;
+const INTERRUPTED_REPLY = 'My previous run was interrupted before I could finish. I am ready for your next message.';
+
+function runtimeTimeout(env, managed = false) {
+  const value = Number(env.EXTERNAL_AGENT_TIMEOUT_MS || (managed ? 3600000 : 600000));
+  if (!Number.isInteger(value) || value < 1000 || value > 3600000) {
+    throw new Error('Runtime timeout must be between 1000 and 3600000 milliseconds.');
+  }
+  return value;
+}
 
 function canonicalLocalPath(localPath) {
   let current = path.resolve(localPath);
@@ -354,6 +364,9 @@ class SharedRunner {
           cwd: profile.cwd || process.cwd(),
           env: {
             ...process.env,
+            // Permit outbound DMs from this trusted provider without admitting
+            // a second private inbox consumer or private user-message writer.
+            CHATSPACE_SHARED_A2A_RUNTIME: this.executionMode === 'trusted' ? this.runtimeId : '',
             ...(profile.managedRunner ? {
               CHATSPACE_SHARED_TURN: '1',
               CHATSPACE_SHARED_PROVIDER: profile.provider,
@@ -416,7 +429,11 @@ class SharedRunner {
         // details must never be copied into errors delivered to shared chats.
         child.stderr.on('data', b => { diagnostics = (diagnostics + b.toString()).slice(-64000); });
         child.on('error', finish);
-        child.on('close', code => finish(failure || (code === 0 && !signal?.aborted ? null : new Error('Provider execution did not complete successfully'))));
+        child.on('close', code => {
+          const error = failure || (code === 0 && !signal?.aborted ? null : new Error('Provider execution did not complete successfully'));
+          if (error && signal?.aborted && signal.reason?.name === 'TimeoutError') error.code = 'PROVIDER_TIMEOUT';
+          finish(error);
+        });
         child.stdin.on('error', () => {});
         child.stdin.end(messages.map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('\n\n'));
         if (signal?.aborted) abort();
@@ -643,7 +660,7 @@ class SharedRunner {
     if (bytes.toString('base64') !== file.bytesBase64) throw new Error('Restricted saved artifact encoding is invalid');
     return bytes;
   }
-  taskAuthorizationWatch(taskId, controller) {
+  taskAuthorizationWatch(taskId, controller, maxDeadlineMs = 900000) {
     let closed = false, timer = null, pending = null, deadlineTimer = null;
     const watch = { cancellationPending: false };
     watch.check = () => pending ||= (async () => {
@@ -654,7 +671,7 @@ class SharedRunner {
           throw new ExecutorUnavailableError('Task authorization ended; stopping restricted execution');
         }
         const deadline = typeof result.deadlineAt === 'string' ? Date.parse(result.deadlineAt) : NaN;
-        if (!Number.isFinite(deadline) || deadline <= Date.now() || deadline > Date.now() + 900000) {
+        if (!Number.isFinite(deadline) || deadline <= Date.now() || deadline > Date.now() + maxDeadlineMs) {
           throw new ExecutorUnavailableError('A current finite task deadline is required');
         }
         if (!watch.deadlineAt || deadline < watch.deadlineAt) {
@@ -674,6 +691,38 @@ class SharedRunner {
     watch.start = () => { if (!closed) { timer = setTimeout(poll, 1000); timer.unref?.(); } };
     watch.close = async () => { closed = true; clearTimeout(timer); clearTimeout(deadlineTimer); await pending?.catch(() => {}); };
     return watch;
+  }
+  interruptionReply(p) {
+    return p.failureReason === 'timeout'
+      ? `This run reached its ${Math.ceil(this.bridge.timeoutMs / 60000)}-minute time limit before finishing. It may have made partial changes. Your request has been preserved; review the work before retrying.`
+      : INTERRUPTED_REPLY;
+  }
+  async interruptShared(p) {
+    // A failed provider turn is a chat outcome, not a lock on the whole inbox.
+    // Keep its journal, publish one stable notice, and never repeat its tools.
+    const detail = await this.api('/' + p.batch.room.id);
+    const version = detail.room.key_version;
+    if (!p.interruptionNotice || p.interruptionNotice.keyVersion !== version) {
+      const key = (await this.keys(detail)).get(version);
+      p.interruptionNotice = {
+        id: p.interruptionNotice?.id || crypto.randomUUID(), keyVersion: version,
+        payload: await C.encrypt(key, {
+          text: this.interruptionReply(p),
+          options: [], files: []
+        }, `${detail.room.id}:${version}`)
+      };
+      p.phase = 'interruption_pending';
+      this.persist();
+    }
+    if (this.bridge.file && UUID.test(p.batch.id)) {
+      saveState(path.join(path.dirname(this.bridge.file), `interrupted-shared-${p.batch.id}.json`), {
+        interruptedAt: new Date().toISOString(), pending: p
+      });
+    }
+    await this.api(`/batches/${p.batch.id}/interrupted`, { message: p.interruptionNotice });
+    this.state.shared.pending = null;
+    this.persist();
+    console.log('Interrupted run closed; ready for new messages.');
   }
   async sharedTurn() {
     for (const profile of this.profiles) this.assertConnectorSeparation(profile);
@@ -707,6 +756,12 @@ class SharedRunner {
       await this.api(`/tasks/${p.batch.id}/cancellation/confirm`, { confirmedStopped: true });
       this.state.shared.pending = null;
       this.persist();
+      return true;
+    }
+    if (['running', 'uncertain', 'interruption_pending'].includes(p.phase) &&
+        this.trustedContext(p.batch.context) && !p.cleanupReceipt && !p.action &&
+        !(this.state.shared.retainedExecutions?.length)) {
+      await this.interruptShared(p);
       return true;
     }
     if (['running', 'uncertain'].includes(p.phase)) {
@@ -820,7 +875,7 @@ class SharedRunner {
         this.bridge.busy = true;
         this.controller = new AbortController();
         if (p.batch.context?.contextVersion === 2) {
-          authorizationWatch = this.taskAuthorizationWatch(p.batch.id, this.controller);
+          authorizationWatch = this.taskAuthorizationWatch(p.batch.id, this.controller, trusted ? 3600000 : 900000);
           await authorizationWatch.check();
           authorizationWatch.start();
         }
@@ -834,7 +889,7 @@ class SharedRunner {
             text: JSON.stringify(input)
           }, ...images] : JSON.stringify(input)
         }];
-        const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(600000)]);
+        const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(trusted ? this.bridge.timeoutMs : 600000)]);
         const execute = selectedProfile => {
           signal.throwIfAborted();
           taskFiles?.assertReady();
@@ -906,6 +961,7 @@ class SharedRunner {
           if (!this.state.shared.retainedExecutions.some(previous => previous.taskId === receipt.taskId)) this.state.shared.retainedExecutions.push(receipt);
         }
         p.phase = 'uncertain';
+        if (e.code === 'PROVIDER_TIMEOUT' || e.name === 'TimeoutError') p.failureReason = 'timeout';
         if (e.diagnosticsFile) p.diagnosticsFile = e.diagnosticsFile;
         this.persist();
         await this.api('/release', {
@@ -1006,6 +1062,12 @@ class SharedRunner {
   async tick() {
     await this.register();
     await this.bridge.heartbeat(this.busy || this.bridge.busy);
+    // A crash between inbox acknowledgement and release leaves only this slot.
+    if (!this.state.pending && this.state.shared.privateExecution) {
+      await this.api('/release', { executionId: this.state.shared.privateExecution });
+      this.state.shared.privateExecution = null;
+      this.persist();
+    }
     // Always recover an existing execution first. Between fresh tasks, private
     // work gets the next admission after a shared turn, even under guest load.
     if (!this.state.shared.pending && !this.state.pending && !this.state.shared.privateExecution && this.state.shared.lastTurnKind === 'shared') await this.bridge.poll();
@@ -1015,6 +1077,23 @@ class SharedRunner {
     if (!this.state.pending) await this.bridge.poll();
     if (!this.state.pending) return;
     const prior = this.state.shared.privateExecution;
+    if (prior && ['running', 'uncertain'].includes(this.state.pending.phase) && this.executionMode === 'trusted') {
+      if (this.bridge.file && UUID.test(prior)) saveState(path.join(path.dirname(this.bridge.file), `interrupted-private-${prior}.json`), {
+        interruptedAt: new Date().toISOString(), pending: this.state.pending
+      });
+      this.state.pending.interrupted = true;
+      this.state.pending.output = this.interruptionReply(this.state.pending);
+      this.bridge.prepareReply(this.state.pending);
+    }
+    if (prior && this.state.pending.interrupted) {
+      await this.bridge.completePending();
+      await this.api('/release', { executionId: prior });
+      this.state.shared.privateExecution = null;
+      this.state.shared.lastTurnKind = 'private';
+      this.persist();
+      console.log('Interrupted private run closed; ready for new messages.');
+      return;
+    }
     if (prior && ['running', 'uncertain'].includes(this.state.pending.phase)) throw new Error('Private execution uncertain; use external bridge retry/skip after inspecting the runtime.');
     const id = prior || crypto.randomUUID();
     const {
@@ -1059,6 +1138,59 @@ function prepareManagedProfile(env) {
   saveState(profileFile, profiles);
   return profiles;
 }
+
+// DrvFS mounts without metadata may report 0777 even after chmod(0600).
+// Keep credentials on a filesystem that can enforce permissions, without
+// changing the project directory or weakening the bridge's loadState check.
+function managedStorageDirectory(env, { home = os.homedir() } = {}) {
+  const file = env.CHATSPACE_BRIDGE_STATE;
+  if (!file || !path.isAbsolute(file)) throw new Error('Managed bridge state requires an absolute path');
+  const original = path.dirname(file);
+  fs.mkdirSync(original, { recursive: true, mode: 0o700 });
+  function supportsPrivateFiles(directory) {
+    const probe = path.join(directory, `.permissions-${crypto.randomUUID()}`);
+    try {
+      fs.writeFileSync(probe, '', { mode: 0o600, flag: 'wx' });
+      return (fs.statSync(probe).mode & 0o077) === 0;
+    } finally { if (fs.existsSync(probe)) fs.unlinkSync(probe); }
+  }
+  // Always use an existing relocation, including after mount settings change.
+  const destination = path.join(home, '.chatmcp', 'private-state',
+    crypto.createHash('sha256').update(path.resolve(file)).digest('hex'));
+  if (!fs.existsSync(destination) && supportsPrivateFiles(original)) return original;
+  for (const directory of [path.join(home, '.chatmcp'), path.join(home, '.chatmcp', 'private-state'), destination]) {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || (stat.uid !== undefined && process.getuid && stat.uid !== process.getuid())) {
+      throw new Error('Private bridge storage must be a directory owned by your user');
+    }
+    fs.chmodSync(directory, 0o700);
+    if (fs.statSync(directory).mode & 0o077) {
+      throw new Error('Your Linux home cannot protect bridge credentials. Use a Linux home filesystem with private file permissions.');
+    }
+  }
+  if (!supportsPrivateFiles(destination)) throw new Error('Private bridge storage cannot enforce permissions');
+  const target = path.join(destination, path.basename(file));
+  if (fs.existsSync(file)) {
+    if (fs.existsSync(`${file}.lock`)) throw new Error('Stop the project bridge listener before moving its state to private storage');
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || (process.getuid && stat.uid !== process.getuid())) {
+      throw new Error('Existing bridge state must be a regular file owned by your user');
+    }
+    if (fs.existsSync(target)) {
+      if (fs.readFileSync(file, 'utf8') !== fs.readFileSync(target, 'utf8')) {
+        throw new Error('Both project and private bridge states exist. Stop the listener and resolve the conflicting states before restarting.');
+      }
+    } else {
+      // Preserve enrollment, pending work and encryption keys; never re-enroll
+      // an identity merely because its original filesystem lacks chmod support.
+      saveState(target, JSON.parse(fs.readFileSync(file, 'utf8')));
+      loadState(target);
+    }
+    fs.unlinkSync(file);
+  }
+  return destination;
+}
 async function enrollManaged(file, env) {
     if (fs.existsSync(file)) throw new Error('State already exists; use it or choose another path');
     if (!env.API_KEY || !env.API_BASE || !env.AGENT_NAME || !env.ENCRYPTION_SALT || !env.USER_PASSWORD) throw new Error('Load the existing managed agent environment locally before init-managed');
@@ -1089,9 +1221,20 @@ async function enrollManaged(file, env) {
     });
 }
 async function main() {
-  const file = process.env.CHATSPACE_BRIDGE_STATE;
+  let file = process.env.CHATSPACE_BRIDGE_STATE;
   if (!file) throw new Error('Set CHATSPACE_BRIDGE_STATE to an existing paired state file');
   const command = process.argv[2];
+  if (command === 'storage-directory') {
+    console.log(managedStorageDirectory(process.env));
+    return;
+  }
+  if (command === 'run-managed') {
+    const storage = managedStorageDirectory(process.env);
+    file = path.join(storage, path.basename(file));
+    process.env.CHATSPACE_BRIDGE_STATE = file;
+    process.env.CHATSPACE_SHARED_PROFILES = path.join(storage, 'shared-profiles.json');
+    process.env.CHATSPACE_SHARED_EXPORT_DIR = path.join(storage, 'shared-exports');
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const release = acquireLock(file);
   let timer;
@@ -1112,6 +1255,7 @@ async function main() {
     const bridge = new Bridge(state, {
       file,
       runtimeKey: process.env.EXTERNAL_AGENT_API_KEY || 'managed-local',
+      timeoutMs: runtimeTimeout(process.env, command === 'run-managed'),
       sharedFiles: true
     });
     const protocolVersion = Number(process.env.CHATSPACE_SHARED_PROTOCOL || '2');
@@ -1185,6 +1329,8 @@ if (require.main === module) main().catch(e => {
 });
 module.exports = {
   SharedRunner,
+  runtimeTimeout,
   prepareManagedProfile,
+  managedStorageDirectory,
   readApprovedExport
 };

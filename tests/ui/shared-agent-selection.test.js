@@ -22,7 +22,7 @@ function setup(overrides = {}) {
   };
   const html = state.legacyTemplate ? template.replace(/<form id="sharedCreate">[\s\S]*?<\/form>/,
     '<form id="sharedCreate"><label>Agent <select name="agentId" required></select></label><label>Conversation title <input name="title" required></label><button>Create</button><p>Only connected shared-capable runtimes appear. Stop the old listener before connecting the shared runner.</p></form>') : template;
-  dom = new JSDOM(ejs.render(html, { csrfToken: 'csrf-token' }), {
+  dom = new JSDOM(ejs.render(html, { csrfToken: 'csrf-token', assetUrl: require('../../src/utils/assetUrl').assetUrl }), {
     url: 'https://space.example/shared' + (state.search || ''), runScripts: 'outside-only'
   });
   dom.window.Date.now = () => now;

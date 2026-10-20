@@ -26,6 +26,9 @@
 }
 
 html {
+  /* Paint the canvas and mobile browser controls beyond the app shell. */
+  background-color: #020617;
+  color-scheme: dark;
   overscroll-behavior-x: none;
   overscroll-behavior-y: none;
 }
@@ -117,8 +120,16 @@ body::before {
   gap: 0.25rem;
 }
 
+.message-bubble > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
 /* Markdown Typography Styles for Message Content */
 .message-content {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   line-height: 1.45;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -217,6 +228,9 @@ body::before {
   border-radius: 0.25em;
   font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
   font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Code blocks */
@@ -225,6 +239,11 @@ body::before {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0.5em;
   padding: 0.75em 1em;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   overflow-x: auto;
   margin-bottom: 0.75em;
 }
@@ -235,6 +254,9 @@ body::before {
   padding: 0;
   color: #e2e8f0;
   font-size: 0.85em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Blockquotes */
@@ -1044,7 +1066,107 @@ body::before {
   background: #f59e0b;
   flex-shrink: 0;
   box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
-  animation: tile-working-pulse 1.5s ease-in-out infinite;
+  /* Glow-only pulse: tile-working-pulse fades opacity, which would also fade
+     the hover hint rendered by ::after. */
+  animation: chat-header-working-glow 1.5s ease-in-out infinite;
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+@keyframes chat-header-working-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(245, 158, 11, 0.45); }
+  50% { box-shadow: 0 0 12px 2px rgba(245, 158, 11, 0.85); }
+}
+
+.chat-header__working-indicator::after {
+  content: attr(data-hint);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, -2px);
+  padding: 0.3rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(15, 23, 42, 0.96);
+  color: #fde68a;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 60;
+}
+
+.chat-header__working-indicator:hover::after,
+.chat-header__working-indicator:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.chat-header__working-indicator:focus-visible {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.6);
+}
+
+.chat-header__unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fcd34d;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: default;
+}
+
+.chat-header__unread.hidden {
+  display: none;
+}
+
+.chat-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: flex-start;
+  margin-top: 0.2rem;
+}
+
+.chat-header__share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  background: rgba(15, 23, 42, 0.75);
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.chat-header__share-btn[hidden] {
+  display: none;
+}
+
+.chat-header__share-btn:hover {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.chat-header__share-btn:focus-visible {
+  outline: 2px solid #6ee7b7;
+  outline-offset: 2px;
 }
 
 .shared-participants-button {
@@ -1075,8 +1197,7 @@ body::before {
   align-items: center;
   gap: 0.35rem;
   flex-shrink: 0;
-  margin-left: auto;
-  margin-top: 0.2rem;
+  height: 1.75rem;
   border-radius: 999px;
   border: 1px solid rgba(52, 211, 153, 0.25);
   background: rgba(15, 23, 42, 0.75);
@@ -1237,11 +1358,11 @@ body::before {
   background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05), transparent 70%), var(--surface);
 }
 
-/* Stats bar: always horizontal 3-column layout */
+/* Give the paired total/active filters half of the stats bar. */
 #mobileStatsToggle > .grid {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.5rem;
   text-align: center;
 }
 
@@ -1921,7 +2042,7 @@ body.orbit-dragging .agent-seat {
 }
 
 .agent-seat--active:hover {
-  filter: drop-shadow(0 0 25px rgba(16, 185, 129, 0.4));
+  filter: drop-shadow(0 0 12px rgba(var(--agent-priority-rgb), 0.35));
 }
 
 /* Disconnected agent icon (orbit view) */
@@ -1941,34 +2062,62 @@ body.orbit-dragging .agent-seat {
   height: 10px;
 }
 
+/* Priority owns the aura; selection has a separate neutral outline. */
+.agent-seat {
+  --agent-priority-rgb: 100, 116, 139;
+  --agent-aura-size: 8px;
+  --agent-aura-opacity: 0.3;
+}
+
+.agent-seat--urgent {
+  --agent-priority-rgb: 248, 113, 113;
+  --agent-aura-size: 20px;
+  --agent-aura-opacity: 0.85;
+}
+
+.agent-seat--attention {
+  --agent-priority-rgb: 251, 191, 36;
+  --agent-aura-size: 13px;
+  --agent-aura-opacity: 0.65;
+}
+
+.agent-seat .agent-avatar::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 2px solid rgba(var(--agent-priority-rgb), var(--agent-aura-opacity));
+  border-radius: 50%;
+  box-shadow: 0 0 var(--agent-aura-size) rgba(var(--agent-priority-rgb), var(--agent-aura-opacity));
+  pointer-events: none;
+  z-index: 0;
+}
+
 .agent-seat--urgent .agent-avatar::before {
-  content: '';
-  position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(239, 68, 68, 0.6), transparent 70%);
-  z-index: -1;
-  animation: urgentPulse 2s ease-in-out infinite;
+  animation: agentPriorityPulse 2s ease-in-out infinite;
 }
 
-.agent-seat--attention .agent-avatar::before {
-  content: '';
-  position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(251, 191, 36, 0.5), transparent 70%);
-  z-index: -1;
-  animation: pulse 3s ease-in-out infinite;
+/* Override the blue focus/loading shadow without hiding the priority aura. */
+.agent-seat .agent-avatar > .rounded-full {
+  border-color: rgba(var(--agent-priority-rgb), var(--agent-aura-opacity));
+  box-shadow: 0 0 var(--agent-aura-size) rgba(var(--agent-priority-rgb), var(--agent-aura-opacity));
+  animation: none;
 }
 
-.agent-seat--selected .agent-avatar::before {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.6), transparent 70%);
-  z-index: -1;
-  opacity: 1;
+.agent-seat--selected .agent-avatar > .rounded-full,
+.agent-seat--focused .agent-avatar > .rounded-full {
+  outline: 2px solid rgba(241, 245, 249, 0.9);
+  outline-offset: 7px;
+}
+
+@keyframes agentPriorityPulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-seat--urgent .agent-avatar::before {
+    animation: none;
+  }
 }
 
 @keyframes urgentPulse {
@@ -2206,11 +2355,9 @@ body.dashboard-fast-mode #mobileStatsToggle {
   display: none !important;
 }
 
-/* Fast Mode: keep the agent list usable for chat switching but drop the
-   "Agents" title and count chip so the list itself takes priority. */
-body.dashboard-fast-mode .agent-list-title,
-body.dashboard-fast-mode .agent-list-count {
-  display: none !important;
+/* Keep filter names visible in Fast Mode so the controls remain identifiable. */
+body.dashboard-fast-mode .agent-list-filter-pills {
+  font-size: 0.7rem;
 }
 
 /* Fast Mode: float the council actions dropdown near the top nav so the
@@ -3718,6 +3865,8 @@ button:focus-visible {
   }
 
   body:has(#dashboardRoot) {
+    /* Override min-h-screen while the visual viewport is keyboard-sized. */
+    min-height: 0;
     overflow: hidden !important;
     height: 100vh;
     height: 100dvh;
@@ -4712,6 +4861,76 @@ button:focus-visible {
   min-width: 0;
 }
 
+.agent-list-filter-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.agent-list-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.32rem 0.65rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(148, 163, 184, 0.85);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.agent-list-filter-pill:hover {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(148, 163, 184, 0.32);
+  color: #f8fafc;
+}
+
+.agent-list-filter-pill.is-active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.15);
+}
+
+.agent-list-filter-pill[data-agent-status-filter="active"].is-active {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.48);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.16);
+}
+
+.agent-list-filter-divider {
+  color: rgba(148, 163, 184, 0.45);
+  font-size: 0.75rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.agent-status-filter-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.agent-status-filter-btn:hover {
+  background: rgba(30, 41, 59, 0.65);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.agent-status-filter-btn.is-active {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(52, 211, 153, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.12);
+}
+
+.agent-status-filter-btn[data-agent-status-filter="active"].is-active {
+  border-color: rgba(56, 189, 248, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.14);
+}
+
 .agent-list-title {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -4720,13 +4939,22 @@ button:focus-visible {
   color: rgba(148, 163, 184, 0.8);
 }
 
+.agent-list-filter-pill.is-active .agent-list-title {
+  color: #e2e8f0;
+}
+
 .agent-list-count {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   background: rgba(16, 185, 129, 0.2);
   color: #10b981;
   padding: 0.125rem 0.5rem;
   border-radius: 999px;
+}
+
+.agent-list-count--active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
 }
 
 .agent-list-search {
@@ -5037,8 +5265,27 @@ button:focus-visible {
   }
 }
 
-body.mobile-list-expanded #collapseMobileListBtn svg {
-  transform: rotate(180deg);
+/* The orbit logo stays upright; the button border indicates the open list. */
+#collapseMobileListBtn[aria-expanded="true"],
+.fast-mode-chat-list-toggle[aria-expanded="true"] {
+  border-color: #22d3ee !important;
+  background: rgba(8, 145, 178, 0.22) !important;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18);
+}
+
+#collapseMobileListBtn:focus-visible,
+.fast-mode-chat-list-toggle:focus-visible,
+.fast-mode-placeholder-open-chats:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 3px;
+}
+
+#collapseMobileListBtn .agent-list-logo,
+.fast-mode-chat-list-toggle .agent-list-logo,
+.fast-mode-placeholder-open-chats .agent-list-logo {
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: 0 0 auto;
 }
 
 #collapseMobileListBtn:active {
@@ -5657,6 +5904,23 @@ body.mobile-list-expanded #collapseMobileListBtn svg {
 
 .image-preview-item:hover .image-preview-filename {
   opacity: 1;
+}
+
+/* Upload button desktop base alignment inside composer textarea */
+#messageInputArea #generalFileUploadLabel,
+#messageInputArea #imageUploadLabel {
+  position: absolute;
+  bottom: 0.75rem;
+  width: 2rem;
+  height: 2rem;
+}
+
+#messageInputArea #generalFileUploadLabel {
+  right: 3.25rem;
+}
+
+#messageInputArea #imageUploadLabel {
+  right: 0.75rem;
 }
 
 /* Upload button disabled state */
@@ -7398,6 +7662,8 @@ main>*:nth-child(3) {
   }
 
   body:has(#dashboardRoot) {
+    /* Override min-h-screen while the visual viewport is keyboard-sized. */
+    min-height: 0;
     position: fixed;
     inset: 0;
     width: 100%;
@@ -7519,6 +7785,8 @@ main>*:nth-child(3) {
   }
 
   body:has(#dashboardRoot) {
+    /* Override min-h-screen while the visual viewport is keyboard-sized. */
+    min-height: 0;
     position: fixed;
     inset: 0;
     width: 100%;
@@ -8350,8 +8618,16 @@ main>*:nth-child(3) {
   line-height: 1.45;
   padding: 0.45rem 0.6rem;
   border-radius: 0.85rem;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  min-width: 0;
+  overflow: hidden;
   max-width: 90%;
+}
+
+.chat-tile__bubble > * {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .chat-tile__bubble--user {
@@ -8726,10 +9002,33 @@ main>*:nth-child(3) {
    with a faint inset ring and let hover/press carry the affordance. Only
    transform, box-shadow and colours change, so these stay cheap to animate. */
 #groupBackBtn {
-  border-color: transparent;
-  background: rgba(148, 163, 184, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.1);
+  gap: 0.5rem;
+  padding: 0.3rem 0.85rem 0.3rem 0.3rem;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(15, 23, 42, 0.85));
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.28), 0 6px 18px -12px rgba(16, 185, 129, 0.6);
+  color: #d1fae5;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+#groupBackBtn .group-back-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.22);
+  color: #6ee7b7;
+}
+
+#groupBackBtn:focus-visible {
+  outline: 2px solid #6ee7b7;
+  outline-offset: 2px;
 }
 
 #groupBackBtn svg {
@@ -8746,8 +9045,9 @@ a.rounded-full.border-white\/10:not([class*="border-emerald"]):not([class*="bord
 /* Hover lift only where a real pointer can hover, so it does not stick after a tap. */
 @media (hover: hover) and (pointer: fine) {
   #groupBackBtn:hover {
-    background: rgba(148, 163, 184, 0.16);
-    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16), 0 6px 18px -10px rgba(16, 185, 129, 0.55);
+    color: #fff;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.26), rgba(15, 23, 42, 0.85));
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.5), 0 8px 22px -10px rgba(16, 185, 129, 0.7);
   }
 
   #groupBackBtn:hover svg {
@@ -8850,3 +9150,168 @@ a.rounded-full.border-white\/10:active {
 .message-reply-draft { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
 .message-reply-draft .message-reply-quote { margin: 0; cursor: default; }
 .message-reply-highlight { outline: 2px solid rgba(52,211,153,.65); outline-offset: 3px; border-radius: .75rem; }
+
+/* Device identicons sit opposite the priority/status indicators. */
+.agent-device-badge {
+  position: absolute;
+  bottom: -2px;
+  left: -3px;
+  z-index: 25;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border: 1px solid rgba(226, 232, 240, .65);
+  border-radius: 5px;
+  background: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1;
+}
+.agent-device-badge svg { display: block; width: 100%; height: 100%; border-radius: 1px; }
+.agent-list-item__avatar { position: relative; overflow: visible; }
+.agent-list-item__avatar .agent-device-badge { width: 17px; height: 17px; bottom: -3px; left: -4px; }
+.dock-agent { position: relative; }
+.dock-agent > .agent-device-badge { top: 30px; bottom: auto; left: 4px; width: 17px; height: 17px; }
+
+/* Shared terminal setup dialog. */
+#agentSetupDialog::backdrop { background: rgb(2 6 23 / 78%); backdrop-filter: blur(5px); }
+.agent-setup-platforms { display: flex; padding: 4px; gap: 4px; border: 1px solid #334155; border-radius: 12px; background: #020617; }
+.agent-setup-platforms button { flex: 1; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #94a3b8; }
+.agent-setup-platforms button[aria-pressed="true"] { color: #a7f3d0; background: #1e293b; box-shadow: 0 1px 3px #0004; }
+.agent-setup-platforms button:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
+.agent-setup-card { padding: 16px; border: 1px solid #334155; border-radius: 12px; background: #0b1222; }
+.agent-setup-card > * + * { margin-top: 10px; }
+.agent-setup-card summary { cursor: pointer; }
+#agentSetupDialog textarea { line-height: 1.7; }
+
+/* Mobile dashboard: keep paired stats and long agent names inside the viewport. */
+@media (max-width: 1023px), (pointer: coarse) and (orientation: landscape) and (max-height: 600px) {
+  #mobileStatsToggle > .grid > *,
+  #mobileStatsToggle [role="group"],
+  #agentHeaderInfo {
+    min-width: 0;
+  }
+
+  #mobileStatsToggle [role="group"] {
+    gap: 0.15rem;
+  }
+
+  #mobileStatsToggle .agent-status-filter-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 2.75rem;
+    padding-inline: 0.15rem;
+  }
+
+  #mobileStatsToggle p:last-child {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.2 !important;
+  }
+
+  #agentHeaderInfo > .flex:first-child {
+    gap: 0.4rem;
+  }
+
+  #selectedAgentName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #selectedAgentActionIcon,
+  .fast-mode-chat-list-toggle,
+  #selectedChatContextStatus,
+  #selectedAgentWorkingIndicator,
+  #agentUnreadBadge {
+    flex-shrink: 0;
+  }
+
+  #collapseMobileListBtn,
+  .fast-mode-chat-list-toggle {
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #collapseMobileListBtn::after,
+  #collapseMobileListBtn::before {
+    animation: none;
+  }
+}
+
+/* Tablet split view needs enough room for the chat composer beside the council. */
+@media (min-width: 768px) and (max-width: 1023px) and (min-height: 601px),
+       (pointer: coarse) and (min-width: 768px) and (max-width: 1180px) and (min-height: 601px) {
+  .dashboard-main-grid > .council-chamber {
+    flex: 0 0 38% !important;
+    min-width: 0 !important;
+    max-width: 38% !important;
+  }
+
+  /* The orbit needs desktop width; use the searchable agent list in this split. */
+  .council-chamber #councilCircle,
+  .council-chamber #mobileAgentDock,
+  #mobileHeader .council-header-title,
+  #headerNavLeft,
+  #headerNavRight {
+    display: none !important;
+  }
+
+  #mobileHeader {
+    padding: 0.5rem !important;
+  }
+
+  #mobileHeader .mobile-council-actions-toggle {
+    display: flex !important;
+    flex-shrink: 0;
+  }
+
+  #mobileHeader .council-header-actions {
+    display: none !important;
+    position: absolute;
+    top: 100%;
+    right: 0.5rem;
+    z-index: 160;
+    flex-direction: column;
+    padding: 0.5rem;
+    border-radius: 0.75rem;
+    background: #0f172a;
+  }
+
+  body.mobile-council-actions-open #mobileHeader .council-header-actions {
+    display: flex !important;
+  }
+
+  #councilListSection {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #mobileStatsToggle {
+    padding: 0.4rem;
+    font-size: 0.65rem;
+  }
+
+  .agent-list-header {
+    padding-inline: 0.5rem;
+  }
+
+  .agent-list-filter-pill {
+    font-size: 0.65rem;
+    padding-inline: 0.35rem;
+    gap: 0.25rem;
+  }
+
+  body.dashboard-fast-mode #agentListPanel.mobile-expanded {
+    max-height: none !important;
+  }
+}

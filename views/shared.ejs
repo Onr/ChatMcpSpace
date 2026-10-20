@@ -1,5 +1,5 @@
-<link rel="stylesheet" href="/css/sharing-theme.css?v=20261009">
-<link rel="stylesheet" href="/css/shared.css?v=20261009">
+<link rel="stylesheet" href="<%= assetUrl('/css/sharing-theme.css') %>">
+<link rel="stylesheet" href="<%= assetUrl('/css/shared.css') %>">
 <section id="sharedApp" class="chat-shell" data-csrf="<%= csrfToken || '' %>" aria-label="Shared conversations">
   <header class="chat-page-header">
     <div><p class="chat-eyebrow">Your workspace, together</p><h1>Shared conversations<span class="chat-heading-dot" aria-hidden="true">.</span></h1><p>A place for your team and agent to think, build and move work forward.</p></div>
@@ -57,9 +57,9 @@
     </section>
   </div>
 </section>
-<script src="/js/encryption.js"></script>
-<script src="/js/shared-crypto.js"></script>
-<script src="/js/vendor/dompurify.min.js"></script>
-<script src="/js/rich-rendering.js"></script>
-<script src="/js/sharing-ui.js?v=20261009"></script>
-<script src="/js/shared-chat.js?v=20261009"></script>
+<script src="<%= assetUrl('/js/encryption.js') %>"></script>
+<script src="<%= assetUrl('/js/shared-crypto.js') %>"></script>
+<script src="<%= assetUrl('/js/vendor/dompurify.min.js') %>"></script>
+<script src="<%= assetUrl('/js/rich-rendering.js') %>"></script>
+<script src="<%= assetUrl('/js/sharing-ui.js') %>"></script>
+<script src="<%= assetUrl('/js/shared-chat.js') %>"></script>

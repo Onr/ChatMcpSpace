@@ -18,6 +18,7 @@ afterEach(() => {
 const locals = {
   agents: [], groups: [], encryptionSalt: '', isGoogleAuth: false,
   csrfToken: 'fixture', cspNonce: 'fixture',
+  assetUrl: require('../../src/utils/assetUrl').assetUrl,
   safeJsonForScript: require('../../src/utils/safeJsonHelper').safeJsonForScript
 };
 
@@ -63,7 +64,7 @@ test('legacy navigation remains available with the in-place flag off and disappe
   process.env.FEATURE_SHARED_CONVERSATIONS = 'true';
   process.env.FEATURE_GUEST_SHARING = 'true';
   delete process.env.FEATURE_IN_PLACE_AGENT_SHARING;
-  const locals = { title: 'Dashboard', user: { email: 'owner@example.test' }, body: '', cspNonce: 'test' };
+  const locals = { title: 'Dashboard', user: { email: 'owner@example.test' }, body: '', cspNonce: 'test', assetUrl: require('../../src/utils/assetUrl').assetUrl };
   const legacy = await ejs.renderFile(layout, locals);
   expect(legacy).toContain('href="/shared"');
   expect(legacy).toContain('href="/guest-sharing"');

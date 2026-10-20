@@ -56,6 +56,48 @@ async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
 }
 
 describe('Agent API routes', () => {
+  it('enrolls an owned native runtime without shared conversations or broad account access', async () => {
+    const f = await createAgentApiTestContext();
+    const previous = process.env.FEATURE_SHARED_CONVERSATIONS;
+    process.env.FEATURE_SHARED_CONVERSATIONS = 'false';
+    try {
+      const agentId = uuidv4();
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'Native Fixture']);
+      const response = await request(f.app).post('/api/agent/runtime-enroll').send({ agentName: 'Native Fixture', scopes: ['*'] }).expect(201);
+      expect(response.body.agentId).toBe(agentId);
+      expect(response.body.token).toMatch(/^agt_/);
+      expect(response.headers['cache-control']).toBe('no-store');
+      const credentials = (await f.query('SELECT token_hash, scopes_json FROM agent_api_credentials WHERE agent_id=$1', [agentId])).rows;
+      expect(credentials).toHaveLength(1);
+      expect(credentials[0].token_hash).not.toBe(response.body.token);
+      expect(credentials[0].scopes_json).toContain('agent.responses.read');
+      expect(credentials[0].scopes_json).not.toContain('*');
+      await request(f.app).post('/api/agent/runtime-enroll').send({ agentName: 'Unowned Agent' }).expect(404);
+      await request(f.app).post('/api/agent/runtime-enroll').send({}).expect(400);
+    } finally {
+      if (previous === undefined) delete process.env.FEATURE_SHARED_CONVERSATIONS; else process.env.FEATURE_SHARED_CONVERSATIONS = previous;
+      await f.pool.end();
+    }
+  });
+
+  it('does not let a scoped runtime mint another credential', async () => {
+    const f = await createAgentApiTestContext({ scopedAgentId: 'scoped-fixture' });
+    try { await request(f.app).post('/api/agent/runtime-enroll').send({ agentName: 'Native Fixture' }).expect(403); }
+    finally { await f.pool.end(); }
+  });
+
+  it('stores agent bug reports and feature requests as anonymous feedback', async () => {
+    const f = await createAgentApiTestContext();
+    try {
+      const res = await request(f.app).post('/api/agent/feedback')
+        .send({ type: 'bug', message: '  Send button misaligned  ', pageUrl: 'https://chatmcp.space/dashboard' }).expect(201);
+      expect(res.body.success).toBe(true);
+      const rows = (await f.query('SELECT message, kind, page_url FROM feedback')).rows;
+      expect(rows).toEqual([{ message: '[Bug report via agent] Send button misaligned', kind: 'feedback', page_url: 'https://chatmcp.space/dashboard' }]);
+      await request(f.app).post('/api/agent/feedback').send({ type: 'spam', message: 'x' }).expect(400);
+      await request(f.app).post('/api/agent/feedback').send({ type: 'feature', message: '   ' }).expect(400);
+    } finally { await f.pool.end(); }
+  });
   it('persists owner CLI grants so dashboard config loads cannot restore stale permission limits', async () => {
     const f = await createAgentApiTestContext(); const agentId = uuidv4();
     try {
@@ -68,6 +110,118 @@ describe('Agent API routes', () => {
       expect(loaded.body).toMatchObject({ allowedPermissions, config: { sandbox_mode: 'none', approval_mode: 'full-auto', project_path: '/project' } });
     } finally { await f.pool.end(); }
   });
+  it('registers a new CLI agent before its first message and safely retries the grant', async () => {
+    const f = await createAgentApiTestContext();
+    try {
+      await applyLineageSchema(f.query);
+      const body = { agentName: 'Fresh CLI Agent',
+        allowedPermissions: { codex: { '--sandbox': ['danger-full-access'] }, inter_agent: { enabled: true, mode: 'listen_all' } },
+        config: { model_provider: 'codex', model: 'default', approval_mode: 'full-auto', sandbox_mode: 'none', project_path: '/tmp/my project' } };
+      await request(f.app).post('/api/agent/runtime-permissions').send(body).expect(200);
+      const first = (await f.query('SELECT * FROM agents WHERE user_id=$1 AND agent_name=$2', [f.userId, body.agentName])).rows[0];
+      expect(first).toMatchObject({ can_spawn: true, inter_agent_mode: 'listen_all', runtime_config: body.config, allowed_permissions: body.allowedPermissions });
+      await request(f.app).post('/api/agent/runtime-permissions').send(body).expect(200);
+      const rows = (await f.query('SELECT agent_id FROM agents WHERE user_id=$1 AND agent_name=$2', [f.userId, body.agentName])).rows;
+      expect(rows).toEqual([{ agent_id: first.agent_id }]);
+      expect((await f.query('SELECT message_id FROM messages WHERE agent_id=$1', [first.agent_id])).rows).toEqual([]);
+      const loaded = await request(f.app).get('/api/agent/config').query({ agentName: body.agentName }).expect(200);
+      expect(loaded.body).toMatchObject({ config: body.config, allowedPermissions: body.allowedPermissions, interAgentMode: 'listen_all' });
+    } finally { await f.pool.end(); }
+  });
+
+  it.each(['interactive', 'headless-safe', 'headless-max'])('completes generated %s setup against the API before any runner starts', async mode => {
+    const f = await createAgentApiTestContext();
+    const fs = require('fs'), os = require('os'), path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-registration-'));
+    const server = f.app.listen(0, '127.0.0.1');
+    try {
+      await new Promise(resolve => server.once('listening', resolve));
+      const { generateMainCLIScript } = require('../../src/utils/apiGuideGenerator');
+      const generated = generateMainCLIScript('fixture-key', `http://127.0.0.1:${server.address().port}`);
+      // Use the real CLI functions and real curl. Replace only startup dependency
+      // installation/model discovery and terminal input; never start a provider.
+      const entry = generated.lastIndexOf('print_bootstrap_info "Initializing agent CLI..."');
+      expect(entry).toBeGreaterThan(0);
+      const harness = generated.slice(0, entry) + `
+        gum() {
+          case "$1" in
+            input) case "$*" in *"Agent Name:"*) printf '%s' 'CLI Fixture';; *) printf '%s' "$PWD";; esac ;;
+            choose) case "$*" in *"Permissions for this agent"*) printf max-access;; *) printf Cancel;; esac ;;
+            confirm) return 1 ;;
+          esac
+        }
+        ${mode === 'interactive' ? 'create_agent' : 'create_agent_headless "CLI Fixture"'}
+      `;
+      const cli = path.join(dir, 'agent-cli.sh');
+      fs.writeFileSync(cli, harness);
+      const run = args => new Promise((resolve, reject) => {
+        require('child_process').execFile('bash', [cli, ...args], { cwd: dir, timeout: 15000 }, (error, stdout, stderr) => {
+          if (error) reject(new Error(`${error.message}\n${stdout}\n${stderr}`)); else resolve(stdout);
+        });
+      });
+      const args = mode === 'interactive' ? [] : ['--headless', '--no-auto-start', mode === 'headless-safe' ? '--safe-defaults' : '--allow-all'];
+      await run(args);
+      const folder = path.join(dir, '.chatspace', 'cli_fixture', 'agent_state');
+      const config = JSON.parse(fs.readFileSync(path.join(folder, 'agent_config.json')));
+      const allowedPermissions = JSON.parse(fs.readFileSync(path.join(folder, 'allowed_permissions.json')));
+      const row = (await f.query('SELECT * FROM agents WHERE user_id=$1', [f.userId])).rows[0];
+      const { provider, started_at, ...savedConfig } = config;
+      expect(row).toMatchObject({ agent_name: 'CLI Fixture', runtime_config: savedConfig, allowed_permissions: allowedPermissions });
+      expect(row.runtime_config.project_path).toBe(dir);
+      expect(row.runtime_config.sandbox_mode).toBe(mode === 'headless-safe' ? 'workspace-write' : 'none');
+      // Resume the files left by an interrupted setup, preserving their config.
+      fs.writeFileSync(cli, generated.slice(0, entry) + '\nrun_agent_headless "CLI Fixture" preserve\n');
+      await run(['--headless', '--no-auto-start']);
+      expect((await f.query('SELECT agent_id FROM agents WHERE user_id=$1', [f.userId])).rows).toEqual([{ agent_id: row.agent_id }]);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+      fs.rmSync(dir, { recursive: true, force: true });
+      await f.pool.end();
+    }
+  }, 30000);
+
+  it('keeps same-named agents and their settings isolated between owners', async () => {
+    const f = await createAgentApiTestContext();
+    try {
+      const other = await seedUser(f.query, { email: 'other-owner@example.com' });
+      const otherId = uuidv4();
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [otherId, other.userId, 'Same Name']);
+      await request(f.app).post('/api/agent/runtime-permissions').send({ agentName: 'Same Name',
+        allowedPermissions: { codex: {}, inter_agent: { enabled: true, mode: 'listen_all' } }, config: { model_provider: 'codex' } }).expect(200);
+      const rows = (await f.query('SELECT agent_id,user_id,inter_agent_mode FROM agents WHERE agent_name=$1', ['Same Name'])).rows;
+      expect(rows).toHaveLength(2);
+      expect(rows.find(row => row.user_id === other.userId)).toMatchObject({ agent_id: otherId, inter_agent_mode: 'disabled' });
+      expect(rows.find(row => row.user_id === f.userId)).toMatchObject({ inter_agent_mode: 'listen_all' });
+    } finally { await f.pool.end(); }
+  });
+
+  it.each([
+    { allowedPermissions: { unknownProvider: {} } },
+    { allowedPermissions: { codex: {}, inter_agent: { enabled: true, mode: 'invalid' } } },
+    { allowedPermissions: { codex: {} }, config: { model_provider: 'claude' } },
+  ])('rejects invalid setup before creating an agent: %j', async body => {
+    const f = await createAgentApiTestContext();
+    try {
+      await request(f.app).post('/api/agent/runtime-permissions').send({ agentName: 'Invalid Setup', ...body }).expect(400);
+      expect((await f.query('SELECT agent_id FROM agents WHERE user_id=$1', [f.userId])).rows).toEqual([]);
+    } finally { await f.pool.end(); }
+  });
+
+  it('synchronizes group membership on retries and removes it when communication is disabled', async () => {
+    const f = await createAgentApiTestContext();
+    try {
+      const body = { agentName: 'Group CLI Agent', allowedPermissions: { codex: {},
+        inter_agent: { enabled: true, mode: 'groups', groups: ['Team One', 'Team One'] } }, config: { model_provider: 'codex' } };
+      await request(f.app).post('/api/agent/runtime-permissions').send(body).expect(200);
+      await request(f.app).post('/api/agent/runtime-permissions').send(body).expect(200);
+      expect((await f.query('SELECT * FROM agent_group_members')).rows).toHaveLength(1);
+      body.allowedPermissions.inter_agent = { enabled: false };
+      await request(f.app).post('/api/agent/runtime-permissions').send(body).expect(200);
+      expect((await f.query('SELECT * FROM agent_group_members')).rows).toHaveLength(0);
+      expect((await f.query('SELECT inter_agent_mode FROM agents WHERE user_id=$1', [f.userId])).rows[0].inter_agent_mode).toBe('disabled');
+    } finally { await f.pool.end(); }
+  });
+
   it('rejects attempts by scoped runtime credentials to grant themselves full access', async () => {
     const f = await createAgentApiTestContext({ scopedAgentId: uuidv4() });
     try { await request(f.app).post('/api/agent/runtime-permissions').send({ agentName: 'Alpha', allowedPermissions: { codex: {} } }).expect(403); }

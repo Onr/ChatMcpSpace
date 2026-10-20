@@ -19,6 +19,12 @@
         animationDuration: 1000
     };
 
+    let resizeObserver = null;
+    let renderFrame = null;
+    function scheduleRender() {
+        if (renderFrame !== null) return;
+        renderFrame = requestAnimationFrame(() => { renderFrame = null; renderConnections(); });
+    }
     let pollTimer = null;
     let currentConnections = [];
     let currentMessages = [];
@@ -38,6 +44,13 @@
             eventHandlersBound = true;
         }
 
+        window.addEventListener('council:layout', scheduleRender);
+        window.addEventListener('resize', scheduleRender);
+        if (window.ResizeObserver && !resizeObserver) {
+            resizeObserver = new ResizeObserver(scheduleRender);
+            const circle = document.getElementById('councilCircle');
+            if (circle) resizeObserver.observe(circle);
+        }
         // Initial fetch
         fetchAndRenderConnections();
 
@@ -86,6 +99,7 @@
             // Add gradient definition for line styling
             const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
             defs.innerHTML = `
+        <marker id="a2aArrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a5f3fc"/></marker>
         <linearGradient id="agentConnectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" style="stop-color:rgba(56, 189, 248, 0.3);stop-opacity:1" />
           <stop offset="50%" style="stop-color:rgba(56, 189, 248, 0.8);stop-opacity:1" />
@@ -110,6 +124,7 @@
      * Fetch agent connections from API and render them
      */
     async function fetchAndRenderConnections() {
+        if (document.hidden) return;
         try {
             const response = await fetch(`/api/user/agent-messages?hours=${CONFIG.hoursToShow}`, {
                 credentials: 'same-origin'
@@ -131,6 +146,7 @@
             const data = await response.json();
             currentConnections = data.connections || [];
             currentMessages = data.messages || [];
+            window.CouncilSharing?.updateConnections(currentConnections);
 
             renderConnections();
             renderChatsList();
@@ -143,107 +159,76 @@
     /**
      * Get the center position of an agent seat element
      */
-    function getAgentPosition(agentId) {
-        const seat = document.querySelector(`[data-agent-id="${agentId}"]`);
-        if (!seat) return null;
-
-        const councilCircle = document.getElementById('councilCircle');
-        if (!councilCircle) return null;
-
-        const circleRect = councilCircle.getBoundingClientRect();
-        const seatRect = seat.getBoundingClientRect();
-
-        // Calculate position relative to the council circle
-        const x = (seatRect.left + seatRect.width / 2) - circleRect.left;
-        const y = (seatRect.top + seatRect.height / 2) - circleRect.top;
-
-        // Convert to percentage of council circle
-        const xPercent = (x / circleRect.width) * 100;
-        const yPercent = (y / circleRect.height) * 100;
-
-        return { x: xPercent, y: yPercent };
+    function getAgentPosition(agentId, positions) {
+        return positions.get(agentId) || null;
     }
 
-    /**
-     * Create a curved path between two points
-     */
+    // Use the normal to the segment: opposite seats remain finite and curves
+    // have consistent direction even when the midpoint is the circle center.
     function createCurvedPath(x1, y1, x2, y2) {
-        // Calculate control point for the quadratic curve
-        // Curve outward from the center
-        const midX = (x1 + x2) / 2;
-        const midY = (y1 + y2) / 2;
-
-        // Vector from center (50,50) to midpoint
-        const dx = midX - 50;
-        const dy = midY - 50;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        // Push control point outward
-        const curveFactor = 0.3;
-        const cx = midX + (dx / dist) * dist * curveFactor;
-        const cy = midY + (dy / dist) * dist * curveFactor;
-
-        return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+        const dx = x2 - x1, dy = y2 - y1;
+        return `M ${x1} ${y1} Q ${(x1 + x2) / 2 - dy * .18} ${(y1 + y2) / 2 + dx * .18} ${x2} ${y2}`;
     }
 
-    /**
-     * Render connection lines between agents
-     */
     function renderConnections() {
+        ensureSvgContainer();
         const svg = document.getElementById('agentConnectionLines');
-        if (!svg) return;
-
-        // Clear existing lines (keep defs)
-        const defs = svg.querySelector('defs');
-        svg.innerHTML = '';
-        if (defs) svg.appendChild(defs);
-
-        // Get council circle dimensions for viewBox
-        const councilCircle = document.getElementById('councilCircle');
-        if (!councilCircle) return;
-
-        svg.setAttribute('viewBox', '0 0 100 100');
+        const circle = document.getElementById('councilCircle');
+        if (!svg || !circle) return;
+        svg.querySelectorAll('.a2a-link').forEach(el => el.remove());
+        const bounds = circle.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        // Pixel coordinates keep strokes and arrowheads proportional on narrow panels.
+        svg.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
         svg.setAttribute('preserveAspectRatio', 'none');
-
-        // Only show connections from last hour for lines
-        const oneHourAgo = new Date(Date.now() - CONFIG.lineHoursToShow * 60 * 60 * 1000);
-        const recentConnections = currentConnections.filter(conn =>
-            new Date(conn.lastMessage) > oneHourAgo
-        );
-
-        // Render each connection
-        recentConnections.forEach((conn, index) => {
-            const pos1 = getAgentPosition(conn.agent1Id);
-            const pos2 = getAgentPosition(conn.agent2Id);
-
-            if (!pos1 || !pos2) {
-                return; // Agent not visible
-            }
-
-            // Create path element
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', createCurvedPath(pos1.x, pos1.y, pos2.x, pos2.y));
-            path.setAttribute('class', 'agent-connection-line');
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', CONFIG.lineColor);
-            path.setAttribute('stroke-width', String(CONFIG.lineWidth));
-            path.setAttribute('stroke-dasharray', CONFIG.dashArray);
-            path.setAttribute('filter', 'url(#connectionGlow)');
-
-            // Add animation offset based on index for visual variety
-            const animOffset = index * 0.5;
-            path.style.animation = `dashMove ${CONFIG.animationDuration}ms linear infinite`;
-            path.style.animationDelay = `${animOffset}s`;
-
-            // Add data attributes for interactivity
-            path.dataset.agent1 = conn.agent1Id;
-            path.dataset.agent2 = conn.agent2Id;
-            path.dataset.messageCount = conn.messageCount;
-
-            svg.appendChild(path);
+        const positions = window.CouncilSharing?.positions(circle, bounds) || new Map();
+        circle.querySelectorAll('.agent-seat[data-agent-id]').forEach(seat => {
+            const ball = seat.querySelector('.agent-avatar') || seat;
+            const rect = ball.getBoundingClientRect();
+            if (rect.width && rect.height) positions.set(seat.dataset.agentId, {
+                x: rect.left + rect.width / 2 - bounds.left,
+                y: rect.top + rect.height / 2 - bounds.top,
+                key: 'agent:' + seat.dataset.agentId
+            });
         });
-
-        // Update connection count badge if element exists
+        const cutoff = Date.now() - CONFIG.lineHoursToShow * 3600000;
+        const routes = new Map();
+        currentConnections.filter(c => new Date(c.lastMessage).getTime() > cutoff).forEach(conn => {
+            const reverse = conn.lastSenderId === conn.agent2Id;
+            const from = getAgentPosition(reverse ? conn.agent2Id : conn.agent1Id, positions);
+            const to = getAgentPosition(reverse ? conn.agent1Id : conn.agent2Id, positions);
+            if (!from || !to || from.key === to.key) return;
+            const key = [from.key, to.key].sort().join('|');
+            const selected = activeConversation && [conn.agent1Id,conn.agent2Id].includes(activeConversation.agent1Id) && [conn.agent1Id,conn.agent2Id].includes(activeConversation.agent2Id);
+            const existing = routes.get(key);
+            if (existing) { existing.count += conn.messageCount; existing.pairs++; existing.selected ||= selected; return; }
+            routes.set(key, {from, to, count: conn.messageCount, pairs: 1, selected});
+        });
+        // Bound SVG work even in a busy workspace. No per-frame JS or blur filters.
+        [...routes.values()].slice(0, 80).forEach(route => {
+            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            group.setAttribute('class', 'a2a-link' + (route.selected ? ' a2a-link--selected' : ''));
+            const title = document.createElementNS(svg.namespaceURI, 'title');
+            title.textContent = `${route.count} messages · ${route.pairs} agent connection${route.pairs === 1 ? '' : 's'}`;
+            group.appendChild(title);
+            const d = createCurvedPath(route.from.x, route.from.y, route.to.x, route.to.y);
+            for (const kind of ['track', 'flow']) {
+                const path = document.createElementNS(svg.namespaceURI, 'path');
+                path.setAttribute('d', d);
+                path.setAttribute('class', `a2a-link__${kind}`);
+                path.setAttribute('fill', 'none');
+                if (kind === 'flow') path.setAttribute('marker-end', 'url(#a2aArrow)');
+                group.appendChild(path);
+            }
+            if (svg.querySelectorAll('.a2a-link__packet').length < 12) {
+                const packet = document.createElementNS(svg.namespaceURI, 'circle');
+                packet.setAttribute('class', 'a2a-link__packet');
+                packet.setAttribute('r', '2.5');
+                packet.style.offsetPath = `path('${d}')`;
+                group.appendChild(packet);
+            }
+            svg.appendChild(group);
+        });
         updateConnectionBadge();
     }
 
@@ -303,8 +288,8 @@
 
         item.innerHTML = `
             <div class="agent-chat-avatars">
-                <div class="agent-chat-avatar">${conn.agent1Name.substring(0, 2).toUpperCase()}</div>
-                <div class="agent-chat-avatar">${conn.agent2Name.substring(0, 2).toUpperCase()}</div>
+                <div class="agent-chat-avatar">${escapeHtml(conn.agent1Name.substring(0, 2).toUpperCase())}</div>
+                <div class="agent-chat-avatar">${escapeHtml(conn.agent2Name.substring(0, 2).toUpperCase())}</div>
             </div>
             <div class="agent-chat-info">
                 <div class="agent-chat-names">
@@ -331,6 +316,7 @@
      */
     function showConversation(conn) {
         activeConversation = { agent1Id: conn.agent1Id, agent2Id: conn.agent2Id };
+        scheduleRender();
 
         // Update active state in list
         document.querySelectorAll('.agent-chat-item').forEach(el => {
@@ -392,10 +378,10 @@
             <div class="flex items-start gap-3">
                 <div class="flex -space-x-2">
                     <div class="w-10 h-10 rounded-full bg-cyan-900/50 border-2 border-slate-800 flex items-center justify-center text-sm font-bold text-cyan-300">
-                        ${conn.agent1Name.substring(0, 2).toUpperCase()}
+                        ${escapeHtml(conn.agent1Name.substring(0, 2).toUpperCase())}
                     </div>
                     <div class="w-10 h-10 rounded-full bg-cyan-900/50 border-2 border-slate-800 flex items-center justify-center text-sm font-bold text-cyan-300">
-                        ${conn.agent2Name.substring(0, 2).toUpperCase()}
+                        ${escapeHtml(conn.agent2Name.substring(0, 2).toUpperCase())}
                     </div>
                 </div>
                 <div class="flex-1 min-w-0">
@@ -431,7 +417,7 @@
             const decryptedMessages = [];
 
             for (const msg of messages) {
-                let messageIsEncrypted = false;
+                let messageIsEncrypted = msg.content === null && msg.encrypted === true;
                 if (msg.content && typeof msg.content === 'string' && looksLikeEncryptedTextForAgent(msg.content)) {
                     if (encryptionKey && window.E2EEncryption && typeof window.E2EEncryption.decryptMessage === 'function') {
                         try {
@@ -525,6 +511,7 @@
      */
     function closeAgentConversation() {
         activeConversation = null;
+        scheduleRender();
 
         // Remove active state from list
         document.querySelectorAll('.agent-chat-item--active').forEach(el => {
@@ -611,6 +598,12 @@
      * Stop polling
      */
     function destroy() {
+        window.removeEventListener('council:layout', scheduleRender);
+        window.removeEventListener('resize', scheduleRender);
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+        renderFrame = null;
         if (pollTimer) {
             clearInterval(pollTimer);
             pollTimer = null;
@@ -622,6 +615,7 @@
         init,
         refresh,
         getConnections,
+        renderConnections,
         destroy,
         showConversation,
         closeConversation: closeAgentConversation

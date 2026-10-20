@@ -92,6 +92,14 @@
   transition: max-height 0.3s ease, opacity 0.2s ease, padding 0.3s ease;
   max-height: 2000px;
   opacity: 1;
+  color: rgb(226, 232, 240);
+}
+
+/* Agent-authored inline colors may be intended for a light page and become
+   unreadable on our dark card. Keep text readable while retaining the
+   component-specific colors used for links, buttons, and form controls. */
+.rich-content-body :not(a):not(button):not(input):not(textarea):not(select):not(option):not(progress):not(meter) {
+  color: rgb(226, 232, 240) !important;
 }
 
 /* ============================================================================

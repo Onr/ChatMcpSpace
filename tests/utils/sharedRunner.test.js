@@ -10,6 +10,7 @@ const {
 } = require('../../scripts/external-agent-bridge');
 const {
   SharedRunner,
+  runtimeTimeout,
   readApprovedExport
 } = require('../../scripts/shared-agent-runner');
 let dir, runner, invoke, room, user, batch, detail, messages, account, pair, key, outputStore, capacitySpy, storeSecuritySpy;
@@ -1350,6 +1351,35 @@ test('managed trusted sharing follows owner-selected providers with the same exe
   expect(runner.managedProfile(batch.config)).toBeNull();
 });
 
+test('managed coding runs allow an hour and honor an explicitly configured timeout', () => {
+  expect(runtimeTimeout({}, true)).toBe(3600000);
+  expect(runtimeTimeout({})).toBe(600000);
+  expect(runtimeTimeout({ EXTERNAL_AGENT_TIMEOUT_MS: '1800000' }, true)).toBe(1800000);
+  for (const value of ['invalid', '0', '3600001', '1500.5']) {
+    expect(() => runtimeTimeout({ EXTERNAL_AGENT_TIMEOUT_MS: value }, true)).toThrow('Runtime timeout');
+  }
+});
+
+test('trusted shared turns use the configured bridge timeout', async () => {
+  trustFixtureContext();
+  runner.bridge.timeoutMs = 1800000;
+  const api = runner.api.getMockImplementation();
+  runner.api.mockImplementation((route, ...args) => route.endsWith('/authorization')
+    ? { authorized: true, state: 'running', deadlineAt: new Date(Date.now() + 3599000).toISOString() }
+    : api(route, ...args));
+  const timeout = jest.spyOn(AbortSignal, 'timeout');
+  try {
+    await runner.sharedTurn();
+    expect(timeout).toHaveBeenCalledWith(1800000);
+  } finally { timeout.mockRestore(); }
+});
+
+test('a timed-out command records the timeout only after the provider has stopped', async () => {
+  runner.invokeOverride = null;
+  const profile = { provider: 'test', model: 'test', command: [process.execPath, '-e', 'setInterval(() => {}, 1000)'] };
+  await expect(runner.invoke(profile, [], 'private', AbortSignal.timeout(25))).rejects.toMatchObject({ code: 'PROVIDER_TIMEOUT' });
+});
+
 test('managed setup writes one owner-controlled normal-runner profile', () => {
   const { prepareManagedProfile } = require('../../scripts/shared-agent-runner');
   const managed = path.join(dir, 'agent-runner.sh');
@@ -1382,6 +1412,7 @@ esac
 `, { mode: 0o700 });
   fs.writeFileSync(path.join(bin, 'node'), `#!/bin/bash
 if [ "$1" = '--check' ]; then exit 0; fi
+if [ "$2" = 'storage-directory' ]; then printf '%s\\n' "$(dirname \"$CHATSPACE_BRIDGE_STATE\")"; exit 0; fi
 printf '%s\\n' "$2" "$CHATSPACE_SHARED_MANAGED_RUNNER" "$CHATSPACE_SHARED_PROVIDER" "$CHATSPACE_SHARED_MODEL" "$CHATSPACE_SHARED_EXECUTION_MODE"
 `, { mode: 0o700 });
   const result = spawnSync('bash', [managed], { encoding: 'utf8', timeout: 10000,
@@ -1390,4 +1421,64 @@ printf '%s\\n' "$2" "$CHATSPACE_SHARED_MANAGED_RUNNER" "$CHATSPACE_SHARED_PROVID
   expect(result.status).toBe(0);
   expect(result.stdout).toContain(`run-managed\n${managed}\nclaude\nowner-selected\ntrusted`);
   expect(fs.existsSync(path.join(state, 'shared-runner.js'))).toBe(true);
+});
+
+function trustedInterruptedBatch(phase = 'uncertain') {
+  runner.executionMode = 'trusted'; runner.protocolVersion = 2;
+  batch.context = { contextVersion: 2, execution: { mode: 'trusted', connectorId: runner.runtimeId } };
+  runner.state.shared.pending = { phase, batch };
+}
+test.each(['running', 'uncertain', 'interruption_pending'])('trusted %s turn closes with a chat notice without replay or manager review', async phase => {
+  trustedInterruptedBatch(phase);
+  await runner.sharedTurn();
+  expect(invoke).not.toHaveBeenCalled();
+  expect(runner.state.shared.pending).toBeNull();
+  const call = runner.api.mock.calls.find(([route]) => route.endsWith('/interrupted'));
+  expect(call[0]).toBe(`/batches/${batch.id}/interrupted`);
+  expect((await C.decrypt(key, call[1].message.payload, `${room}:1`)).text).toContain('ready for your next message');
+  expect(fs.existsSync(path.join(dir, `interrupted-shared-${batch.id}.json`))).toBe(true);
+});
+test('a failed interruption notice delivery retries its saved identifier without invoking the provider', async () => {
+  trustedInterruptedBatch();
+  const api = runner.api.getMockImplementation(); let fail = true;
+  runner.api.mockImplementation(async (route, ...args) => {
+    if (route.endsWith('/interrupted') && fail) { fail = false; throw new Error('Network lost'); }
+    return api(route, ...args);
+  });
+  await expect(runner.sharedTurn()).rejects.toThrow('Network lost');
+  const notice = JSON.stringify(runner.state.shared.pending.interruptionNotice);
+  await runner.sharedTurn();
+  expect(JSON.stringify(runner.api.mock.calls.filter(([route]) => route.endsWith('/interrupted'))[1][1].message)).toBe(notice);
+  expect(invoke).not.toHaveBeenCalled();
+});
+test('rotated room keys refresh the saved interruption notice before retry', async () => {
+  trustedInterruptedBatch();
+  runner.state.shared.pending.interruptionNotice = { id: crypto.randomUUID(), keyVersion: 0 };
+  const id = runner.state.shared.pending.interruptionNotice.id;
+  await runner.sharedTurn();
+  expect(runner.api.mock.calls.find(([route]) => route.endsWith('/interrupted'))[1].message).toMatchObject({ id, keyVersion: 1 });
+});
+test('timeout recovery explains the limit while retaining the interrupted request', async () => {
+  trustedInterruptedBatch();
+  runner.state.shared.pending.failureReason = 'timeout';
+  runner.bridge.timeoutMs = 1800000;
+  await runner.sharedTurn();
+  const notice = runner.api.mock.calls.find(([route]) => route.endsWith('/interrupted'))[1].message;
+  expect((await C.decrypt(key, notice.payload, `${room}:1`)).text).toContain('30-minute time limit');
+  const archived = JSON.parse(fs.readFileSync(path.join(dir, `interrupted-shared-${batch.id}.json`), 'utf8'));
+  expect(archived.pending).toMatchObject({ failureReason: 'timeout', batch: { id: batch.id } });
+  expect(invoke).not.toHaveBeenCalled();
+});
+test('a trusted interrupted private turn sends a normal reply and releases its slot', async () => {
+  runner.executionMode = 'trusted';
+  const execution = crypto.randomUUID(); runner.state.shared.privateExecution = execution;
+  runner.state.pending = { phase: 'uncertain', id: crypto.randomUUID(), kind: 'user', channel: 'user', message: {} };
+  runner.register = jest.fn(); runner.bridge.heartbeat = jest.fn();
+  runner.bridge.completePending = jest.fn(async () => { runner.state.pending = null; });
+  await runner.tick();
+  expect(runner.bridge.completePending).toHaveBeenCalledTimes(1);
+  expect(runner.api).toHaveBeenCalledWith('/release', { executionId: execution });
+  expect(runner.api).not.toHaveBeenCalledWith('/acquire', expect.anything());
+  expect(runner.state.shared.privateExecution).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
 });

@@ -177,7 +177,11 @@
 
               <!-- Quick Install Command -->
               <div class="mb-6">
-                <label class="block text-sm font-medium text-slate-300 mb-2">Run this command to get started:</label>
+                <label class="block text-sm font-medium text-slate-300 mb-2">Run this command in Bash (Linux / macOS):</label>
+                <% if (process.env.WINDOWS_AGENT_SETUP_ENABLED !== 'false') { %>
+                  <button type="button" data-open-agent-setup data-setup-os="windows" data-setup-base-url="<%= baseUrl %>"
+                    class="text-sm text-emerald-300 underline mb-3">Windows setup (PowerShell)</button>
+                <% } %>
                 <div class="flex items-center gap-3">
                   <div class="relative flex-1">
                     <code id="curlCommand"
@@ -764,10 +768,10 @@
     enabled: mfaEnabledSafe
   }) %>;
 </script>
-<script src="/js/encryption.js"></script>
-<script src="/js/voice-control.js"></script>
-<script src="/js/settings.js?v=20261015.1"></script>
-<script src="/js/external-agent-setup.js?v=20261015.1"></script>
+<script src="<%= assetUrl('/js/encryption.js') %>"></script>
+<script src="<%= assetUrl('/js/voice-control.js') %>"></script>
+<script src="<%= assetUrl('/js/settings.js') %>"></script>
+<script src="<%= assetUrl('/js/external-agent-setup.js') %>"></script>
 
 <%- include('partials/cos-install-modal') %>
-<script src="/js/cos-install.js?v=<%= Date.now() %>"></script>
+<script src="<%= assetUrl('/js/cos-install.js') %>"></script>

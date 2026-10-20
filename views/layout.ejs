@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#020617">
   <title>
     <%= typeof title !=='undefined' ? title : 'ChatMCPSpace' %>
   </title>
@@ -372,7 +373,11 @@
           <main class="<%= user ? 'py-8' : 'py-4' %>">
             <%- body %>
           </main>
-          <script src="/js/setup-script.js"></script>
+          <% if (user && process.env.WINDOWS_AGENT_SETUP_ENABLED !== 'false') { %>
+            <%- include('partials/agent-setup-dialog') %>
+            <script src="<%= assetUrl('/js/setup-platform.js') %>"></script>
+          <% } %>
+          <script src="<%= assetUrl('/js/setup-script.js') %>"></script>
           <script src="/js/notifications.js"></script>
           <script nonce="<%= cspNonce %>">
             (function () {
