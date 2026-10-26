@@ -13,6 +13,14 @@ A web-based platform that enables bidirectional communication between users and 
 
 Live at **[https://chatmcp.space/](https://chatmcp.space/)** without needing to set up your own server.
 
+## Promo Video
+
+Watch or download the launch promo video: **[ChatMCP.Space Launch Video (`public/videos/ChatMCP.Space-Launch-Video.mp4`)](public/videos/ChatMCP.Space-Launch-Video.mp4)**
+
+<div align="center">
+  <video src="https://raw.githubusercontent.com/Onr/ChatMcpSpace/main/public/videos/ChatMCP.Space-Launch-Video.mp4" controls width="720"></video>
+</div>
+
 ## Features
 
 - **User Authentication**: Secure registration and login with email/password or Google OAuth
