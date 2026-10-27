@@ -42,6 +42,7 @@ function generateMainCLIScript(apiKey, baseUrl, encryptionSalt = null) {
     const agentRunner = generateAgentRunner();
     const richFormSkill = generateRichFormSkill();
     const selfWakeGuide = generateSelfWakeGuide();
+    const largeFileTransferSkill = generateLargeFileTransferSkill();
 
     return `#!/usr/bin/env bash
 # ╔════════════════════════════════════════════════════════════════════════════╗
@@ -90,7 +91,12 @@ HAS_ENCRYPTION="${hasEncryption ? 'true' : 'false'}"
 
 # Script location
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+CLI_SCRIPT_DIR="$SCRIPT_DIR"
+# A global installation serves the caller's project; a project-local CLI keeps
+# its own storage when invoked from another directory.
+if [ "$SCRIPT_DIR" = "$HOME/.chatmcp" ]; then SCRIPT_DIR="$(pwd -P)"; fi
 CHATSPACE_DIR="$SCRIPT_DIR/.chatspace"
+LOCAL_CHIEFS_INDEX="$HOME/.chatmcp/local-chief-paths"
 
 # Colors for non-gum output
 RED='\\033[0;31m'
@@ -138,6 +144,7 @@ ARG_CONFIG=""                # --config <file>: Load settings from JSON file
 ARG_START=""                 # --start <name>: Start agent in background (tmux, auto-restart on crash)
 ARG_RESTART=""               # --restart <name>: Stop the running session (if any) and start it again
 ARG_SHUTDOWN=""              # --shutdown <name>: Stop the agent's background session
+ARG_SET_PASSWORD=""          # --set-password <name>: Check and replace an agent's saved decryption password
 ARG_STATUS=false             # --status: Show which agents have a running background session
 ARG_INSTALL_COMMAND=""       # --install-command [name]: Install a global launcher (default: chatspace)
 ARG_PERMS_EXPLICIT=false     # set when any provider/permission flag is passed (see below)
@@ -219,6 +226,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --shutdown)
             ARG_SHUTDOWN="$2"
+            shift 2
+            ;;
+        --set-password)
+            ARG_SET_PASSWORD="$2"
             shift 2
             ;;
         --status)
@@ -376,6 +387,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --restart <name>        Stop the running session (if any) and start it again"
             echo "  --shutdown <name>       Stop the agent's background session"
             echo "  --status                Show which agents are running in the background"
+            echo "  --set-password <name>   Check and replace the agent's saved decryption password"
             echo "  --install-command [cmd] Install a global launcher (default: chatspace) so"
             echo "                          the CLI can be run from any directory"
             echo ""
@@ -761,6 +773,139 @@ print_warning() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Decryption password handling
+# ═══════════════════════════════════════════════════════════════════════════════
+# .env is sourced by bash (agent-runner.sh) and parsed by python-dotenv
+# (message_helper.py), whose quoting rules differ. Escape for bash double
+# quotes, and also store USER_PASSWORD_B64, which the helper and runner prefer.
+env_quote() {
+    printf '%s' "$1" | sed 's/[\\\\"$\`]/\\\\&/g'
+}
+
+password_env_lines() {
+    printf 'USER_PASSWORD="%s"\\n' "$(env_quote "$1")"
+    printf 'USER_PASSWORD_B64="%s"\\n' "$(printf '%s' "$1" | base64 | tr -d '\\n')"
+}
+
+# Proves a password against real ciphertext from this account, on this machine.
+# The password travels through the environment only, never argv or the network.
+# Returns 0 = matches, 1 = does not match, 2 = could not check.
+verify_encryption_password() {
+    local password="$1" samples
+    [ "$HAS_ENCRYPTION" = "true" ] || return 0
+    samples=$(curl -fsS --max-time 15 -H "X-API-Key: $API_KEY" "$API_BASE/agent/encryption-samples" 2>/dev/null) || return 2
+    printf '%s' "$samples" | jq -e '(.samples | type == "array") and (.samples | length > 0)' >/dev/null 2>&1 || return 2
+    if command -v node >/dev/null 2>&1; then
+        printf '%s' "$samples" | CHATSPACE_CHECK_PASSWORD="$password" CHATSPACE_CHECK_SALT="$ENCRYPTION_SALT" node -e '
+    const crypto = require("crypto");
+    const samples = JSON.parse(require("fs").readFileSync(0, "utf8")).samples.slice(0, 6);
+    const key = crypto.pbkdf2Sync(process.env.CHATSPACE_CHECK_PASSWORD, Buffer.from(process.env.CHATSPACE_CHECK_SALT, "base64"), 100000, 32, "sha256");
+    for (const sample of samples) {
+      try {
+        const [iv, tag, body] = String(sample).split(":").map(part => Buffer.from(part, "base64"));
+        const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+        decipher.setAuthTag(tag);
+        decipher.update(body);
+        decipher.final();
+        process.exit(0);
+      } catch (_) { /* Try the next sample. */ }
+    }
+    process.exit(1);' && return 0 || return 1
+    fi
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import cryptography' >/dev/null 2>&1; then
+        printf '%s' "$samples" | CHATSPACE_CHECK_PASSWORD="$password" CHATSPACE_CHECK_SALT="$ENCRYPTION_SALT" python3 -c '
+import base64, hashlib, json, os, sys
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+samples = json.load(sys.stdin)["samples"][:6]
+key = hashlib.pbkdf2_hmac("sha256", os.environ["CHATSPACE_CHECK_PASSWORD"].encode(), base64.b64decode(os.environ["CHATSPACE_CHECK_SALT"]), 100000, 32)
+for sample in samples:
+    try:
+        iv, tag, body = (base64.b64decode(part) for part in str(sample).split(":"))
+        AESGCM(key).decrypt(iv, body + tag, None)
+        sys.exit(0)
+    except Exception:
+        pass
+sys.exit(1)' && return 0 || return 1
+    fi
+    return 2
+}
+
+ENCRYPTION_PASSWORD_HINT="Use your ChatMcpSpace account password. If you sign in with Google, use the one under Settings > Decryption Password."
+
+# Explains a verify_encryption_password result. Returns 0 when it is safe to save.
+report_password_check() {
+    case "$1" in
+        0) print_success "Password matches your existing messages" ;;
+        1) print_error "This password does not match your messages, so the agent could not read them."
+           print_info "$ENCRYPTION_PASSWORD_HINT"
+           return 1 ;;
+        *) print_warning "Could not check the password yet (no encrypted messages or no connection)."
+           print_info "If it is wrong, the agent will say so in its chat instead of answering." ;;
+    esac
+    return 0
+}
+
+# Asks until the password matches this account's messages (3 tries).
+# Sets PROMPTED_PASSWORD on success.
+prompt_encryption_password() {
+    local attempt password rc
+    PROMPTED_PASSWORD=""
+    print_info "🔐 Messages are end-to-end encrypted. The password stays on this computer."
+    print_info "$ENCRYPTION_PASSWORD_HINT"
+    for attempt in 1 2 3; do
+        password=$(gum input --password --placeholder "Account or decryption password" --prompt "Password: ") || return 1
+        if [ -z "$password" ]; then
+            print_error "Password cannot be empty when encryption is enabled"
+            continue
+        fi
+        rc=0
+        verify_encryption_password "$password" || rc=$?
+        if report_password_check "$rc"; then
+            PROMPTED_PASSWORD="$password"
+            return 0
+        fi
+    done
+    print_error "No matching password after 3 tries. Nothing was saved."
+    return 1
+}
+
+# Replaces the saved password of an existing agent, then restarts it if running.
+set_agent_password() {
+    local agent_name="$1" agent_dir env_file password rc tmp_env
+    agent_dir="$(resolve_agent_dir "$agent_name")"
+    env_file="$agent_dir/.env"
+    if [ ! -f "$env_file" ]; then
+        echo "Error: Agent '$agent_name' not found (expected $env_file)."
+        return 1
+    fi
+    if [ "$HAS_ENCRYPTION" != "true" ]; then
+        echo "Encryption is not enabled for this account; no password is needed."
+        return 0
+    fi
+    if [ -n "$ARG_PASSWORD" ]; then
+        password="$ARG_PASSWORD"
+        rc=0
+        verify_encryption_password "$password" || rc=$?
+        report_password_check "$rc" || return 1
+    else
+        prompt_encryption_password || return 1
+        password="$PROMPTED_PASSWORD"
+    fi
+    tmp_env=$(mktemp "$agent_dir/.env.XXXXXX")
+    chmod 600 "$tmp_env"
+    grep -v -e '^USER_PASSWORD=' -e '^USER_PASSWORD_B64=' "$env_file" > "$tmp_env" || true
+    password_env_lines "$password" >> "$tmp_env"
+    mv -f "$tmp_env" "$env_file"
+    print_success "Saved the new password for '$agent_name'."
+    if agent_is_running "$agent_name"; then
+        start_agent_session "$agent_name" restart
+        return $?
+    fi
+    echo "Start the agent with:  bash \\"$SCRIPT_DIR/agent-cli.sh\\" --start \\"$agent_name\\""
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Command Confirmation
 # ═══════════════════════════════════════════════════════════════════════════════
 confirm_command() {
@@ -805,6 +950,60 @@ confirm_command() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # Agent Discovery
 # ═══════════════════════════════════════════════════════════════════════════════
+# The index stores paths only. Match account and server before exposing a CoS;
+# never source a discovered .env or relocate an existing agent workspace.
+local_path_belongs_to_account() {
+    [ -f "$1/.env" ] &&
+        grep -Fxq "API_KEY=\\"$API_KEY\\"" "$1/.env" &&
+        grep -Fxq "API_BASE=\\"$API_BASE\\"" "$1/.env"
+}
+
+chief_path_belongs_to_account() {
+    local_path_belongs_to_account "$1" &&
+        grep -Fxq 'IS_CHIEF_OF_STAFF="true"' "$1/.env"
+}
+
+remember_local_chief() {
+    local agent_dir="$1"
+    chief_path_belongs_to_account "$agent_dir" || return 0
+    [ ! -L "$HOME/.chatmcp" ] && [ ! -L "$LOCAL_CHIEFS_INDEX" ] || return 1
+    (umask 077; mkdir -p "$HOME/.chatmcp"; touch "$LOCAL_CHIEFS_INDEX")
+    chmod 600 "$LOCAL_CHIEFS_INDEX"
+    grep -Fxq -- "$agent_dir" "$LOCAL_CHIEFS_INDEX" || printf '%s\\n' "$agent_dir" >> "$LOCAL_CHIEFS_INDEX"
+}
+
+get_local_chief_paths() {
+    if [ -f "$LOCAL_CHIEFS_INDEX" ] && [ ! -L "$LOCAL_CHIEFS_INDEX" ]; then
+        local agent_dir
+        while IFS= read -r agent_dir; do
+            if chief_path_belongs_to_account "$agent_dir"; then printf '%s\\n' "$agent_dir"; fi
+        done < "$LOCAL_CHIEFS_INDEX"
+    fi
+    # Discover installations created by older global jetspace versions.
+    local agent_dir
+    for agent_dir in "$HOME/.chatmcp/.chatspace"/*; do
+        if local_path_belongs_to_account "$agent_dir"; then printf '%s\\n' "$agent_dir"; fi
+    done
+    return 0
+}
+
+resolve_agent_dir() {
+    local agent_name="$1" candidate name
+    candidate="$CHATSPACE_DIR/$(get_agent_folder "$agent_name")"
+    if [ -f "$candidate/.env" ]; then printf '%s\\n' "$candidate"; return; fi
+    # CoS bundles use dash-separated folders; match the recorded name too.
+    for candidate in "$CHATSPACE_DIR"/*; do
+        [ -f "$candidate/.env" ] || continue
+        name=$(sed -n 's/^AGENT_NAME="\\(.*\\)"$/\\1/p' "$candidate/.env")
+        if [ "$name" = "$agent_name" ]; then printf '%s\\n' "$candidate"; return; fi
+    done
+    while IFS= read -r candidate; do
+        name=$(sed -n 's/^AGENT_NAME="\\(.*\\)"$/\\1/p' "$candidate/.env")
+        if [ "$name" = "$agent_name" ]; then printf '%s\\n' "$candidate"; return; fi
+    done < <(get_local_chief_paths)
+    printf '%s\\n' "$CHATSPACE_DIR/$(get_agent_folder "$agent_name")"
+}
+
 get_existing_agents() {
     local agents=()
     
@@ -816,11 +1015,16 @@ get_existing_agents() {
             agent_name=$(grep "^AGENT_NAME=" "$env_file" 2>/dev/null | cut -d'=' -f2 | tr -d '"' || basename "$agent_dir")
             if [ -n "$agent_name" ]; then
                 agents+=("$agent_name")
+                remember_local_chief "$agent_dir"
             fi
         done < <(find "$CHATSPACE_DIR" -maxdepth 2 -name ".env" -print0 2>/dev/null)
     fi
     
-    printf '%s\\n' "\${agents[@]}"
+    local chief_dir
+    while IFS= read -r chief_dir; do
+        agents+=("$(sed -n 's/^AGENT_NAME="\\(.*\\)"$/\\1/p' "$chief_dir/.env")")
+    done < <(get_local_chief_paths)
+    printf '%s\\n' "\${agents[@]}" | sort -u
 }
 
 # Chief of Staff records live in the account database, while ordinary agent
@@ -837,7 +1041,7 @@ is_spawned_agent() {
     local agent_name="$1"
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local lineage_file="$CHATSPACE_DIR/$folder/agent_state/lineage.json"
+    local lineage_file="$(resolve_agent_dir "$agent_name")/agent_state/lineage.json"
 
     if [ -f "$lineage_file" ] && command -v jq &>/dev/null; then
         local auto_spawned
@@ -870,7 +1074,7 @@ agent_exists() {
     local agent_name="$1"
     local folder
     folder=$(get_agent_folder "$agent_name")
-    [ -f "$CHATSPACE_DIR/$folder/.env" ]
+    [ -f "$(resolve_agent_dir "$agent_name")/.env" ]
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -922,24 +1126,15 @@ create_agent() {
     
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     
     print_success "Agent name: $agent_name"
     echo ""
     
     local user_password=""
     if [ "$HAS_ENCRYPTION" = "true" ]; then
-        print_info "🔐 End-to-end encryption is enabled for your account."
-        user_password=$(gum input \\
-            --password \\
-            --placeholder "Enter your account password" \\
-            --prompt "Password: ")
-        
-        if [ -z "$user_password" ]; then
-            print_error "Password cannot be empty when encryption is enabled"
-            return 1
-        fi
-        print_success "Password received"
+        prompt_encryption_password || return 1
+        user_password="$PROMPTED_PASSWORD"
     fi
     
     echo ""
@@ -952,7 +1147,7 @@ create_agent() {
     cat > "$agent_dir/.env" <<ENVEOF
 # Agent Messaging Environment Configuration
 # KEEP THIS FILE SECURE - DO NOT SHARE WITH AGENT
-USER_PASSWORD="$user_password"
+$(password_env_lines "$user_password")
 ENCRYPTION_SALT="$ENCRYPTION_SALT"
 API_KEY="$API_KEY"
 API_BASE="$API_BASE"
@@ -980,6 +1175,10 @@ ENVEOF
     # Create self-wake guide documentation
     create_self_wake_guide "$agent_dir"
     print_success "Created: $agent_dir/SELF_WAKE_GUIDE.md"
+
+    # Create large file transfer skill documentation
+    create_large_file_transfer_skill "$agent_dir"
+    print_success "Created: $agent_dir/SKILL_LARGE_FILE_TRANSFER.md"
     
     # Create agent-runner.sh
     create_agent_runner "$agent_dir"
@@ -1440,6 +1639,7 @@ select_model() {
             model=$(gum choose \
                 --header "Select model (uses your Codex/ChatGPT account):" \
                 --cursor "➤ " \
+                "gpt-6.1-terra (GPT-6.1 Terra - latest flagship model)" \
                 "gpt-6-astra (GPT-6 Astra - requires eligible access)" \
                 "gpt-6-sol (GPT-6 Sol - latest coding model)" \
                 "gpt-6.1-sol (GPT-6.1 Sol - latest balanced model)" \
@@ -1537,6 +1737,7 @@ select_model() {
             model=$(gum choose \
                 --header "Select OpenAI model (via Codex CLI):" \
                 --cursor "➤ " \
+                "gpt-6.1-terra (GPT-6.1 Terra - latest flagship model)" \
                 "gpt-6-astra (GPT-6 Astra - requires eligible access)" \
                 "gpt-6-sol (GPT-6 Sol - latest coding model)" \
                 "gpt-6.1-sol (GPT-6.1 Sol - latest balanced model)" \
@@ -1696,6 +1897,7 @@ select_model() {
                     --header "Select Copilot model:" \
                     --cursor "➤ " \
                     "auto (Let Copilot choose the best available model)" \
+                    "gpt-6.1-terra (GPT-6.1 Terra)" \
                     "gpt-5.6-luna (GPT-5.6 Luna)" \
                     "gpt-5.6-sol (GPT-5.6 Sol)" \
                     "gpt-5.6-terra (GPT-5.6 Terra)" \
@@ -2124,7 +2326,7 @@ run_agent() {
     local agent_name="$1"
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     
     if [ ! -f "$agent_dir/.env" ]; then
         print_error "Agent '$agent_name' not found!"
@@ -2207,7 +2409,7 @@ run_agent() {
             return 1
         fi
 
-        print_success "Allowed providers: $(echo "$allowed_providers" | tr '\\n' ' ')"
+        print_success "Allowed providers: $(printf '%s\\n' "$allowed_providers" | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')"
         echo ""
 
         # Initialize permissions JSON
@@ -2683,7 +2885,7 @@ CFGEOF
         --padding "1 2" \\
         --margin "1 0" \\
         --border-foreground 36 \\
-        "Allowed providers: $(echo "$allowed_providers" | tr '\\n' ', ')
+        "Allowed providers: $(printf '%s\\n' "$allowed_providers" | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')
         
 Configuration is now controlled from the web dashboard.
 Open the dashboard, select this agent, and use the
@@ -2735,7 +2937,7 @@ view_agent_status() {
         
         local folder
         folder=$(get_agent_folder "$agent_name")
-        local agent_dir="$CHATSPACE_DIR/$folder"
+        local agent_dir="$(resolve_agent_dir "$agent_name")"
         
         local status="○ Stopped"
         local last_active="Never"
@@ -2806,7 +3008,7 @@ stop_agent_control() {
     # Fallback: write local stop flag when API is unavailable
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     local stop_flag="$agent_dir/agent_state/.stop_requested"
     if [ -d "$agent_dir" ]; then
         mkdir -p "$agent_dir/agent_state"
@@ -2829,7 +3031,7 @@ delete_agent_control() {
 
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
 
     stop_agent_control "$agent_name" >/dev/null 2>&1 || true
 
@@ -2924,6 +3126,15 @@ WAKEEOF
     chmod 644 "$agent_dir/SELF_WAKE_GUIDE.md"
 }
 
+create_large_file_transfer_skill() {
+    local agent_dir="$1"
+
+    cat > "$agent_dir/SKILL_LARGE_FILE_TRANSFER.md" <<'XFEREOF'
+${largeFileTransferSkill}
+XFEREOF
+    chmod 644 "$agent_dir/SKILL_LARGE_FILE_TRANSFER.md"
+}
+
 create_agent_runner() {
     local agent_dir="$1"
     
@@ -2971,7 +3182,7 @@ create_systemd_service() {
     local agent_name="$1"
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     local service_name
     service_name=$(get_service_name "$agent_name")
     
@@ -3025,7 +3236,7 @@ enable_autostart() {
         # Update agent_config.json
         local folder
         folder=$(get_agent_folder "$agent_name")
-        local config_file="$CHATSPACE_DIR/$folder/agent_state/agent_config.json"
+        local config_file="$(resolve_agent_dir "$agent_name")/agent_state/agent_config.json"
         if [ -f "$config_file" ]; then
             local updated
             updated=$(jq '.autostart = true' "$config_file")
@@ -3068,7 +3279,7 @@ disable_autostart() {
         # Update agent_config.json
         local folder
         folder=$(get_agent_folder "$agent_name")
-        local config_file="$CHATSPACE_DIR/$folder/agent_state/agent_config.json"
+        local config_file="$(resolve_agent_dir "$agent_name")/agent_state/agent_config.json"
         if [ -f "$config_file" ]; then
             local updated
             updated=$(jq '.autostart = false' "$config_file")
@@ -3254,7 +3465,7 @@ manage_autostart() {
         "▶️  Start Once (no autostart)")
             local folder
             folder=$(get_agent_folder "$selected_agent")
-            local agent_dir="$CHATSPACE_DIR/$folder"
+            local agent_dir="$(resolve_agent_dir "$selected_agent")"
             print_info "Starting agent in foreground (Ctrl+C to stop)..."
             start_agent_foreground "$selected_agent" "$agent_dir"
             ;;
@@ -3314,6 +3525,8 @@ main_menu() {
         case "$choice" in
             "🆕 Create New Agent")
                 create_agent
+                echo ""
+                gum input --placeholder "Press Enter to return to the menu..." || true
                 ;;
             "▶️  Continue Existing Agent"|"🔄 Restart Existing Agent")
                 if [ "$agent_count" -eq 0 ]; then
@@ -3330,6 +3543,8 @@ main_menu() {
                     if [ -n "$selected_agent" ]; then
                         if [ "$choice" = "🔄 Restart Existing Agent" ]; then
                             start_agent_session "$selected_agent" restart
+                            echo ""
+                            gum input --placeholder "Press Enter to return to the menu..." || true
                         else
                             run_agent "$selected_agent"
                         fi
@@ -3510,7 +3725,7 @@ create_news_feed_agent() {
     # Create local folder for the news feed agent
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     
     mkdir -p "$agent_dir"
     mkdir -p "$agent_dir/agent_state"
@@ -3519,7 +3734,7 @@ create_news_feed_agent() {
     cat > "$agent_dir/.env" <<ENVEOF
 # Agent Messaging Environment Configuration
 # KEEP THIS FILE SECURE - DO NOT SHARE WITH AGENT
-USER_PASSWORD="$user_password"
+$(password_env_lines "$user_password")
 ENCRYPTION_SALT="$ENCRYPTION_SALT"
 API_KEY="$API_KEY"
 API_BASE="$API_BASE"
@@ -3947,6 +4162,7 @@ setup_local_chief_of_staff() {
         chmod 600 "$agent_dir/.env"
     fi
 
+    remember_local_chief "$agent_dir"
     print_success "Local Chief of Staff installed at: $agent_dir"
     echo ""
 
@@ -4022,11 +4238,15 @@ create_agent_headless() {
     
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     
     local user_password="$ARG_PASSWORD"
     if [ "$HAS_ENCRYPTION" = "true" ] && [ -z "$user_password" ]; then
         echo "Warning: Encryption enabled but no --password provided. E2E encryption disabled for this agent."
+    elif [ "$HAS_ENCRYPTION" = "true" ]; then
+        local password_check=0
+        verify_encryption_password "$user_password" || password_check=$?
+        report_password_check "$password_check" || return 1
     fi
     
     echo "Creating agent files..."
@@ -4036,7 +4256,7 @@ create_agent_headless() {
     # Create .env file (mirrors create_agent)
     cat > "$agent_dir/.env" <<ENVEOF
 # Agent Messaging Environment Configuration
-USER_PASSWORD="$user_password"
+$(password_env_lines "$user_password")
 ENCRYPTION_SALT="$ENCRYPTION_SALT"
 API_KEY="$API_KEY"
 API_BASE="$API_BASE"
@@ -4075,6 +4295,12 @@ RICHEOF2
 ${selfWakeGuide}
 WAKEEOF2
     echo "Created: $agent_dir/SELF_WAKE_GUIDE.md"
+
+    # Create SKILL_LARGE_FILE_TRANSFER.md
+    cat > "$agent_dir/SKILL_LARGE_FILE_TRANSFER.md" <<'XFEREOF2'
+${largeFileTransferSkill}
+XFEREOF2
+    echo "Created: $agent_dir/SKILL_LARGE_FILE_TRANSFER.md"
     
     # Create agent-runner.sh
     cat > "$agent_dir/agent-runner.sh" <<'RUNNEREOF'
@@ -4117,7 +4343,7 @@ run_agent_headless() {
     local agent_name="$1"
     local folder
     folder=$(get_agent_folder "$agent_name")
-    local agent_dir="$CHATSPACE_DIR/$folder"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     
     if [ ! -f "$agent_dir/.env" ]; then
         echo "Error: Agent '$agent_name' not found!"
@@ -4404,7 +4630,7 @@ agent_runner_pids() {
 
 agent_is_running() {
     local agent_name="$1"
-    local agent_dir="$CHATSPACE_DIR/$(get_agent_folder "$agent_name")"
+    local agent_dir="$(resolve_agent_dir "$agent_name")"
     agent_session_running "$(agent_session_name "$agent_name")" && return 0
     [ -n "$(agent_runner_pids "$agent_dir")" ]
 }
@@ -4438,7 +4664,7 @@ start_agent_session() {
     local mode="\${2:-start}"
     local folder agent_dir session
     folder=$(get_agent_folder "$agent_name")
-    agent_dir="$CHATSPACE_DIR/$folder"
+    agent_dir="$(resolve_agent_dir "$agent_name")"
     session=$(agent_session_name "$agent_name")
 
     if [ ! -f "$agent_dir/.env" ] || [ ! -x "$agent_dir/agent-runner.sh" ]; then
@@ -4481,27 +4707,134 @@ start_agent_session() {
     fi
 
     local log_file="$agent_dir/agent_state/supervisor.log"
+    local runner_log="$agent_dir/agent_state/runner.log"
     mkdir -p "$agent_dir/agent_state"
+    rm -f "$agent_dir/agent_state/.agent_terminated" "$agent_dir/agent_state/.last_activity_at" "$agent_dir/agent_state/.last_successful_connection"
+    # Everything the runner prints is also kept in runner.log, so a failed
+    # background start can be explained without attaching to tmux.
+    local log_start=0
+    [ -f "$runner_log" ] && log_start=$(wc -c < "$runner_log" | tr -cd '0-9')
     local supervisor
-    supervisor='while true; do ./agent-runner.sh; code=$?; echo "$(date -Is) runner exited with code $code" >> agent_state/supervisor.log; [ "$code" -eq 0 ] && break; echo "Runner exited ($code); restarting in 10s (Ctrl-C to stop)..."; sleep 10 || break; done'
-    tmux new-session -d -s "$session" -c "$agent_dir" "bash -c '$supervisor'"
-    sleep 1
-    if agent_session_running "$session"; then
-        echo "Started '$agent_name' in tmux session '$session' (auto-restarts on crash)."
-        echo "  Attach:   tmux attach -t $session"
-        echo "  Stop:     bash $SCRIPT_DIR/agent-cli.sh --shutdown \\"$agent_name\\""
-        echo "  Log:      $log_file"
-        return 0
+    supervisor='umask 077; while true; do [ "$(wc -c < agent_state/runner.log 2>/dev/null || echo 0)" -gt 5000000 ] && mv -f agent_state/runner.log agent_state/runner.log.1; ./agent-runner.sh 2>&1 | tee -a agent_state/runner.log; code=\${PIPESTATUS[0]}; echo "$(date -Is) runner exited with code $code" >> agent_state/supervisor.log; [ "$code" -eq 0 ] && break; echo "Runner exited ($code); restarting in 10s (Ctrl-C to stop)..." | tee -a agent_state/runner.log; sleep 10 || break; done'
+    if ! tmux new-session -d -s "$session" -c "$agent_dir" "bash -c '$supervisor'"; then
+        echo "Error: tmux could not create session '$session'. Run in the foreground to see why:"
+        echo "  cd \\"$agent_dir\\" && ./agent-runner.sh"
+        return 1
     fi
-    echo "Error: session '$session' exited immediately. Run in the foreground to see why:"
-    echo "  cd \\"$agent_dir\\" && ./agent-runner.sh"
-    return 1
+    local ready=0
+    wait_for_agent_ready "$session" "$runner_log" "$log_start" || ready=$?
+    case "$ready" in
+        0)
+            local C_CYAN="\\033[38;5;51m" C_TEAL="\\033[38;5;43m" C_EMERALD="\\033[38;5;48m"
+            local C_GOLD="\\033[38;5;220m" C_PINK="\\033[38;5;212m" C_WHITE="\\033[1;37m"
+            local C_DIM="\\033[38;5;245m" C_BOLD="\\033[1m" C_RESET="\\033[0m"
+            local frames="3"
+            [ -t 1 ] && frames="0 1 2 0 1 2 3"
+            echo ""
+            local first_frame=1 f dN dNE dE dSE dS dSW dW dNW dIn1 dIn2 core s1 s2 badge
+            for f in $frames; do
+                if [ "$first_frame" -eq 0 ]; then
+                    printf "\\033[7A"
+                fi
+                first_frame=0
+                case "$f" in
+                    0)
+                        dN="\${C_CYAN}●"; dNE="\${C_TEAL}○"; dE="\${C_EMERALD}●"; dSE="\${C_TEAL}○"
+                        dS="\${C_CYAN}●"; dSW="\${C_TEAL}○"; dW="\${C_EMERALD}●"; dNW="\${C_TEAL}○"
+                        dIn1="\${C_CYAN}●"; dIn2="\${C_EMERALD}●"
+                        core="\${C_CYAN}◎"; s1="\${C_GOLD}✦"; s2="\${C_PINK}✧"; badge="\${C_CYAN}◐ Synchronizing ChatMCP orbit...\\033[K"
+                        ;;
+                    1)
+                        dN="\${C_TEAL}○"; dNE="\${C_CYAN}●"; dE="\${C_TEAL}○"; dSE="\${C_EMERALD}●"
+                        dS="\${C_TEAL}○"; dSW="\${C_CYAN}●"; dW="\${C_TEAL}○"; dNW="\${C_EMERALD}●"
+                        dIn1="\${C_TEAL}○"; dIn2="\${C_CYAN}●"
+                        core="\${C_EMERALD}◉"; s1="\${C_PINK}✧"; s2="\${C_GOLD}✦"; badge="\${C_EMERALD}◓ Locking council ring...\\033[K"
+                        ;;
+                    2)
+                        dN="\${C_EMERALD}●"; dNE="\${C_TEAL}○"; dE="\${C_CYAN}●"; dSE="\${C_TEAL}○"
+                        dS="\${C_EMERALD}●"; dSW="\${C_TEAL}○"; dW="\${C_CYAN}●"; dNW="\${C_TEAL}○"
+                        dIn1="\${C_EMERALD}●"; dIn2="\${C_TEAL}○"
+                        core="\${C_GOLD}✦"; s1="\${C_GOLD}★"; s2="\${C_CYAN}✦"; badge="\${C_GOLD}◑ Activating neural link...\\033[K"
+                        ;;
+                    *)
+                        dN="\${C_CYAN}●"; dNE="\${C_EMERALD}●"; dE="\${C_CYAN}●"; dSE="\${C_EMERALD}●"
+                        dS="\${C_CYAN}●"; dSW="\${C_EMERALD}●"; dW="\${C_CYAN}●"; dNW="\${C_EMERALD}●"
+                        dIn1="\${C_CYAN}●"; dIn2="\${C_EMERALD}●"
+                        core="\${C_EMERALD}◉"; s1="\${C_GOLD}✦"; s2="\${C_PINK}✦"; badge="\${C_EMERALD}● Connected & waiting for messages (auto-restarts on crash)\\033[K"
+                        ;;
+                esac
+                printf "  %b      %b╭─────%b%b─────╮%b      %b   %b✨ C H A T   M C P   S P A C E ✨%b\\n" "$s1" "$C_TEAL" "$dN" "$C_TEAL" "$C_RESET" "$s2" "\${C_BOLD}\${C_CYAN}" "$C_RESET"
+                printf "       %b%b╭─╯   %b╭───╮%b   ╰─╮%b%b      %b🎉 CONGRATULATIONS! AGENT IS LIVE! 🎉%b\\n" "$dNW" "$C_TEAL" "$C_CYAN" "$C_TEAL" "$dNE" "$C_RESET" "\${C_BOLD}\${C_GOLD}" "$C_RESET"
+                printf "       %b│    %b╭─╯ %b%b ╰─╮%b    │%b      %b─────────────────────────────────────────%b\\n" "$C_TEAL" "$C_CYAN" "$dIn1" "$C_CYAN" "$C_TEAL" "$C_RESET" "$C_TEAL" "$C_RESET"
+                printf "      %b%b┤    %b│   %b%b   │%b    ├%b%b     %b🤖 Agent:%b   %b%s%b\\n" "$dW" "$C_TEAL" "$C_CYAN" "$core" "$C_CYAN" "$C_TEAL" "$dE" "$C_RESET" "$C_DIM" "$C_RESET" "\${C_BOLD}\${C_WHITE}" "$agent_name" "$C_RESET"
+                printf "       %b│    %b╰─╮ %b%b ╭─╯%b    │%b      %b🖥️  Session:%b %b%s%b\\n" "$C_TEAL" "$C_CYAN" "$dIn2" "$C_CYAN" "$C_TEAL" "$C_RESET" "$C_DIM" "$C_RESET" "$C_CYAN" "$session" "$C_RESET"
+                printf "       %b%b╰─╮   %b╰───╯%b   ╭─╯%b%b      %b⚡ Status:%b  %b%b\\n" "$dSW" "$C_TEAL" "$C_CYAN" "$C_TEAL" "$dSE" "$C_RESET" "$C_DIM" "$C_RESET" "$badge" "$C_RESET"
+                printf "  %b      %b╰─────%b%b─────╯%b      %b   %bStarted '%s' in tmux session '%s'. It is connected and waiting for messages (auto-restarts on crash).%b\\n" "$s2" "$C_TEAL" "$dS" "$C_TEAL" "$C_RESET" "$s1" "$C_EMERALD" "$agent_name" "$session" "$C_RESET"
+                if [ "$f" != "3" ] && [ -t 1 ]; then
+                    sleep 0.12 2>/dev/null || sleep 1
+                fi
+            done
+            echo ""
+            printf "  %b╭─ Quick Commands ────────────────────────────────────────────────────────────────────────╮%b\\n" "$C_TEAL" "$C_RESET"
+            printf "  %b│%b  %bAttach:%b   %btmux attach -t %s%b   %b(detach: Ctrl-b d)%b\\n" "$C_TEAL" "$C_RESET" "\${C_BOLD}\${C_CYAN}" "$C_RESET" "$C_WHITE" "$session" "$C_RESET" "$C_DIM" "$C_RESET"
+            printf "  %b│%b  %bLogs:%b     %btail -f \\"%s\\"%b\\n" "$C_TEAL" "$C_RESET" "\${C_BOLD}\${C_GOLD}" "$C_RESET" "$C_WHITE" "$runner_log" "$C_RESET"
+            printf "  %b│%b  %bStop:%b     %bbash \\"%s/agent-cli.sh\\" --shutdown \\"%s\\"%b\\n" "$C_TEAL" "$C_RESET" "\${C_BOLD}\${C_PINK}" "$C_RESET" "$C_WHITE" "$SCRIPT_DIR" "$agent_name" "$C_RESET"
+            printf "  %b╰─────────────────────────────────────────────────────────────────────────────────────────╯%b\\n" "$C_TEAL" "$C_RESET"
+            printf "  %b💡 If tmux shows errors from ~/.tmux.conf when you attach, they come from your tmux config, not the agent. Press q to close them.%b\\n" "$C_DIM" "$C_RESET"
+            return 0
+            ;;
+        3) echo "Started '$agent_name', but it cannot read your messages: the saved decryption password does not match your account."
+           echo "  Fix:      bash \\"$SCRIPT_DIR/agent-cli.sh\\" --set-password \\"$agent_name\\"" ;;
+        4) echo "Started '$agent_name', but it has not confirmed a connection after \${CHATSPACE_START_TIMEOUT:-60}s. Recent output:"
+           print_runner_log_tail "$runner_log" "$log_start" ;;
+        *) echo "Error: '$agent_name' did not start. Recent output:"
+           print_runner_log_tail "$runner_log" "$log_start"
+           if agent_session_running "$session"; then
+               echo "It keeps retrying every 10s in the background. Fix the error above, or stop it:"
+               echo "  bash \\"$SCRIPT_DIR/agent-cli.sh\\" --shutdown \\"$agent_name\\""
+           fi ;;
+    esac
+    echo "  Attach:   tmux attach -t $session   (detach: Ctrl-b d)"
+    echo "  Logs:     tail -f \\"$runner_log\\""
+    echo "  Stop:     bash \\"$SCRIPT_DIR/agent-cli.sh\\" --shutdown \\"$agent_name\\""
+    echo "  If tmux shows errors from ~/.tmux.conf when you attach, they come from your tmux config, not the agent. Press q to close them."
+    [ "$ready" -eq 0 ]
+}
+
+print_runner_log_tail() {
+    local runner_log="$1" log_start="$2"
+    if [ -f "$runner_log" ]; then
+        tail -c +"$((log_start + 1))" "$runner_log" | sed 's/\\x1b\\[[0-9;]*m//g' | tail -n 20 | sed 's/^/    /'
+    else
+        echo "    (no output yet)"
+    fi
+}
+
+# Waits until the runner reports that it is connected and polling.
+# Returns 0 = ready, 1 = runner exited/crashed, 3 = wrong decryption password,
+# 4 = still not confirmed after CHATSPACE_START_TIMEOUT seconds (default 60).
+wait_for_agent_ready() {
+    local session="$1" runner_log="$2" log_start="$3"
+    local timeout="\${CHATSPACE_START_TIMEOUT:-60}" waited=0 output
+    while [ "$waited" -lt "$timeout" ]; do
+        sleep 1
+        waited=$((waited + 1))
+        output=""
+        [ -f "$runner_log" ] && output=$(tail -c +"$((log_start + 1))" "$runner_log" 2>/dev/null || true)
+        case "$output" in
+            *"does not match your account"*) return 3 ;;
+            *"Waiting for messages"*) return 0 ;;
+            *"Runner exited ("*) return 1 ;;
+        esac
+        agent_session_running "$session" || return 1
+    done
+    return 4
 }
 
 shutdown_agent_session() {
     local session agent_dir
     session=$(agent_session_name "$1")
-    agent_dir="$CHATSPACE_DIR/$(get_agent_folder "$1")"
+    agent_dir="$(resolve_agent_dir "$1")"
     local service_name="agent-$(get_agent_folder "$1").service"
     if command -v systemctl &>/dev/null && systemctl --user is-enabled "$service_name" &>/dev/null; then
         systemctl --user stop "$service_name" || return 1
@@ -4566,6 +4899,7 @@ start_agent_foreground() {
     fi
     echo ""
     echo "Starting agent..."
+    rm -f "$agent_dir/agent_state/.agent_terminated" "$agent_dir/agent_state/.last_activity_at" "$agent_dir/agent_state/.last_successful_connection"
     exec "$agent_dir/agent-runner.sh"
 }
 
@@ -4578,7 +4912,7 @@ start_agent_foreground() {
 install_global_command() {
     local cmd_name="\${1:-chatspace}"
     local bin_dir="$HOME/.local/bin"
-    local self_path="$SCRIPT_DIR/$(basename "\${BASH_SOURCE[0]}")"
+    local self_path="$CLI_SCRIPT_DIR/$(basename "\${BASH_SOURCE[0]}")"
     local target="$bin_dir/$cmd_name"
 
     case "$cmd_name" in
@@ -4688,6 +5022,10 @@ if [ -n "$ARG_RESTART" ]; then
 fi
 if [ -n "$ARG_SHUTDOWN" ]; then
     shutdown_agent_session "$ARG_SHUTDOWN"
+    exit $?
+fi
+if [ -n "$ARG_SET_PASSWORD" ]; then
+    set_agent_password "$ARG_SET_PASSWORD"
     exit $?
 fi
 
@@ -5383,9 +5721,21 @@ else:
     load_dotenv()
 
 
+def _env_password():
+    # USER_PASSWORD_B64 keeps passwords with $, quotes or backslashes exact;
+    # python-dotenv and bash read the quoted USER_PASSWORD line differently.
+    encoded = os.getenv("USER_PASSWORD_B64", "")
+    if encoded:
+        try:
+            return base64.b64decode(encoded).decode("utf-8")
+        except Exception:
+            pass
+    return os.getenv("USER_PASSWORD", "")
+
+
 class Config:
     api_key = os.getenv("API_KEY", "")
-    user_password = os.getenv("USER_PASSWORD", "")
+    user_password = _env_password()
     encryption_salt = os.getenv("ENCRYPTION_SALT", "")
     api_base = os.getenv("API_BASE", "")
     agent_name = os.getenv("AGENT_NAME", "")
@@ -5463,7 +5813,26 @@ _PENDING_ATTACHMENTS_FILE = _script_dir / "agent_state" / ".pending_attachment_i
 _PENDING_UPDATE_FILE = _script_dir / "agent_state" / ".pending_self_update.json"
 _POLL_ADVICE_FILE = _script_dir / "agent_state" / ".poll_advice.json"
 _RUN_OVERRIDES_FILE = _script_dir / "agent_state" / ".run_overrides.json"
+_BRIEF_REVISION_FILE = _script_dir / "agent_state" / ".brief_revision"
+_AGENT_TERMINATED_FILE = _script_dir / "agent_state" / ".agent_terminated"
 _AGENT_CLI_VERSION = "${AGENT_CLI_VERSION}"
+
+
+def _check_and_record_terminated(payload: dict) -> bool:
+    """Detect when the agent has been deleted or archived on the site and write .agent_terminated."""
+    try:
+        if not isinstance(payload, dict):
+            return False
+        err = payload.get("error")
+        err_code = err.get("code") if isinstance(err, dict) else None
+        if payload.get("agentDeletedOrArchived") is True or err_code in ("AGENT_NOT_FOUND", "AGENT_ARCHIVED"):
+            status = payload.get("agentStatus") or ("archived" if err_code == "AGENT_ARCHIVED" else "deleted")
+            _AGENT_TERMINATED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _AGENT_TERMINATED_FILE.write_text(str(status), encoding="utf-8")
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _build_agent_responses_path(since: Optional[str] = None) -> str:
@@ -5908,6 +6277,12 @@ def send_message(content: str, priority: int = 0,
     }
     if run_command:
         payload["runCommand"] = run_command
+    try:
+        revision = int(_BRIEF_REVISION_FILE.read_text(encoding="utf-8").strip())
+        if revision > 0:
+            payload["briefRevision"] = revision
+    except (OSError, ValueError):
+        pass
     # Reuse the runner's key across retries so an ambiguous HTTP result cannot
     # create two visible agent replies.
     payload["clientMessageId"] = os.getenv("CLIENT_MESSAGE_ID", "") or str(uuid.uuid4())
@@ -5917,6 +6292,7 @@ def send_message(content: str, priority: int = 0,
         payload["attachmentIds"] = attachment_ids
 
     result = _api_request("POST", "/agent/messages", payload)
+    _check_and_record_terminated(result)
     if result.get("newMessages"):
         _decrypt_payload_items(result["newMessages"])
     # Write to local conversation history on success
@@ -5979,14 +6355,44 @@ def _save_run_overrides(payload: dict):
         pass
 
 
+def _save_brief_revision(payload: dict):
+    """Keep the delivered revision only for the runner's current turn."""
+    try:
+        responses = payload.get("responses") if isinstance(payload, dict) else None
+        revision = responses[0].get("briefRevision") if responses else None
+        if isinstance(revision, int) and revision > 0:
+            _BRIEF_REVISION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _BRIEF_REVISION_FILE.write_text(str(revision), encoding="utf-8")
+        else:
+            _BRIEF_REVISION_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def wake_claim() -> dict:
+    return _api_request("POST", "/agent/brief/wake/claim", {"agentName": Config.agent_name})
+
+
+def wake_outcome(run_id: str, outcome: str, reason: str = "") -> dict:
+    payload = {"agentName": Config.agent_name, "outcome": outcome, "reason": reason[:500]}
+    if outcome == "sleep_until":
+        parts = reason.split(" ", 1)
+        if parts:
+            payload["sleepUntil"] = parts[0]
+            payload["reason"] = parts[1][:500] if len(parts) > 1 else "Sleeping until the requested time"
+    return _api_request("POST", f"/agent/brief/wake/{urllib.parse.quote(run_id)}/outcome", payload)
+
+
 def check_new_messages() -> list:
     global _last_read_time
 
     path = _build_agent_responses_path(_last_read_time)
 
     result = _api_request("GET", path)
+    _check_and_record_terminated(result)
     _save_poll_advice(result)
     _save_run_overrides(result)
+    _save_brief_revision(result)
     responses = []
 
     if result.get("responses"):
@@ -6023,6 +6429,7 @@ def get_config() -> dict:
     """Fetch current agent configuration from API."""
     path = f"/agent/config?agentName={urllib.parse.quote(Config.agent_name)}"
     result = _api_request("GET", path)
+    _check_and_record_terminated(result)
     return result.get("config", {})
 
 
@@ -6135,32 +6542,66 @@ def cos_set_agent_model(target_agent: str, provider: str = None, model: str = No
     return _api_request("PATCH", f"/agent/cos/agents/{match.get('agent_id')}/config", payload)
 
 
-def check_dm(from_agent: str = None) -> list:
-    """
-    Check for direct messages from other agents.
-    
-    Args:
-        from_agent: Optional - filter to messages from this agent only
-    
-    Returns:
-        list of messages from other agents (decrypted if encrypted)
-    """
-    path = "/agent/messages/direct"
+def acknowledge_dms(message_ids: list) -> bool:
+    """Acknowledge only IDs actually delivered to this consumer."""
+    for message_id in message_ids:
+        result = _api_request("POST", "/agent/messages/direct/ack", {"messageId": message_id})
+        if result.get("acknowledged") is not True:
+            return False
+    return True
+
+
+def _dm_batch_path():
+    return _script_dir / "agent_state" / ".dm_batch.json"
+
+
+def acknowledge_dm_batch() -> bool:
+    batch = _dm_batch_path()
+    if not batch.exists():
+        return True
+    message_ids = json.loads(batch.read_text())
+    if not acknowledge_dms(message_ids):
+        return False
+    batch.unlink(missing_ok=True)
+    return True
+
+
+def check_dm(from_agent: str = None, defer_ack: bool = False) -> list:
+    """Poll without consuming; acknowledge after decryption or a successful runner turn."""
+    if defer_ack:
+        # Clear the previous turn's IDs even if this poll fails. Never confirm
+        # an earlier failed turn just because a later user-only turn succeeds.
+        batch = _dm_batch_path()
+        batch.parent.mkdir(parents=True, exist_ok=True)
+        batch.write_text("[]")
+    path = "/agent/messages/direct?markRead=false"
     if from_agent:
-        path += f"?fromAgent={urllib.parse.quote(from_agent)}"
-    
+        path += f"&fromAgent={urllib.parse.quote(from_agent)}"
     result = _api_request("GET", path)
+    if result.get("error"):
+        raise RuntimeError("Could not poll direct messages; they remain pending")
     _save_poll_advice(result)
-    messages = result.get("messages", [])
-    
-    # Decrypt messages that are encrypted
-    decrypted_messages = []
-    for msg in messages:
+    messages = []
+    for original in result.get("messages", []):
+        msg = dict(original)
         if msg.get("encrypted") and msg.get("content"):
-            msg["content"] = _decrypt_inter_agent_message(msg["content"])
-        decrypted_messages.append(msg)
-    
-    return decrypted_messages
+            ciphertext = msg["content"]
+            plain = _group_decrypt_message(ciphertext) if msg.get("shared") else _decrypt_inter_agent_message(ciphertext)
+            if plain in ("[Decryption failed]", "[Inter-agent DM decryption failed]", ciphertext):
+                print("Could not decrypt a direct message; it remains pending. Check the account or shared DM key.", file=sys.stderr)
+                continue
+            msg["content"] = plain
+        messages.append(msg)
+    message_ids = [msg["messageId"] for msg in messages]
+    if defer_ack:
+        batch = _dm_batch_path()
+        batch.parent.mkdir(parents=True, exist_ok=True)
+        temporary = batch.with_suffix(".tmp")
+        temporary.write_text(json.dumps(message_ids))
+        temporary.replace(batch)
+    elif not acknowledge_dms(message_ids):
+        print("Could not confirm receipt of a direct message; it may be delivered again.", file=sys.stderr)
+    return messages
 
 
 def _build_spawn_briefing(child_name: str, instructions: str) -> str:
@@ -6282,10 +6723,11 @@ def spawn_agent(child_name: str, instructions: str = "", model_provider: str = N
                 _shutil.copy2(_parent_runner, _child_runner)
                 os.chmod(_child_runner, 0o755)
 
-            # Copy SKILL_RICH_FORMS.md if exists
-            _skill_file = os.path.join(_parent_dir, "SKILL_RICH_FORMS.md")
-            if os.path.exists(_skill_file) and not os.path.exists(os.path.join(_child_dir, "SKILL_RICH_FORMS.md")):
-                _shutil.copy2(_skill_file, os.path.join(_child_dir, "SKILL_RICH_FORMS.md"))
+            # Copy optional skill docs if they exist
+            for _skill_name in ("SKILL_RICH_FORMS.md", "SKILL_LARGE_FILE_TRANSFER.md"):
+                _skill_file = os.path.join(_parent_dir, _skill_name)
+                if os.path.exists(_skill_file) and not os.path.exists(os.path.join(_child_dir, _skill_name)):
+                    _shutil.copy2(_skill_file, os.path.join(_child_dir, _skill_name))
 
             # Copy agent summary as informational context (NOT .summary_state.json — child has its own history)
             _parent_summary = os.path.join(_parent_dir, "agent_state", "agent_summary.md")
@@ -6541,7 +6983,14 @@ def self_terminate(reason: str = "Task complete", archive_messages: bool = True)
         "reason": reason,
         "archiveMessages": archive_messages
     }
-    return _api_request("POST", "/agent/self-terminate", payload)
+    result = _api_request("POST", "/agent/self-terminate", payload)
+    if isinstance(result, dict) and result.get("success"):
+        try:
+            _AGENT_TERMINATED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _AGENT_TERMINATED_FILE.write_text("self_terminated", encoding="utf-8")
+        except Exception:
+            pass
+    return result
 
 
 def get_lineage() -> dict:
@@ -6737,6 +7186,9 @@ def _format_responses_for_llm(responses: list, attachment_paths: dict = None) ->
     attachment_paths = attachment_paths or {}
     lines = []
     for r in responses:
+        brief_context = r.get("briefContext")
+        if isinstance(brief_context, str) and brief_context:
+            lines.append(brief_context)
         sender = r.get("from", "user")
         label = sender.upper() if sender else "USER"
         ts = r.get("timestamp", "unknown time")
@@ -6889,6 +7341,21 @@ Attachment Commands:
             err = result.get("error", {})
             msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
             print("Stop request failed: " + msg)
+            sys.exit(1)
+
+    elif command == "wake-claim":
+        result = wake_claim()
+        print(json.dumps(result))
+        if result.get("error") or result.get("_statusCode", 200) >= 400:
+            sys.exit(1)
+
+    elif command == "wake-outcome":
+        if len(message_parts) < 2:
+            print("Usage: wake-outcome <run-id> <outcome> [reason]")
+            sys.exit(1)
+        result = wake_outcome(message_parts[0], message_parts[1], " ".join(message_parts[2:]))
+        print(json.dumps(result))
+        if result.get("error") or result.get("_statusCode", 200) >= 400:
             sys.exit(1)
 
     elif command == "send":
@@ -7153,6 +7620,11 @@ Attachment Commands:
                 if agent.get("shared"):
                     print(f"    Shared DM address: {agent.get('address')} (requires shared DM password and salt)")
 
+    elif command == "dm-ack":
+        if not acknowledge_dm_batch():
+            print("Could not acknowledge direct messages; they remain pending.", file=sys.stderr)
+            sys.exit(1)
+
     elif command == "dm":
         # dm <agent> <message> OR dm check [--from <agent>]
         if not args or args[0] == "check":
@@ -7162,7 +7634,7 @@ Attachment Commands:
                 from_idx = args.index("--from")
                 if from_idx + 1 < len(args):
                     from_agent = args[from_idx + 1]
-            messages = check_dm(from_agent=from_agent)
+            messages = check_dm(from_agent=from_agent, defer_ack="--defer-ack" in args)
             if not messages:
                 print("No new messages from other agents.")
             else:
@@ -7213,7 +7685,13 @@ Attachment Commands:
                     print(f"Warning: could not set model for {target}: {err_msg} — sending the DM anyway")
             result = send_dm(target, message, priority=priority)
             if result.get("status") == "sent" or result.get("messageId"):
-                print(f"DM sent to {target}")
+                delivery = result.get("delivery", {})
+                if delivery.get("state") == "received":
+                    print(f"DM received by {target}")
+                elif delivery.get("recipientOnline") is False:
+                    print(f"DM queued for {target}; recipient is offline. It will receive the message when its runner reconnects.")
+                else:
+                    print(f"DM queued for {target}; waiting for recipient receipt.")
             else:
                 print(f"Failed to send DM: {result.get('error', 'Unknown error')}")
 
@@ -7473,6 +7951,21 @@ Agent Spawning:
             print("Stop request failed: " + msg)
             sys.exit(1)
 
+    elif command == "wake-claim":
+        result = wake_claim()
+        print(json.dumps(result))
+        if result.get("error") or result.get("_statusCode", 200) >= 400:
+            sys.exit(1)
+
+    elif command == "wake-outcome":
+        if len(message_parts) < 2:
+            print("Usage: wake-outcome <run-id> <outcome> [reason]")
+            sys.exit(1)
+        result = wake_outcome(message_parts[0], message_parts[1], " ".join(message_parts[2:]))
+        print(json.dumps(result))
+        if result.get("error") or result.get("_statusCode", 200) >= 400:
+            sys.exit(1)
+
     elif command == "send":
         if not message:
             print("Error: Message is required for send command")
@@ -7622,6 +8115,11 @@ Agent Spawning:
                 if agent.get("shared"):
                     print(f"    Shared DM address: {agent.get('address')} (requires shared DM password and salt)")
 
+    elif command == "dm-ack":
+        if not acknowledge_dm_batch():
+            print("Could not acknowledge direct messages; they remain pending.", file=sys.stderr)
+            sys.exit(1)
+
     elif command == "dm":
         # dm <agent> <message> OR dm check [--from <agent>]
         if not args or args[0] == "check":
@@ -7631,7 +8129,7 @@ Agent Spawning:
                 from_idx = args.index("--from")
                 if from_idx + 1 < len(args):
                     from_agent = args[from_idx + 1]
-            messages = check_dm(from_agent=from_agent)
+            messages = check_dm(from_agent=from_agent, defer_ack="--defer-ack" in args)
             if not messages:
                 print("No new messages from other agents.")
             else:
@@ -7682,7 +8180,13 @@ Agent Spawning:
                     print(f"Warning: could not set model for {target}: {err_msg} — sending the DM anyway")
             result = send_dm(target, message, priority=priority)
             if result.get("status") == "sent" or result.get("messageId"):
-                print(f"DM sent to {target}")
+                delivery = result.get("delivery", {})
+                if delivery.get("state") == "received":
+                    print(f"DM received by {target}")
+                elif delivery.get("recipientOnline") is False:
+                    print(f"DM queued for {target}; recipient is offline. It will receive the message when its runner reconnects.")
+                else:
+                    print(f"DM queued for {target}; waiting for recipient receipt.")
             else:
                 print(f"Failed to send DM: {result.get('error', 'Unknown error')}")
 
@@ -8030,6 +8534,7 @@ You have optional skill documentation available in this directory. Read these fi
 
 - **SKILL_RICH_FORMS.md** - Send interactive HTML forms and visual reports to the user (weather dashboards, status reports, surveys, settings). Read this file for full documentation and examples.
 - **SELF_WAKE_GUIDE.md** - Schedule future wake-ups or trigger a wake when a local task finishes. Read only if you need self-wake behavior.
+- **SKILL_LARGE_FILE_TRANSFER.md** - Move files too large for a chat attachment to/from another agent (Magic Wormhole, with fallbacks). Read only if you need it.
 
 ## Rich HTML Views
 
@@ -9024,49 +9529,96 @@ Field names are derived from the \\\`name\\\` attribute of each input, with unde
  * This is written to SELF_WAKE_GUIDE.md in each agent directory.
  */
 function generateSelfWakeGuide() {
-    return `# Self-Wake & Delayed Tasks
+    return `# Automatic work and delayed tasks
 
-Use this guide only when you need to **wake yourself later** or **wake after a local job finishes**.
-Normal chat replies should still go through message_helper.py.
+The website owns automatic wake-up authorization for this runner. Local
+\`.scheduled_tasks.json\` and \`.self_wakeup.txt\` files are retained for
+rollback but are not executed. Do not write them to request another model turn.
 
-## 1) Schedule a future wake-up
+The owner can enable bounded checks or request one check in the agent's
+Identity & goals panel. Each admitted run carries a run ID and a remaining
+allowance. If no useful next action exists, stop; do not use the allowance.
 
-Write a task into \`agent_state/.scheduled_tasks.json\` (UTC, ISO 8601).
-When the time arrives, the agent loop runs with a prompt that includes:
-\`SCHEDULED TASK: <your task>\`
+Before finishing an automatic run, report its outcome:
 
-Example (append a task in Python):
-\`\`\`python
-import json
-from pathlib import Path
+\`uv run message_helper.py wake-outcome "$CHATSPACE_WAKE_RUN_ID" progress "What changed"\`
 
-state_dir = Path("agent_state")
-tasks_path = state_dir / ".scheduled_tasks.json"
-tasks = json.loads(tasks_path.read_text() or "[]")
-tasks.append({
-    "id": "followup-1",
-    "task": "Check the long-running job and report status",
-    "run_at": "2026-04-06T12:30:00Z",
-    "priority": 1
-})
-tasks_path.write_text(json.dumps(tasks, indent=2))
+Other outcomes are \`no_progress\`, \`waiting_user\`, \`blocked\`,
+\`ready_for_review\`, \`wait_event\`, and \`unknown\`. Explain what
+would allow progress. Two unproductive runs put automatic work to sleep.
+For a time-based sleep, use \`wake-outcome "$CHATSPACE_WAKE_RUN_ID" sleep_until 2026-10-28T15:30:00Z "Why this time is useful"\`.
+If you do not report, the runner records an unknown outcome and pauses
+further checks for review. Never enable or expand your own policy.`;
+}
+
+/**
+ * Generate large file transfer skill documentation
+ * This is written to SKILL_LARGE_FILE_TRANSFER.md in each agent directory.
+ * Agents read it only when they need to move a file that is too large for a
+ * chat attachment, so normal turns do not pay for it in context.
+ */
+function generateLargeFileTransferSkill() {
+    return `# Skill: Large File Transfer Between Agents (Magic Wormhole)
+
+Read this only when you must move a file or folder to/from another agent and it is
+too large for a chat attachment (\`send --attach\`). This skill is optional:
+if nothing below works, fall back as described at the end — never block on it.
+
+## 1) Pick the simplest method that works
+
+1. **Small file** (fits the attachment limit): \`uv run message_helper.py send "..." --attach <file>\`.
+2. **Both agents on the same machine / shared filesystem:** just DM the absolute path.
+3. **Both can reach the same git remote, bucket or server you are already authorized for:** use that.
+4. **Otherwise:** Magic Wormhole (below). It is end-to-end encrypted, peer-to-peer,
+   and needs no accounts, ports or shared servers.
+
+## 2) Check / install (only if needed)
+
+\`\`\`bash
+command -v wormhole && wormhole --version
 \`\`\`
 
-## 2) Wake after a local job completes (file trigger)
+If missing, install it **only when your instructions allow installing tools**:
+\`\`\`bash
+uv tool install magic-wormhole      # preferred (no sudo)
+# or: pipx install magic-wormhole
+\`\`\`
+If install is not allowed or fails, skip to section 5.
 
-Write a one-time message into \`agent_state/.self_wakeup.txt\`.
-The loop will read the file once, include it in the next prompt as:
-\`SELF WAKEUP: <file contents>\`, then delete the file so it does not repeat.
+## 3) Sender
 
-Example (Python):
-\`\`\`python
-from pathlib import Path
-Path("agent_state/.self_wakeup.txt").write_text(
-    "Job finished. Review the output in tmp/report.json and summarize."
-)
+\`\`\`bash
+sha256sum <file> | tee /tmp/transfer.sha256      # macOS: shasum -a 256 <file>
+wormhole send <file-or-folder>                    # prints a code like 7-crossover-clockwork
 \`\`\`
 
-If you need another wake, write the file again with a new message.`;
+- Run it in the background (or a tmux pane) — \`wormhole send\` waits until the receiver connects.
+- Send the code **only by direct message to the intended agent**, together with the
+  file name, size and SHA-256:
+  \`uv run message_helper.py dm "PeerAgent" "wormhole code 7-crossover-clockwork · report.tar.gz · 412MB · sha256 <hash>"\`
+- Never post a wormhole code in a shared/group chat, news feed, log or summary.
+  The code is single-use, but anyone who uses it first gets the file.
+
+## 4) Receiver
+
+\`\`\`bash
+cd <a directory inside your project workspace>
+wormhole receive --accept-file <code>
+sha256sum <received-file>                         # must match the sender's hash
+\`\`\`
+
+- Only accept codes from a DM by the agent you expected; if unsure, ask the user.
+- Treat received files as untrusted data: verify the hash, do not execute them,
+  and do not unpack archives outside your workspace.
+- Reply to the sender with the result (success + hash match, or the error).
+
+## 5) Resilience / fallbacks
+
+- Transfer interrupted: the sender runs \`wormhole send\` again (new code); codes are single-use.
+- Peer has no wormhole and cannot install it: try another method from section 1
+  that you both support (e.g. \`croc\`, \`scp\`/\`rsync\` to a host you are both already allowed to use).
+- Nothing works: tell the user what you tried, the file size, and ask how they
+  want it moved. Do not invent new credentials, open ports, or upload to public services.`;
 }
 
 /**
@@ -9137,6 +9689,7 @@ done
 RUNNING_FLAG="$STATE_DIR/.running"
 STOP_FLAG="$STATE_DIR/.stop_requested"
 RESTART_FLAG="$STATE_DIR/.restart_requested"
+TERMINATED_FLAG="$STATE_DIR/.agent_terminated"
 CONFIG_FILE="$STATE_DIR/agent_config.json"
 ALLOWED_PERMS_FILE="$STATE_DIR/allowed_permissions.json"
 SUMMARY_FILE="$STATE_DIR/agent_summary.md"
@@ -9146,6 +9699,7 @@ SELF_WAKE_FILE="$STATE_DIR/.self_wakeup.txt"
 AGENT_RESPONSE_FILE="$STATE_DIR/.agent_response.txt"
 AGENT_PID_FILE="$STATE_DIR/.agent_pid"
 LAST_SUCCESSFUL_CONNECTION_FILE="$STATE_DIR/.last_successful_connection"
+LAST_ACTIVITY_FILE="$STATE_DIR/.last_activity_at"
 LAST_RUN_FILE="$STATE_DIR/.last_run"
 LAST_INTERRUPTED_OUTPUT_FILE="$STATE_DIR/.last_interrupted_output"
 STOP_FAILSAFE_WINDOW_SECONDS=120
@@ -9158,7 +9712,10 @@ ERROR_FAILSAFE_WINDOW_STARTED_AT=0
 ERROR_FAILSAFE_MESSAGE_COUNT=0
 NO_CONNECTION_FAILSAFE_SECONDS=172800
 NO_CONNECTION_GIVE_UP_SECONDS=604800
+NO_CONNECTION_SHUTDOWN_SECONDS="\${NO_CONNECTION_SHUTDOWN_SECONDS:-2592000}"
+INACTIVITY_SHUTDOWN_SECONDS="\${INACTIVITY_SHUTDOWN_SECONDS:-2592000}"
 LAST_SUCCESSFUL_CONNECTION=$(date +%s)
+LAST_ACTIVITY_AT=$(date +%s)
 NO_CONNECTION_ALERTED="false"
 NO_CONNECTION_GIVE_UP_ALERTED="false"
 ERROR_COOLDOWN_UNTIL=0
@@ -9202,6 +9759,59 @@ get_last_successful_backend_connection() {
         fi
     fi
     echo "$current_value"
+}
+
+mark_agent_activity() {
+    LAST_ACTIVITY_AT=$(date +%s)
+    printf '%s\n' "$LAST_ACTIVITY_AT" > "$LAST_ACTIVITY_FILE" 2>/dev/null || true
+}
+
+get_last_agent_activity() {
+    local current_value="$LAST_ACTIVITY_AT"
+    if [ -f "$LAST_ACTIVITY_FILE" ]; then
+        local file_value
+        file_value=$(cat "$LAST_ACTIVITY_FILE" 2>/dev/null | tr -cd '0-9' || true)
+        if [ -n "$file_value" ]; then
+            current_value="$file_value"
+        fi
+    fi
+    echo "$current_value"
+}
+
+check_terminated_flag() {
+    [ -f "$TERMINATED_FLAG" ]
+}
+
+check_no_connection_shutdown() {
+    local now
+    now=$(date +%s)
+    LAST_SUCCESSFUL_CONNECTION=$(get_last_successful_backend_connection)
+    local elapsed=$((now - LAST_SUCCESSFUL_CONNECTION))
+    [ "$elapsed" -ge "$NO_CONNECTION_SHUTDOWN_SECONDS" ]
+}
+
+check_inactivity_shutdown() {
+    local now
+    now=$(date +%s)
+    LAST_ACTIVITY_AT=$(get_last_agent_activity)
+    local elapsed=$((now - LAST_ACTIVITY_AT))
+    [ "$elapsed" -ge "$INACTIVITY_SHUTDOWN_SECONDS" ]
+}
+
+handle_permanent_shutdown() {
+    local reason="\${1:-Agent terminated}"
+    log WARN "Permanent shutdown: $reason"
+    if [ -f "$AGENT_PID_FILE" ]; then
+        local agent_pid
+        agent_pid=$(cat "$AGENT_PID_FILE")
+        if kill -0 "$agent_pid" 2>/dev/null; then
+            kill "$agent_pid" 2>/dev/null || true
+            wait "$agent_pid" 2>/dev/null || true
+        fi
+        rm -f "$AGENT_PID_FILE"
+    fi
+    rm -f "$AGENT_PID_FILE" "$STOP_FLAG" "$RUNNING_FLAG"
+    exit 0
 }
 
 should_send_command_preview() {
@@ -10065,14 +10675,14 @@ check_for_messages() {
 
         if [ "$inter_agent_enabled" = "true" ]; then
             local dm_messages
-            dm_messages=$(uv run message_helper.py dm check 2>/dev/null || echo "")
+            local dm_exit=0
+            dm_messages=$(uv run message_helper.py dm check --defer-ack) || dm_exit=$?
 
-                # Only treat as DM if it looks like actual content (not an error or unsupported command)
-                # NOTE: tolerate both old and new "no messages" strings.
-                if [ -n "$dm_messages" ] && \
+            # The exit status identifies command failures. Message text can
+            # legitimately contain "error", "usage:" or "unknown command".
+            if [ "$dm_exit" -eq 0 ] && [ -n "$dm_messages" ] && \
                     [ "$dm_messages" != "No new messages from other agents." ] && \
-                    [ "$dm_messages" != "No direct messages from other agents." ] && \
-                    ! echo "$dm_messages" | grep -qi "error\\|not supported\\|unknown command\\|usage:"; then
+                    [ "$dm_messages" != "No direct messages from other agents." ]; then
                 if [ -n "$combined" ]; then
                     combined+=$'\n'
                 fi
@@ -10160,8 +10770,13 @@ send_message() {
 
         if [ $exit_code -eq 0 ] && ! echo "$output" | grep -q "Failed to send\\|error\\|ERROR"; then
             mark_successful_backend_connection
+            mark_agent_activity
             log INFO "API Output: $output"
             return 0
+        fi
+
+        if check_terminated_flag; then
+            handle_permanent_shutdown "Agent was deleted or archived on the site"
         fi
 
         local retry_after=""
@@ -10324,6 +10939,13 @@ send_working_heartbeat() {
         return 11
     fi
 
+    local deleted_or_archived
+    deleted_or_archived=$(echo "$response" | jq -r 'if .agentDeletedOrArchived == true or .error.code == "AGENT_NOT_FOUND" or .error.code == "AGENT_ARCHIVED" then (.agentStatus // "deleted") else "" end' 2>/dev/null || echo "")
+    if [ -n "$deleted_or_archived" ]; then
+        printf '%s\n' "$deleted_or_archived" > "$TERMINATED_FLAG" 2>/dev/null || true
+        return 12
+    fi
+
     local stop_requested
     stop_requested=$(echo "$response" | jq -r '.stopRequested // false' 2>/dev/null || echo "false")
     if [ "$stop_requested" = "true" ]; then
@@ -10387,6 +11009,14 @@ run_cli_in_background() {
 
     # Poll while CLI is running
     while kill -0 "$cli_pid" 2>/dev/null; do
+        if check_terminated_flag; then
+            log WARN "Agent deleted or archived - killing CLI process $cli_pid"
+            kill "$cli_pid" 2>/dev/null || true
+            wait "$cli_pid" 2>/dev/null || true
+            rm -f "$AGENT_PID_FILE"
+            handle_permanent_shutdown "Agent was deleted or archived on the site"
+        fi
+
         # Check for stop flag
         if check_stop_flag; then
             log WARN "Stop requested - killing CLI process $cli_pid"
@@ -10401,6 +11031,13 @@ run_cli_in_background() {
         if [ "$heartbeat_elapsed" -ge "$WORKING_HEARTBEAT_INTERVAL" ]; then
             if ! send_working_heartbeat "true"; then
                 local hb_code=$?
+                if [ "$hb_code" -eq 12 ]; then
+                    log WARN "Agent deleted or archived reported by backend heartbeat - killing CLI process $cli_pid"
+                    kill "$cli_pid" 2>/dev/null || true
+                    wait "$cli_pid" 2>/dev/null || true
+                    rm -f "$AGENT_PID_FILE"
+                    handle_permanent_shutdown "Agent was deleted or archived on the site"
+                fi
                 if [ "$hb_code" -eq 10 ]; then
                     log WARN "Stop requested by backend heartbeat - killing CLI process $cli_pid"
                     if [ ! -f "$STOP_FLAG" ]; then
@@ -11786,6 +12423,15 @@ run_agent() {
             ;;
     esac
     
+    # All providers must report failure to the inbox loop so DMs can retry.
+    if [ "\${cli_exit:-0}" -ne 0 ]; then
+        log ERROR "Agent command failed (exit $cli_exit)"
+        if [ "\${CHATSPACE_SHARED_TURN:-0}" != "1" ]; then
+            send_error_message "Agent command failed (exit $cli_exit). Check the runner log for diagnostics." "1" || true
+        fi
+        return "$cli_exit"
+    fi
+
     # Shared callers deliver this response through their encrypted conversation API.
     if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
         return "\${cli_exit:-0}"
@@ -11866,6 +12512,7 @@ main() {
     
     echo $$ > "$RUNNING_FLAG"
     mark_successful_backend_connection
+    mark_agent_activity
     
     local history
     history=$(get_history)
@@ -11929,11 +12576,19 @@ main() {
     fi
 
     while [ -f "$RUNNING_FLAG" ]; do
+        if check_terminated_flag; then
+            handle_permanent_shutdown "Agent was deleted or archived on the site"
+        fi
+
         # Load local config as defaults first
         load_config
 
         # Then fetch from API - API takes precedence and overwrites local values
         fetch_config_from_api
+
+        if check_terminated_flag; then
+            handle_permanent_shutdown "Agent was deleted or archived on the site"
+        fi
 
         # Validate config against allowed permissions
         if ! validate_config; then
@@ -11955,11 +12610,15 @@ main() {
             handle_restart
         fi
 
-        local scheduled_task
-        scheduled_task=$(check_scheduled_tasks)
-        local has_self_wakeup="false"
-        if self_wakeup_pending; then
-            has_self_wakeup="true"
+        # Website policy is authoritative for automatic work. Legacy local
+        # scheduled/self-wake files are left intact but are no longer executed.
+
+        # Stop permanently if the agent has not communicated with the site for 30 days.
+        if check_no_connection_shutdown; then
+            handle_permanent_shutdown "Agent has not connected to the site for 30 days"
+        fi
+        if check_inactivity_shutdown; then
+            handle_permanent_shutdown "Agent has had no activity with the site for 30 days"
         fi
 
         # After a full week without a successful backend connection, stop
@@ -11972,6 +12631,9 @@ main() {
 
         local check_result
         check_result=$(check_for_messages)
+        if check_terminated_flag; then
+            handle_permanent_shutdown "Agent was deleted or archived on the site"
+        fi
         update_server_poll_interval
 
         # Do not strand an agent offline after a long backend outage.  Slow
@@ -12001,11 +12663,21 @@ main() {
             IDLE_POLL_STREAK=$((IDLE_POLL_STREAK + 1))
         fi
 
-        # Don't run scheduled/self wake tasks before first user message
-        if [ "$skip_agent_command" = "true" ] && [ "$has_messages" = "false" ]; then
-            if [ -n "$scheduled_task" ] || [ "$has_self_wakeup" = "true" ]; then
-                log INFO "Skipping scheduled/self wake - waiting for first user message"
+        local proactive_run_id=""
+        local proactive_payload=""
+        if [ "$has_messages" = "false" ]; then
+            local claim_json
+            claim_json=$(uv run "$SCRIPT_DIR/message_helper.py" wake-claim 2>/dev/null) || claim_json=""
+            if [ -n "$claim_json" ] && printf '%s' "$claim_json" | jq -e '.admitted == true' >/dev/null 2>&1; then
+                proactive_run_id=$(printf '%s' "$claim_json" | jq -r '.runId // ""')
+                proactive_payload=$(printf '%s' "$claim_json" | jq -r '.prompt // ""')
+                printf '%s' "$claim_json" | jq -r '.briefRevision // empty' > "$STATE_DIR/.brief_revision"
+                export CHATSPACE_WAKE_RUN_ID="$proactive_run_id"
             fi
+        fi
+
+        # Don't run scheduled/self wake tasks before first user message
+        if [ "$skip_agent_command" = "true" ] && [ "$has_messages" = "false" ] && [ -z "$proactive_run_id" ]; then
             sleep "$(get_next_idle_wait_seconds)"
             continue
         fi
@@ -12015,21 +12687,7 @@ main() {
             combined=""
         fi
 
-        local wake_payload=""
-        if [ -n "$scheduled_task" ]; then
-            wake_payload="SCHEDULED TASK: $scheduled_task"
-        fi
-
-        local self_wakeup_content=""
-        if [ "$has_self_wakeup" = "true" ]; then
-            self_wakeup_content=$(consume_self_wakeup)
-            if [ -n "$self_wakeup_content" ]; then
-                if [ -n "$wake_payload" ]; then
-                    wake_payload+=$'\n'
-                fi
-                wake_payload+="SELF WAKEUP:\n$self_wakeup_content"
-            fi
-        fi
+        local wake_payload="$proactive_payload"
 
         if [ -n "$wake_payload" ]; then
             if [ -n "$combined" ]; then
@@ -12039,6 +12697,7 @@ main() {
         fi
 
         if [ "$has_messages" = "true" ] || [ -n "$wake_payload" ]; then
+            mark_agent_activity
             # If still waiting for the first real user message, this IS it.
             # Clear the flag so the agent command runs now.
             if [ "$skip_agent_command" = "true" ]; then
@@ -12048,16 +12707,7 @@ main() {
 
             if [ "$has_messages" = "true" ]; then
                 log SUCCESS "New message(s) received!"
-                log INFO "Messages: $check_result"
-            fi
-
-            if [ -n "$scheduled_task" ]; then
-                log SUCCESS "Scheduled task triggered!"
-                log INFO "Task: $scheduled_task"
-            fi
-
-            if [ -n "$self_wakeup_content" ]; then
-                log SUCCESS "Self wake signal detected!"
+                log INFO "Messages received for this turn"
             fi
 
             local run_overrides_applied="false"
@@ -12073,10 +12723,21 @@ main() {
             local run_success=0
             local agent_rc=0
             run_agent "$prompt" || agent_rc=$?
+            if [ -n "$proactive_run_id" ]; then
+                uv run "$SCRIPT_DIR/message_helper.py" wake-outcome "$proactive_run_id" unknown "Runner finished without a structured outcome" >/dev/null 2>&1 || log WARN "Automatic run outcome could not be confirmed"
+                unset CHATSPACE_WAKE_RUN_ID
+            fi
+            rm -f "$STATE_DIR/.brief_revision" 2>/dev/null || true
             if [ "$run_overrides_applied" = "true" ]; then
                 restore_run_overrides
             fi
+            if check_terminated_flag; then
+                handle_permanent_shutdown "Agent was deleted or archived on the site"
+            fi
             if [ "$agent_rc" -eq 0 ]; then
+                # Keep server DMs unread on provider failure, stop or crash.
+                # This batch contains only the messages passed to this turn.
+                uv run "$SCRIPT_DIR/message_helper.py" dm-ack || log WARN "DM receipt could not be confirmed; messages may retry"
                 CONSECUTIVE_FAILURES=0
                 run_success=1
             else
@@ -12095,11 +12756,6 @@ main() {
                     sleep 60
                     CONSECUTIVE_FAILURES=0
                 fi
-            fi
-
-            if [ -n "$scheduled_task" ] && [ "$run_success" -eq 1 ]; then
-                process_scheduled_task "$scheduled_task"
-                log INFO "Scheduled task completed"
             fi
 
             log INFO "Agent completed, checking for messages that arrived during execution..."
@@ -12125,16 +12781,6 @@ main() {
             fi
             if check_restart_flag; then
                 log INFO "Restart signal detected — breaking idle wait"
-                break
-            fi
-            if self_wakeup_pending; then
-                log INFO "Self wake signal detected — checking for messages"
-                break
-            fi
-            local due_task
-            due_task=$(check_scheduled_tasks)
-            if [ -n "$due_task" ]; then
-                log INFO "Scheduled task due — checking for messages"
                 break
             fi
             sleep 1
@@ -12235,6 +12881,9 @@ fi
 
 # Replace this listener with one serialized private/shared listener when enabled.
 # Single-turn provider subprocesses exit above, so they cannot enroll recursively.
+if [ "\${CHATSPACE_TRUSTED_SHARING:-1}" = "1" ] && ! command -v node >/dev/null 2>&1; then
+    log WARN "Node.js was not found on PATH, so this agent runs without shared conversations. Install Node.js 20+ and restart for full features."
+fi
 if [ "\${CHATSPACE_TRUSTED_SHARING:-1}" = "1" ] && command -v node >/dev/null 2>&1; then
     if ! sharing_status=$(curl -fsS --max-time 10 "$API_BASE/agent/sharing-status" 2>/dev/null) || \\
         ! printf '%s' "$sharing_status" | jq -e 'has("enabled") and (.enabled | type == "boolean")' >/dev/null 2>&1; then
@@ -12341,6 +12990,7 @@ function generateDirectSetupScript(apiKey, baseUrl, agentName = 'Your Agent Name
     const oneshotInstructions = generateOneshotInstructions();
     const agentRunner = generateAgentRunner();
     const selfWakeGuide = generateSelfWakeGuide();
+    const largeFileTransferSkill = generateLargeFileTransferSkill();
 
     const passwordBlock = hasEncryption ? `
 echo "🔐 End-to-end encryption is enabled. Your password never leaves this machine."
@@ -12396,6 +13046,12 @@ cat > "$AGENT_FOLDER/SELF_WAKE_GUIDE.md" <<'WAKEEOF'
 ${selfWakeGuide}
 WAKEEOF
 chmod 644 "$AGENT_FOLDER/SELF_WAKE_GUIDE.md"
+
+# Large file transfer skill (read on demand)
+cat > "$AGENT_FOLDER/SKILL_LARGE_FILE_TRANSFER.md" <<'XFEREOF'
+${largeFileTransferSkill}
+XFEREOF
+chmod 644 "$AGENT_FOLDER/SKILL_LARGE_FILE_TRANSFER.md"
 
 # Agent runner (supervises polling and model execution)
 cat > "$AGENT_FOLDER/agent-runner.sh" <<'RUNNEREOF'
@@ -12484,6 +13140,7 @@ module.exports = {
     generateOrchestratorTemplate,
     generateRichFormSkill,
     generateSelfWakeGuide,
+    generateLargeFileTransferSkill,
     generateNewsFeedAgentInstructions,
     // Chief of Staff
     CHIEF_OF_STAFF_DEFAULT_NAME,

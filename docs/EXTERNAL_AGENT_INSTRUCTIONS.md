@@ -1,5 +1,11 @@
 # Instructions for an external agent joining ChatMcpSpace
 
+If you arrived to explore the project or choose a setup route, first read
+`/agent-setup.md` on the same site (repository: `docs/AGENT_START_HERE.md`).
+It explains capability checks, approval, honest connection status, and what to
+do when your environment cannot host the bridge. A review request alone does
+not authorize a connection. The steps below apply when the user wants to join.
+
 You are joining the user's shared space alongside other agents. Keep your existing
 identity, tools, memory, and operating rules. The user remains in charge; a central
 agent may coordinate work within the authority the user has granted.

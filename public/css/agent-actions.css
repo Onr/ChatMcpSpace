@@ -43,3 +43,18 @@
 :is(.agent-actions-menu, .agent-share-dialog) :is(button, a, summary):focus-visible, :is(.agent-list-item__avatar, .agent-seat .agent-avatar):focus-visible { outline: 2px solid #6ee7b7; outline-offset: 3px; }
 @media (max-width: 600px) { .agent-actions-close { min-width: 44px; height: 44px; } .agent-share-dialog { padding: 24px; border-radius: 20px; } }
 @media (prefers-reduced-motion: reduce) { .agent-share-option { transition: none; } .agent-share-dialog::backdrop { backdrop-filter: none; } }
+
+/* Group membership section in agent menus */
+.agent-menu-groups { padding: 8px 12px; border-top: 1px solid rgba(51, 65, 85, 0.5); font-size: 12px; }
+.agent-menu-groups:empty { display: none; }
+.agent-menu-groups__title { margin: 0 0 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; }
+.agent-menu-groups__summary { margin: 0 0 6px; color: #94a3b8; font-size: 11px; }
+.agent-menu-groups__list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.agent-menu-groups__item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 6px; color: #cbd5e1; text-align: left; background: transparent; border: 0; cursor: pointer; }
+.agent-menu-groups__item:hover, .agent-menu-groups__item:focus-visible { background: rgba(139, 92, 246, 0.18); color: #ede9fe; }
+.agent-menu-groups__item[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+.agent-menu-groups__check { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1.5px solid #64748b; border-radius: 4px; }
+.agent-menu-groups__item[aria-checked="true"] .agent-menu-groups__check { background: #8b5cf6; border-color: #8b5cf6; color: #fff; }
+.agent-menu-groups__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-menu-groups__count { flex: none; color: #64748b; font-size: 10px; }
+.agent-menu-groups__create { margin-top: 4px; color: #a78bfa; }

@@ -16,12 +16,21 @@
     <button type="button" data-setup-os-choice="windows" aria-pressed="false">Windows</button>
   </div>
   <p data-setup-windows-note class="text-sm text-emerald-300 mb-4" hidden>
-    Runs directly on Windows with PowerShell. Supports Codex, Claude, and Gemini.
+    Runs directly on Windows with PowerShell. Uses whichever of Codex, Claude Code or Gemini you have installed, or helps you install one.
+    Setup automatically installs Node.js for Jetspace if needed; no separate installation step is required.
   </p>
   <p data-setup-cos-note class="text-sm text-amber-300 mb-4" hidden>
     Windows setup creates a standard agent. Chief of Staff installation is currently available on Linux / macOS.
   </p>
   <div data-setup-steps class="space-y-4"></div>
+  <% if (typeof apiKey !== 'undefined' && apiKey) { %>
+  <section data-setup-api-key class="agent-setup-card mt-4">
+    <h3 class="text-sm font-semibold text-slate-100">Your API key</h3>
+    <p class="text-xs text-slate-400">Setup asks for it. Copy it here and paste it when prompted. Keep it private.</p>
+    <button type="button" data-setup-copy-api-key data-api-key="<%= apiKey %>"
+      class="px-3 py-1 rounded-lg border border-slate-600 text-sm text-emerald-300">Copy API key</button>
+  </section>
+  <% } %>
   <p class="text-xs text-slate-400 mt-4">After setup, send your agent a message here and confirm that it replies.</p>
   <p data-setup-status role="status" aria-live="polite" class="text-sm text-emerald-300 mt-4"></p>
 </dialog>

@@ -11,7 +11,7 @@ const os = require('os');
 // ─── pg-mem test database ───────────────────────────────────────────────────
 const { createTestDatabase, applyRuntimeUserColumns, applyArchiveSchema, seedUser } = require('../utils/pgMemTestUtils');
 
-let db, pool, queryFn, userId, mockChatspaceDir;
+let pool, queryFn, userId, mockChatspaceDir, cleanupDb;
 
 /**
  * Apply the lineage migration columns (022) on top of the pg-mem schema.
@@ -28,11 +28,27 @@ async function applyLineageMigration(q) {
 beforeEach(async () => {
   jest.resetModules();
 
-  // Create fresh in-memory DB
-  const testDb = createTestDatabase();
-  db = testDb.db;
-  pool = testDb.pool;
-  queryFn = testDb.query;
+  // Real Postgres is required to verify row-lock/concurrent admission behavior.
+  if (process.env.SHARED_TEST_DATABASE_URL) {
+    const { Pool } = require('pg');
+    const schemaName = 'spawn_test_' + require('crypto').randomUUID().replace(/-/g, '');
+    const admin = new Pool({ connectionString: process.env.SHARED_TEST_DATABASE_URL });
+    cleanupDb = () => admin.end();
+    await admin.query(`CREATE SCHEMA ${schemaName}`);
+    pool = new Pool({ connectionString: process.env.SHARED_TEST_DATABASE_URL, application_name: schemaName, options: `-c search_path=${schemaName}` });
+    queryFn = (sql, params) => pool.query(sql, params);
+    cleanupDb = async () => {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schemaName} CASCADE`);
+      await admin.end();
+    };
+    await queryFn(fs.readFileSync(path.join(__dirname, '../../src/db/schema.sql'), 'utf8'));
+  } else {
+    const testDb = createTestDatabase();
+    pool = testDb.pool;
+    queryFn = testDb.query;
+    cleanupDb = () => pool.end();
+  }
 
   await applyRuntimeUserColumns(queryFn);
   await applyArchiveSchema(queryFn);
@@ -70,7 +86,7 @@ afterEach(async () => {
     fs.rmSync(mockChatspaceDir, { recursive: true, force: true });
   } catch (_) { /* ignore */ }
 
-  await pool.end();
+  await cleanupDb();
   jest.resetModules();
   jest.clearAllMocks();
 });
@@ -92,6 +108,9 @@ async function createAgent(name, overrides = {}) {
       overrides.interAgentMode ?? 'disabled',
     ]
   );
+  if (Object.hasOwn(overrides, 'lastSeenAt')) {
+    await queryFn('UPDATE agents SET last_seen_at = $2 WHERE agent_id = $1', [result.rows[0].agent_id, overrides.lastSeenAt]);
+  }
   return result.rows[0];
 }
 
@@ -391,7 +410,7 @@ describe('agentSpawnService', () => {
       })).rejects.toThrow(/children/i);
     });
 
-    it('should allow up to 100 total agents per user and reject the 101st', async () => {
+    it('allows 99 active agents, blocks at 100, and frees the slot when a check-in expires', async () => {
       const parent = await createAgent('global-cap-parent', { canSpawn: true });
       const { validateSpawnRequest, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
 
@@ -414,9 +433,95 @@ describe('agentSpawnService', () => {
 
       await expect(validateSpawnRequest(userId, parent.agent_id, 'agent-101')).resolves.toMatchObject({
         valid: false,
-        error: 'Global agent cap reached (100 active agents).'
+        error: expect.stringContaining('Global agent cap reached (100 active agents).')
+      });
+
+      await queryFn("UPDATE agents SET last_seen_at = NOW()::timestamp - INTERVAL '6 minutes' WHERE agent_name = 'agent-100' AND user_id = $1", [userId]);
+      await expect(validateSpawnRequest(userId, parent.agent_id, 'replacement')).resolves.toMatchObject({ valid: true });
+    });
+
+    it('spawns despite more than 100 offline agents and preserves their saved chats', async () => {
+      const parent = await createAgent('active-parent', { canSpawn: true });
+      const { spawnAgent, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
+      const stale = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      for (let i = 0; i < SPAWN_LIMITS.GLOBAL_AGENT_CAP + 1; i++) {
+        await createAgent(`offline-${i}`, { lastSeenAt: i === 0 ? null : stale });
+      }
+      // A stale working flag must not keep a disconnected agent counted.
+      await queryFn("UPDATE agents SET is_working = TRUE WHERE agent_name = 'offline-1'");
+      const child = await spawnAgent({ userId, parentAgentId: parent.agent_id, childAgentName: 'new-active-child' });
+      expect(child.agentName).toBe('new-active-child');
+      const offline = await queryFn("SELECT COUNT(*)::int AS count FROM agents WHERE agent_name LIKE 'offline-%' AND user_id = $1", [userId]);
+      expect(offline.rows[0].count).toBe(SPAWN_LIMITS.GLOBAL_AGENT_CAP + 1);
+    });
+
+    it('ignores offline children, counts idle connected children, and reserves fresh startup slots', async () => {
+      const parent = await createAgent('fanout-parent', { canSpawn: true });
+      const { spawnAgent, validateSpawnRequest, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
+      const stale = new Date(Date.now() - 6 * 60 * 1000);
+      for (let i = 0; i < SPAWN_LIMITS.MAX_CHILDREN + 1; i++) {
+        await createAgent(`stale-child-${i}`, { parentAgentId: parent.agent_id, lastSeenAt: i === 0 ? null : stale });
+      }
+      for (let i = 0; i < SPAWN_LIMITS.MAX_CHILDREN - 1; i++) {
+        await createAgent(`idle-child-${i}`, { parentAgentId: parent.agent_id });
+      }
+      const fresh = await spawnAgent({ userId, parentAgentId: parent.agent_id, childAgentName: 'starting-child' });
+      await expect(validateSpawnRequest(userId, parent.agent_id, 'blocked-child')).resolves.toMatchObject({
+        valid: false, error: expect.stringContaining('10 active children')
+      });
+      await queryFn('UPDATE agents SET last_seen_at = $2 WHERE agent_id = $1', [fresh.agentId, stale]);
+      // Reset the cooldown by reloading the service; only admission is under test.
+      jest.resetModules();
+      const service = require('../../src/services/agentSpawnService');
+      await expect(service.validateSpawnRequest(userId, parent.agent_id, 'replacement')).resolves.toMatchObject({ valid: true });
+      await expect(service.validateSpawnRequest(userId, parent.agent_id, 'stale-child-0')).resolves.toMatchObject({
+        valid: false, error: expect.stringContaining('already exists')
       });
     });
+
+    it('excludes other accounts from the active cap', async () => {
+      const parent = await createAgent('scoped-parent', { canSpawn: true });
+      const { validateSpawnRequest, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
+      const other = await seedUser(queryFn, { email: 'other-spawn@example.test' });
+      for (let i = 0; i < SPAWN_LIMITS.GLOBAL_AGENT_CAP; i++) {
+        await queryFn("INSERT INTO agents(user_id, agent_name, position) VALUES($1, $2, $3)", [other.userId, `other-${i}`, i]);
+      }
+      await expect(validateSpawnRequest(userId, parent.agent_id, 'my-child')).resolves.toMatchObject({ valid: true });
+    });
+
+    (process.env.SHARED_TEST_DATABASE_URL ? it : it.skip)('admits only one of two concurrent parents competing for the last active slot', async () => {
+      const first = await createAgent('racing-parent-a', { canSpawn: true });
+      const second = await createAgent('racing-parent-b', { canSpawn: true });
+      const { spawnAgent, SPAWN_LIMITS } = require('../../src/services/agentSpawnService');
+      const count = Number((await queryFn('SELECT COUNT(*)::int AS count FROM agents WHERE user_id = $1', [userId])).rows[0].count);
+      for (let i = count; i < SPAWN_LIMITS.GLOBAL_AGENT_CAP - 1; i++) await createAgent(`racing-filler-${i}`);
+
+      // Block both requests on the real account lock, then release together.
+      const blocker = await pool.connect();
+      await blocker.query('BEGIN');
+      await blocker.query('SELECT user_id FROM users WHERE user_id = $1 FOR NO KEY UPDATE', [userId]);
+      const competing = Promise.allSettled([first, second].map((parent, i) => spawnAgent({
+        userId, parentAgentId: parent.agent_id, childAgentName: `racing-child-${i}`
+      })));
+      let bothWaiting = false;
+      try {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const waiting = await queryFn("SELECT COUNT(*)::int AS count FROM pg_stat_activity WHERE application_name = $1 AND wait_event_type = 'Lock' AND pid <> $2", [pool.options.application_name, blocker.processID]);
+          if (waiting.rows[0].count === 2) { bothWaiting = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      } finally {
+        await blocker.query('ROLLBACK');
+        blocker.release();
+      }
+      const results = await competing;
+      expect(bothWaiting).toBe(true);
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find(result => result.status === 'rejected').reason.message).toMatch(/Global agent cap/);
+      const after = await queryFn('SELECT COUNT(*)::int AS count FROM agents WHERE user_id = $1', [userId]);
+      expect(after.rows[0].count).toBe(SPAWN_LIMITS.GLOBAL_AGENT_CAP);
+    }, 15000);
 
     it('should enforce spawn cooldown (rate limit)', async () => {
       const parent = await createAgent('fast-spawner', { canSpawn: true });

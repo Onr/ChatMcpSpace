@@ -643,6 +643,10 @@ let userMessageSendButton = null;
 let voiceToggleBtn = null;
 let voiceInputBtn = null;
 let encryptionKey = null; // Store the derived key
+window.addEventListener('storage', async event => {
+  if (event.key !== null && event.key !== window.E2EEncryption?.encryptionStorageKey?.()) return;
+  encryptionKey = await window.E2EEncryption?.getStoredEncryptionKey() || null;
+});
 
 // Message history for arrow-key recall (last 4 sent messages per agent)
 const messageHistoryMap = new Map(); // agentId -> string[]
@@ -898,6 +902,10 @@ let currentGroups = window.__initialGroups || []; // [{ groupId, groupName, desc
 let activeGroupId = null; // null = main view, groupId = zoomed into group
 let cachedGroupPartition = null; // { ungrouped: [...], grouped: Map<groupId, agents[]>, groupMeta: Map }
 let orbitDragState = null; // Active drag state for orbit seats
+let orbitPositionSave = Promise.resolve();
+let orbitPositionRevision = 0;
+const pendingOrbitPositions = new Map();
+const confirmedOrbitPositions = new Map();
 let orbitDragFrame = null; // Coalesce pointer events to one layout update per frame
 let suppressSeatClickUntil = 0; // Prevent click selection after dragging
 let orbitDragHandlersInitialized = false; // Ensure drag handlers are attached once
@@ -1716,6 +1724,114 @@ function calculateSphereFromCircumference(numAgents, containerSize) {
   );
 }
 
+// Keep the orbital positions at every panel size. Fit spheres to the nearest
+// actual seat, including squashed/inner rings and the footprint of group dots.
+function calculateCouncilFit(points, width, height, hasGroups = false) {
+  const orbitSize = Math.max(0, Math.floor(Math.min(width - 64, height - 72)));
+  const centerSize = Math.min(64, orbitSize * 0.2);
+  const footprint = hasGroups ? 1.6 : 1.3;
+  let sphereSize = Math.min(SPHERE_SIZE_LIMITS.max, orbitSize / 4);
+  const centers = points.map(point => ({
+    x: (point.x - 50) * orbitSize / 100,
+    y: (point.y - 50) * orbitSize / 100
+  }));
+  centers.forEach((point, index) => {
+    sphereSize = Math.min(sphereSize,
+      Math.max(0, Math.hypot(point.x, point.y) - centerSize * 0.65) * 2 / footprint);
+    for (let other = 0; other < index; other++) {
+      const distance = Math.hypot(point.x - centers[other].x, point.y - centers[other].y);
+      sphereSize = Math.min(sphereSize, distance * 0.85 / footprint);
+    }
+  });
+  // Fractional sizes let crowded councils keep their rings instead of switching
+  // layouts or forcing a minimum sphere size that overlaps neighbouring seats.
+  sphereSize = Math.max(0, Math.floor(sphereSize * 100) / 100);
+  return { orbitSize, centerSize, sphereSize,
+    compact: sphereSize < SPHERE_SIZE_LIMITS.min || orbitSize < 240,
+    dense: sphereSize < 14 };
+}
+
+// Small chambers lean the orbit back a little as the spheres shrink. The
+// divider tilt still wins when it is stronger.
+const COUNCIL_SIZE_TILT = { start: 420, full: 220, squash: 0.82 };
+function calculateCouncilTilt(width, height) {
+  const orbitSize = Math.min(width - 64, height - 72);
+  const progress = (COUNCIL_SIZE_TILT.start - orbitSize) / (COUNCIL_SIZE_TILT.start - COUNCIL_SIZE_TILT.full);
+  return 1 - Math.min(1, Math.max(0, progress)) * (1 - COUNCIL_SIZE_TILT.squash);
+}
+
+function refreshCouncilFit() {
+  if (orbitDragState) return;
+  const circle = document.getElementById('councilCircle');
+  const orbit = circle?.querySelector('.council-orbit');
+  const container = document.getElementById('agentSeats');
+  if (!orbit || !container || !circle.clientWidth || !circle.clientHeight) return;
+  const dividerSquash = Number.parseFloat(getComputedStyle(circle.parentElement || circle).getPropertyValue('--council-orbit-squash'));
+  const squash = Math.min(Number.isFinite(dividerSquash) && dividerSquash > 0 ? dividerSquash : 1,
+    calculateCouncilTilt(circle.clientWidth, circle.clientHeight));
+  circle.style.setProperty('--council-orbit-squash', squash.toFixed(3));
+  const seats = [...container.querySelectorAll('.agent-seat, .group-seat')];
+  const points = seats.map(seat => {
+    const angle = Number(seat.dataset.councilAngle);
+    const radius = Number(seat.dataset.councilRadius);
+    const point = seat.hasAttribute('data-council-angle')
+      ? projectOrbitPoint(angle, radius, squash)
+      : { x: parseFloat(seat.style.left), y: parseFloat(seat.style.top) };
+    seat.style.left = `${point.x}%`;
+    seat.style.top = `${point.y}%`;
+    return point;
+  });
+  const fit = calculateCouncilFit(points, circle.clientWidth, circle.clientHeight,
+    seats.some(seat => seat.classList.contains('group-seat')));
+  circle.classList.add('council-responsive');
+  circle.classList.toggle('council-compact', fit.compact);
+  circle.classList.toggle('council-dense', fit.dense);
+  orbit.style.setProperty('--council-fitted-orbit-size', `${fit.orbitSize}px`);
+  orbit.style.setProperty('--council-sphere-size', `${fit.sphereSize}px`);
+  orbit.style.setProperty('--council-initial-size', `${fit.sphereSize * 0.32}px`);
+  orbit.style.setProperty('--council-center-size', `${fit.centerSize}px`);
+  orbit.style.setProperty('--council-group-scale', String(fit.sphereSize / 48));
+  for (const seat of seats) {
+    // Keep every seat available by keyboard, with its full name on focus/hover.
+    seat.tabIndex = 0;
+    seat.setAttribute('role', 'button');
+    const name = seat.dataset.agentName || seat.dataset.groupName || 'Agent';
+    seat.setAttribute('aria-label', name);
+    seat.title = name;
+    if (seat.dataset.agentId) seat.style.order = String(currentOrbitLayout?.order?.indexOf(seat.dataset.agentId) ?? 0);
+    else seat.style.order = String(seats.length);
+    if (!seat.dataset.councilKeyboardBound) {
+      seat.dataset.councilKeyboardBound = 'true';
+      seat.addEventListener('keydown', event => {
+        if (event.target !== seat || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        seat.click();
+      });
+    }
+  }
+  window.dispatchEvent(new Event('council:layout'));
+}
+
+function setupResponsiveCouncil() {
+  const circle = document.getElementById('councilCircle');
+  if (!circle) return;
+  let frame = null;
+  const schedule = () => {
+    if (frame !== null) return;
+    frame = requestAnimationFrame(() => { frame = null; refreshCouncilFit(); });
+  };
+  // Divider drags change the panel without firing a window resize event.
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(schedule);
+    observer.observe(circle);
+    window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+    window.addEventListener('pageshow', () => { observer.observe(circle); schedule(); });
+  }
+  window.addEventListener('resize', schedule);
+  refreshCouncilFit();
+}
+
 const ORBIT_DRAG_THRESHOLD = 6;
 const MARKDOWN_RENDER_OPTIONS = {
   gfm: true,
@@ -2145,6 +2261,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     stopMessagePolling();
   });
 
+  setupResponsiveCouncil();
+
   // Re-render agents on window resize to recalculate sphere sizes
   let resizeTimeout = null;
   window.addEventListener('resize', () => {
@@ -2215,6 +2333,8 @@ async function pollAgentList(force = false) {
       return;
     }
 
+    const positionRevision = orbitPositionRevision;
+    const positionsWerePending = pendingOrbitPositions.size > 0;
     const response = await fetch('/api/user/agents');
     let data = null;
 
@@ -2226,6 +2346,13 @@ async function pollAgentList(force = false) {
 
     data = await response.json();
     const agents = data.agents || [];
+    if (window.AgentBriefUI) window.AgentBriefUI.agents = agents;
+    const localPositions = new Map(currentAgentList.map(agent => [agent.agentId, agent.position]));
+    for (const agent of agents) {
+      const pending = pendingOrbitPositions.get(agent.agentId);
+      if (pending) agent.position = pending.position;
+      else if ((positionsWerePending || positionRevision !== orbitPositionRevision) && localPositions.has(agent.agentId)) agent.position = localPositions.get(agent.agentId);
+    }
     agentPollNextDelayMs = getServerPollDelayMs(response, data, agents.length ? DASHBOARD_MIN_POLL_INTERVAL_MS : agentPollNextDelayMs);
     const isInitialLoad = !initialAgentLoadComplete;
 
@@ -2265,6 +2392,7 @@ async function pollAgentList(force = false) {
     if (initialAgentLoadComplete && detectedNewAgents.length > 0) {
       detectedNewAgents.forEach(agent => {
         playNewAgentNotification(agent);
+        window.AgentBriefUI?.offerSetup(agent);
       });
     }
 
@@ -2299,6 +2427,8 @@ async function pollAgentList(force = false) {
     console.error('Error polling agent list:', error);
   }
 }
+
+window.addEventListener('agentbriefsaved', () => pollAgentList(true));
 
 async function queueAgentCliSelfUpdate(agent, options = {}) {
   const {
@@ -2817,6 +2947,9 @@ function getOrbitRingKey(agent) {
   if (agent.lastMessagePriority === 'normal') {
     return 'attention';
   }
+  if ((agent.briefSummary?.suggestionCount || 0) > 0 || ['waiting_user', 'blocked', 'ready_for_review', 'needs_review'].includes(agent.briefSummary?.status)) {
+    return 'attention';
+  }
   return 'idle';
 }
 
@@ -2927,12 +3060,13 @@ function getGroupThemeHue(group) {
 }
 
 function getOrbitSquashValue() {
-  const dashboardGrid = document.querySelector('.dashboard-main-grid');
-  if (!dashboardGrid) {
+  // The chamber holds the divider tilt combined with its own small-size tilt.
+  const chamber = document.getElementById('councilCircle') || document.querySelector('.dashboard-main-grid');
+  if (!chamber) {
     return 1;
   }
 
-  const squash = Number.parseFloat(getComputedStyle(dashboardGrid).getPropertyValue('--council-orbit-squash'));
+  const squash = Number.parseFloat(getComputedStyle(chamber).getPropertyValue('--council-orbit-squash'));
   return Number.isFinite(squash) && squash > 0 ? squash : 1;
 }
 
@@ -2991,7 +3125,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
     const y = orbitMeta?.y ?? 50;
 
     const statusLabel = ringKey;
-    const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0;
+    const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0 || getOrbitRingKey(agent) === 'attention';
     const isWorking = agent.isWorking === true;
     const isNewAgent = newAgentIds.has(agent.agentId);
     const isNewsAgent = agent.agentType === 'news_feed';
@@ -3024,12 +3158,15 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
         data-agent-last-heartbeat="${agent.lastWorkingHeartbeatTime || ''}"
         data-agent-working="${isWorking ? 'true' : 'false'}"
         data-agent-external-provider="${escapeHtml(agent.externalProvider || '')}"
+        data-council-angle="${orbitMeta?.angle ?? -90}"
+        data-council-radius="${orbitMeta?.radius ?? ORBIT_CONFIG.ringRadii.idle}"
         data-agent-ring="${ringKey}"
         data-agent-ring-index="${ringIndex}"
         data-agent-index="${index}"
         style="left: ${x}%; top: ${y}%; transform: translate(-50%, -50%);"
       >
         ${removeBtn}
+        <button type="button" data-open-agent-brief data-agent-id="${agent.agentId}" class="agent-brief-entry absolute z-40 -bottom-7 left-1/2 -translate-x-1/2" aria-label="Edit ${escapeHtml(agent.name)} identity">Identity</button>
         <div class="agent-number-badge absolute -top-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
           <span class="text-[10px] font-mono font-bold text-sky-400/70 bg-slate-900/80 px-1.5 py-0.5 rounded border border-sky-400/30">${safePosition}</span>
         </div>
@@ -3040,7 +3177,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
               <span>i</span>
             </div>
           ` : ''}
-          <div class="rounded-full relative z-10 transition-transform duration-300 group-hover:scale-110 overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900" style="${sizeStyle}">
+          <div class="council-agent-sphere rounded-full relative z-10 transition-transform duration-300 group-hover:scale-110 overflow-hidden border-2 border-white/10 shadow-2xl bg-slate-900" style="${sizeStyle}">
             ${isOpenClaw ? `
               <div class="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-950 via-orange-950/30 to-slate-900">
                 <div class="w-[72%] h-[72%] rounded-full border border-orange-400/40 bg-slate-950/70 flex items-center justify-center shadow-[0_0_20px_rgba(251,146,60,0.25)]">
@@ -3052,7 +3189,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
                   ${marbleSvg}
               </div>
               <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span class="text-white font-bold opacity-90" style="font-size: ${Math.max(sphereSize * 0.32, 10)}px; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);">
+                <span class="council-agent-initials text-white font-bold opacity-90" style="font-size: ${Math.max(sphereSize * 0.32, 10)}px; text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5);">
                   ${escapeHtml(agent.name.substring(0, 2).toUpperCase())}
                 </span>
               </div>
@@ -3080,7 +3217,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
           })()}
         </div>
 
-        <div class="mt-2 text-center opacity-80 ${isSelected ? 'opacity-100' : 'group-hover:opacity-100'} transition-opacity w-full absolute top-full left-1/2 -translate-x-1/2 w-max">
+        <div class="council-seat-name mt-2 text-center opacity-80 ${isSelected ? 'opacity-100' : 'group-hover:opacity-100'} transition-opacity w-full absolute top-full left-1/2 -translate-x-1/2 w-max">
           <p class="text-[10px] font-bold uppercase tracking-wider text-shadow-sm whitespace-nowrap mx-auto ${isSelected ? 'text-emerald-300 bg-slate-900/90 px-2 py-0.5 rounded shadow-lg z-50' : 'text-slate-200 overflow-hidden text-ellipsis max-w-[80px]'}">${escapeHtml(agent.name)}</p>
         </div>
 
@@ -3114,6 +3251,8 @@ function updateAgentListUI(agents) {
   }
 
   currentAgentList = Array.isArray(agents) ? agents : [];
+  window.RecentChats?.updateAgents(currentAgentList);
+  if (orbitDragState) return; // Keep the captured seat attached while dragging.
   window.CouncilSharing?.updateOrbit(currentAgentList, currentGroups, activeGroupId);
   updateAgentCliMenuButton('updateAgentBtn', selectedAgentId);
   updateAgentCliMenuButton('floatingUpdateAgentBtn', document.getElementById('floatingAgentMenu')?.dataset.agentId);
@@ -3157,13 +3296,14 @@ function updateAgentListUI(agents) {
 
   if (currentAgentList.length === 0) {
     agentSeatsContainer.innerHTML = `
-      <div class="absolute -top-40 left-1/2 -translate-x-1/2 w-full text-center text-slate-500">
-        <div class="text-center">
+      <div class="absolute inset-0 flex items-center justify-center">
+        <div class="council-empty-state text-center text-slate-400">
           <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
           </svg>
           <p class="text-sm">No agents in your council yet</p>
           <p class="text-xs text-slate-600 mt-1">Agents will appear here once they connect</p>
+          <a class="workspace-setup-link" href="/for-agents">Connect your first agent →</a>
         </div>
       </div>
     `;
@@ -3266,13 +3406,14 @@ function updateAgentListUI(agents) {
         <div class="group-seat absolute cursor-pointer transition-all duration-300"
              data-group-id="${group.groupId}"
              data-group-name="${escapeHtml(group.groupName)}"
+             data-council-angle="${angle}" data-council-radius="${radius}"
              style="left: ${x}%; top: ${y}%; transform: translate(-50%, -50%); --group-hue: ${groupHue};">
           <div class="group-seat__center relative">
             <span class="group-seat__center-label">${escapeHtml(group.groupName)}</span>
             <div class="group-seat__dots">${dotsHtml}</div>
             ${badgeHtml}
           </div>
-          <div class="mt-2 text-center absolute top-full left-1/2 -translate-x-1/2 w-max">
+          <div class="council-seat-name mt-2 text-center absolute top-full left-1/2 -translate-x-1/2 w-max">
             <p class="group-seat__name">${escapeHtml(group.groupName)}</p>
           </div>
         </div>
@@ -3280,9 +3421,18 @@ function updateAgentListUI(agents) {
     }).join('');
   }
 
+  const councilScrollTop = agentSeatsContainer.scrollTop;
+  const councilFocusId = agentSeatsContainer.contains(document.activeElement)
+    ? document.activeElement.dataset.agentId || document.activeElement.dataset.groupId : null;
   agentSeatsContainer.innerHTML = html + groupHtml;
   setupAgentSelectionHandlers();
   setupGroupSeatHandlers();
+  refreshCouncilFit();
+  agentSeatsContainer.scrollTop = councilScrollTop;
+  if (councilFocusId) {
+    [...agentSeatsContainer.children].find(seat =>
+      (seat.dataset.agentId || seat.dataset.groupId) === councilFocusId)?.focus({ preventScroll: true });
+  }
 
   // Update the agent list panel below the orbit
   updateAgentListPanel(currentAgentList);
@@ -3435,7 +3585,8 @@ async function removeAgentFromGroup(groupId, agentId) {
 
     if (!response.ok) {
       console.error('Failed to remove agent from group:', response.status);
-      return;
+      showErrorMessage('Could not remove the agent from this group. Please try again.');
+      return false;
     }
 
     // Update local state
@@ -3446,15 +3597,107 @@ async function removeAgentFromGroup(groupId, agentId) {
       // If group is now empty, exit view
       if (group.memberIds.length === 0 && activeGroupId === groupId) {
         exitGroupView();
-        return;
+        return true;
       }
     }
 
     cachedGroupPartition = null;
     updateAgentListUI(currentAgentList);
+    return true;
   } catch (error) {
     console.error('Error removing agent from group:', error);
+    showErrorMessage('Could not remove the agent from this group. Please try again.');
+    return false;
   }
+}
+
+/**
+ * Render the "Groups" section of the agent menus: which groups the agent is
+ * in, with a toggle per group to add or remove it.
+ */
+function renderAgentGroupMembership(agentId) {
+  const agent = findCachedAgentRecord(agentId);
+  document.querySelectorAll('[data-agent-groups]').forEach((section) => {
+    if (!agentId || agent?.agentType === 'news_feed') {
+      section.innerHTML = '';
+      delete section.dataset.agentId;
+      return;
+    }
+    section.dataset.agentId = agentId;
+    const groups = (Array.isArray(currentGroups) ? currentGroups : [])
+      .slice()
+      .sort((a, b) => String(a.groupName || '').localeCompare(String(b.groupName || '')));
+    const memberOf = groups.filter(group => (group.memberIds || []).includes(agentId));
+    const summary = memberOf.length === 0
+      ? 'Not in any group'
+      : `In ${memberOf.map(group => escapeHtml(group.groupName || 'Group')).join(', ')}`;
+    const items = groups.map((group) => {
+      const isMember = (group.memberIds || []).includes(agentId);
+      const count = (group.memberIds || []).length;
+      const name = escapeHtml(group.groupName || 'Group');
+      const attrName = name.replace(/"/g, '&quot;');
+      return `
+        <button type="button" class="agent-menu-groups__item" role="menuitemcheckbox"
+          aria-checked="${isMember}" data-agent-group-toggle="${escapeHtml(group.groupId).replace(/"/g, '&quot;')}"
+          title="${isMember ? 'Remove from' : 'Add to'} ${attrName}">
+          <span class="agent-menu-groups__check" aria-hidden="true">${isMember
+            ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 13l4 4L19 7"/></svg>'
+            : ''}</span>
+          <span class="agent-menu-groups__name">${name}</span>
+          <span class="agent-menu-groups__count">${count}</span>
+        </button>`;
+    }).join('');
+    section.innerHTML = `
+      <p class="agent-menu-groups__title">Groups</p>
+      <p class="agent-menu-groups__summary">${summary}</p>
+      ${groups.length > 0
+        ? `<div class="agent-menu-groups__list" role="group" aria-label="Group membership">${items}</div>`
+        : '<button type="button" class="agent-menu-groups__item agent-menu-groups__create" data-agent-group-create>+ Create a group</button>'}`;
+  });
+}
+
+const pendingAgentGroupToggles = new Set();
+async function toggleAgentGroupMembership(agentId, groupId) {
+  const group = currentGroups.find(item => item.groupId === groupId);
+  const key = `${groupId}:${agentId}`;
+  if (!group || !agentId || pendingAgentGroupToggles.has(key)) return;
+  pendingAgentGroupToggles.add(key);
+  document.querySelectorAll(`[data-agent-group-toggle="${CSS.escape(groupId)}"]`)
+    .forEach(btn => btn.setAttribute('aria-busy', 'true'));
+  try {
+    if ((group.memberIds || []).includes(agentId)) {
+      if (await removeAgentFromGroup(groupId, agentId)) {
+        showSuccessMessage(`Agent removed from ${group.groupName}`);
+      }
+    } else {
+      await addAgentToCouncilGroup(agentId, groupId);
+    }
+  } finally {
+    pendingAgentGroupToggles.delete(key);
+    renderAgentGroupMembership(agentId);
+  }
+}
+
+function setupAgentGroupMembershipSections() {
+  document.querySelectorAll('[data-agent-groups]').forEach((section) => {
+    // Handle clicks on the section itself and stop them here, so the
+    // document-level "click outside" handlers don't close the menu when the
+    // list is re-rendered under the pointer.
+    section.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const agentId = section.dataset.agentId;
+      if (event.target.closest('[data-agent-group-create]')) {
+        document.getElementById('agentContextMenu')?.classList.add('hidden');
+        hideFloatingAgentMenu();
+        showCreateGroupModal();
+        return;
+      }
+      const toggle = event.target.closest('[data-agent-group-toggle]');
+      if (toggle && agentId) {
+        toggleAgentGroupMembership(agentId, toggle.getAttribute('data-agent-group-toggle'));
+      }
+    });
+  });
 }
 
 function hideGroupManagementMenu() {
@@ -3821,6 +4064,7 @@ async function createGroup() {
  * Setup group UI event listeners (called once on page load)
  */
 function setupGroupUIHandlers() {
+  setupAgentGroupMembershipSections();
   const fab = document.getElementById('groupManagementFab');
   if (fab) {
     fab.addEventListener('click', (e) => {
@@ -3969,6 +4213,16 @@ function syncSelectedChatHeader(agents) {
   const statusPill = document.getElementById('agentStatusPill');
   const workingDot = document.getElementById('selectedAgentWorkingIndicator');
   const isWorking = agent.isWorking === true;
+  for (const id of ['agentBriefRole', 'agentBriefGoal', 'agentBriefProactive', 'agentBriefOpen']) {
+    const button = document.getElementById(id);
+    if (button) button.dataset.agentId = agent.agentId;
+  }
+  const briefRole = document.getElementById('agentBriefRole');
+  const briefGoal = document.getElementById('agentBriefGoal');
+  const briefProactive = document.getElementById('agentBriefProactive');
+  if (briefRole) briefRole.textContent = agent.briefSummary?.role || 'Set a role';
+  if (briefGoal) briefGoal.textContent = agent.briefSummary?.goal || 'Set a goal';
+  if (briefProactive) briefProactive.textContent = `Proactive: ${agent.briefSummary?.proactiveEnabled ? 'On' : 'Off'}`;
 
   if (lastActiveEl) {
     if (isWorking && agent.lastWorkingHeartbeatTime) {
@@ -4017,16 +4271,24 @@ function isAgentActive(agent) {
   return false;
 }
 
+const VALID_AGENT_STATUS_FILTERS = new Set(['all', 'active', 'attention', 'urgent']);
+
 function filterAgentListByStatus(agents) {
   const list = Array.isArray(agents) ? agents : [];
   if (agentListStatusFilter === 'active') {
     return list.filter(isAgentActive);
   }
+  if (agentListStatusFilter === 'attention') {
+    return list.filter((agent) => getOrbitRingKey(agent) === 'attention');
+  }
+  if (agentListStatusFilter === 'urgent') {
+    return list.filter((agent) => getOrbitRingKey(agent) === 'urgent');
+  }
   return list;
 }
 
 function syncAgentListFilterControls() {
-  const currentFilter = agentListStatusFilter === 'active' ? 'active' : 'all';
+  const currentFilter = VALID_AGENT_STATUS_FILTERS.has(agentListStatusFilter) ? agentListStatusFilter : 'all';
   document.querySelectorAll('[data-agent-status-filter]').forEach((btn) => {
     const targetFilter = btn.getAttribute('data-agent-status-filter') || 'all';
     const isActive = targetFilter === currentFilter;
@@ -4036,7 +4298,7 @@ function syncAgentListFilterControls() {
 }
 
 function setAgentListStatusFilter(nextFilter) {
-  const normalized = nextFilter === 'active' ? 'active' : 'all';
+  const normalized = VALID_AGENT_STATUS_FILTERS.has(nextFilter) ? nextFilter : 'all';
   agentListStatusFilter = normalized;
   syncAgentListFilterControls();
   updateAgentListPanel(currentAgentList);
@@ -4052,6 +4314,8 @@ function filterAgentListBySearch(agents) {
   return statusFiltered.filter((agent) => {
     const haystack = [
       agent?.name,
+      agent?.briefSummary?.displayName,
+      agent?.briefSummary?.role,
       agent?.externalProvider,
       agent?.agentType
     ]
@@ -4083,10 +4347,11 @@ function clearAgentListSearch({ blur = false, update = true } = {}) {
   }
 }
 
-function getAgentListEmptyStateHtml(message) {
+function getAgentListEmptyStateHtml(message, { offerSetup = false } = {}) {
   return `
     <div class="agent-list-empty">
       <p>${message}</p>
+      ${offerSetup ? '<a class="workspace-setup-link" href="/for-agents">Connect an agent →</a>' : ''}
     </div>
   `;
 }
@@ -4109,7 +4374,7 @@ function updateAgentListPanel(agents) {
   const filteredAgentList = filterAgentListBySearch(agentList);
   const normalizedSearchQuery = normalizeAgentListSearchQuery(agentListSearchQuery);
   const hasActiveSearch = normalizedSearchQuery.length > 0;
-  const hasActiveFilter = hasActiveSearch || agentListStatusFilter === 'active';
+  const hasActiveFilter = hasActiveSearch || agentListStatusFilter !== 'all';
   const searchLabel = escapeHtml(agentListSearchQuery.trim());
 
   // Update count badges
@@ -4128,13 +4393,15 @@ function updateAgentListPanel(agents) {
   syncAgentListFilterControls();
 
   if (agentList.length === 0) {
-    listScroll.innerHTML = getAgentListEmptyStateHtml('No agents connected');
+    listScroll.innerHTML = getAgentListEmptyStateHtml('No agents connected', { offerSetup: true });
     return;
   }
 
   const getEmptyMatchMessage = () => {
     if (hasActiveSearch) return `No agents match "${searchLabel}"`;
     if (agentListStatusFilter === 'active') return 'No active agents right now';
+    if (agentListStatusFilter === 'attention') return 'No agents needing attention right now';
+    if (agentListStatusFilter === 'urgent') return 'No urgent agents right now';
     return 'No agents connected';
   };
 
@@ -4259,7 +4526,7 @@ function updateAgentListPanel(agents) {
 function renderAgentListItemsHtml(orderedAgents) {
   return orderedAgents.map((agent) => {
     const ringKey = getOrbitRingKey(agent);
-    const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0;
+    const needsAttention = agent.highestPriority === 'high' || agent.unreadCount > 0 || getOrbitRingKey(agent) === 'attention';
     const isWorking = agent.isWorking === true;
     const isSelected = agent.agentId === selectedAgentId;
     const isNewsAgent = agent.agentType === 'news_feed';
@@ -4304,7 +4571,7 @@ function renderAgentListItemsHtml(orderedAgents) {
             </div>
           ` : `
             <div class="agent-list-item__marble">${marbleSvg}</div>
-            <span class="agent-list-item__initials">${escapeHtml(agent.name.substring(0, 2).toUpperCase())}</span>
+            <span class="agent-list-item__initials">${escapeHtml(agent.briefSummary?.avatar || agent.name.substring(0, 2).toUpperCase())}</span>
           `}
           ${isNewsAgent ? `
             <div class="agent-badge-news">
@@ -4313,9 +4580,11 @@ function renderAgentListItemsHtml(orderedAgents) {
           ` : ''}
         </div>
         <div class="agent-list-item__info">
-          <span class="agent-list-item__name">${escapeHtml(agent.name)}</span>
+          <span class="agent-list-item__name">${escapeHtml(agent.briefSummary?.displayName || agent.name)}</span>
+          ${agent.briefSummary?.displayName ? `<span class="agent-list-item__runtime">${escapeHtml(agent.name)}</span>` : ''}
           <div class="agent-list-item__status-row">
             <span class="agent-list-item__status">${statusHtml}</span>
+            <button type="button" data-open-agent-brief data-brief-tab="${(agent.briefSummary?.suggestionCount || 0) > 0 ? 'identity' : 'activity'}" data-agent-id="${agent.agentId}" class="agent-brief-entry" aria-label="View ${escapeHtml(agent.name)} activity">${escapeHtml((agent.briefSummary?.suggestionCount || 0) > 0 ? 'Review suggestion' : agent.briefSummary?.status === 'ready_for_review' ? 'Ready for review' : agent.briefSummary?.status === 'waiting_user' ? 'Waiting for you' : agent.briefSummary?.proactiveEnabled ? 'Automatic work on' : 'Identity')}</button>
             <div class="agent-list-item__timestamps">
                ${isWorking && agent.lastWorkingHeartbeatTime ? `<span class="agent-list-item__time" title="Last Working Heartbeat">Working ${formatRelativeTime(agent.lastWorkingHeartbeatTime)}</span>` : ''}
                ${agent.lastSeenAt ? `<span class="agent-list-item__time" title="Last Poll">Poll ${formatRelativeTime(agent.lastSeenAt)}</span>` : agent.lastActivityTime ? `<span class="agent-list-item__time" title="Last Active">Active ${formatRelativeTime(agent.lastActivityTime)}</span>` : ''}
@@ -4324,6 +4593,7 @@ function renderAgentListItemsHtml(orderedAgents) {
           </div>
         </div>
         <div class="agent-list-item__arrow flex items-center gap-1">
+          <button type="button" data-open-agent-brief data-agent-id="${agent.agentId}" class="agent-brief-entry" aria-label="Edit ${escapeHtml(agent.name)} identity and goals">⋯</button>
           <button
             type="button"
             class="chat-tile__pin-btn agent-list-pin-btn"
@@ -4503,7 +4773,7 @@ function bindAgentListStatusFilters() {
       event.preventDefault();
       event.stopPropagation();
       const targetFilter = btn.getAttribute('data-agent-status-filter') || 'all';
-      const nextFilter = (targetFilter === 'active' && agentListStatusFilter === 'active')
+      const nextFilter = (targetFilter !== 'all' && agentListStatusFilter === targetFilter)
         ? 'all'
         : targetFilter;
       setAgentListStatusFilter(nextFilter);
@@ -4756,6 +5026,7 @@ async function addAgentToCouncilGroup(agentId, groupId) {
     cachedGroupPartition = null;
     updateAgentListUI(currentAgentList);
     showSuccessMessage(`Agent added to ${group.groupName}`);
+    return true;
   } catch (error) {
     showErrorMessage(error.message || 'Could not update the group. Please try again.');
   } finally {
@@ -4864,10 +5135,11 @@ function handleOrbitPointerMove(event) {
     if (!rect) return;
     const { seat: activeSeat, ringKey: activeRingKey, lastX, lastY } = orbitDragState;
     highlightCouncilGroupDropTarget(findCouncilGroupDropTarget(lastX, lastY));
-    const angle = Math.atan2(lastY - (rect.top + rect.height / 2), lastX - (rect.left + rect.width / 2));
+    const angle = Math.atan2((lastY - (rect.top + rect.height / 2)) / (rect.height * getOrbitSquashValue()), (lastX - (rect.left + rect.width / 2)) / rect.width);
     const radius = ORBIT_CONFIG.ringRadii[activeRingKey] ?? ORBIT_CONFIG.ringRadii.idle;
+    const squash = getOrbitSquashValue();
     activeSeat.style.left = `${50 + radius * Math.cos(angle)}%`;
-    activeSeat.style.top = `${50 + radius * Math.sin(angle)}%`;
+    activeSeat.style.top = `${50 + radius * Math.sin(angle) * squash}%`;
   });
 }
 
@@ -4942,10 +5214,18 @@ function handleOrbitPointerUp(event) {
 
   const centerX = rect.left + rect.width / 2;
   const centerY = rect.top + rect.height / 2;
-  const degrees = Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI;
+  const degrees = Math.atan2((event.clientY - centerY) / (rect.height * getOrbitSquashValue()), (event.clientX - centerX) / rect.width) * 180 / Math.PI;
   const angleFromTop = (degrees + 90 + 360) % 360;
-  const step = 360 / total;
-  const targetIndex = Math.floor((angleFromTop + step / 2) / step) % total;
+  // Groups occupy slots too. Find the closest actual agent angle rather than
+  // assuming that the visible agents alone fill the circle.
+  let targetIndex = 0;
+  let closestAngle = Infinity;
+  orbitOrder.forEach((id, index) => {
+    const angle = ((currentOrbitLayout.layout.get(id)?.angle ?? (index * 360 / total - 90)) + 90 + 360) % 360;
+    const distance = Math.abs(angleFromTop - angle);
+    const circularDistance = Math.min(distance, 360 - distance);
+    if (circularDistance < closestAngle) { closestAngle = circularDistance; targetIndex = index; }
+  });
   const fromIndex = orbitOrder.indexOf(agentId);
 
   if (fromIndex === -1 || targetIndex === fromIndex) {
@@ -4956,14 +5236,20 @@ function handleOrbitPointerUp(event) {
   orbitOrder.splice(fromIndex, 1);
   orbitOrder.splice(targetIndex, 0, agentId);
 
+  const visibleIds = new Set(orbitOrder);
   const sortedPositions = currentAgentList
+    .filter(agent => visibleIds.has(agent.agentId))
     .map(agent => Number.isFinite(agent.position) ? agent.position : Number(agent.position))
     .filter(position => Number.isInteger(position) && position > 0)
     .sort((a, b) => a - b);
 
-  const positionsForOrder = sortedPositions.length === orbitOrder.length
+  const positionsForOrder = sortedPositions.length === orbitOrder.length && new Set(sortedPositions).size === sortedPositions.length
     ? sortedPositions
-    : orbitOrder.map((_, index) => index + 1);
+    : (() => {
+      const reserved = new Set(currentAgentList.filter(agent => !visibleIds.has(agent.agentId)).map(agent => Number(agent.position)));
+      let next = 1;
+      return orbitOrder.map(() => { while (reserved.has(next)) next++; return next++; });
+    })();
 
   const updates = orbitOrder.map((id, index) => ({
     agentId: id,
@@ -5069,38 +5355,46 @@ function getOrbitContainerRect() {
   return container.getBoundingClientRect();
 }
 
-async function applyOrbitPositionUpdates(updates) {
-  try {
-    const response = await csrfFetch('/api/user/agents/positions', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': window.csrfToken
-      },
-      body: JSON.stringify({ updates })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || 'Failed to update agent positions');
-    }
-
-    const agentMap = new Map(currentAgentList.map(agent => [agent.agentId, { ...agent }]));
-    updates.forEach(update => {
-      if (agentMap.has(update.agentId)) {
-        agentMap.get(update.agentId).position = update.position;
-      }
-    });
-
-    currentAgentList = Array.from(agentMap.values());
+function applyOrbitPositionUpdates(updates) {
+  const revision = ++orbitPositionRevision;
+  for (const agent of currentAgentList) {
+    if (!pendingOrbitPositions.has(agent.agentId)) confirmedOrbitPositions.set(agent.agentId, agent.position);
+  }
+  updates.forEach(update => pendingOrbitPositions.set(update.agentId, { position: update.position, revision }));
+  const render = () => {
     agentListCache.agents = currentAgentList;
     agentListCache.timestamp = Date.now();
+    cachedGroupPartition = null;
     updateAgentListUI(currentAgentList);
-  } catch (error) {
-    console.error('Failed to update orbit positions:', error);
-    showErrorMessage(error.message || 'Failed to update agent positions.');
-    updateAgentListUI(currentAgentList);
-  }
+  };
+  currentAgentList = currentAgentList.map(agent => {
+    const pending = pendingOrbitPositions.get(agent.agentId);
+    return pending ? { ...agent, position: pending.position } : agent;
+  });
+  render(); // The drop responds immediately, including on a slow connection.
+  orbitPositionSave = orbitPositionSave.then(async () => {
+    try {
+      const response = await csrfFetch('/api/user/agents/positions', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+        body: JSON.stringify({ updates })
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error?.message || 'Failed to update agent positions');
+      }
+      updates.forEach(update => confirmedOrbitPositions.set(update.agentId, update.position));
+    } catch (error) {
+      currentAgentList = currentAgentList.map(agent => pendingOrbitPositions.get(agent.agentId)?.revision === revision
+        ? { ...agent, position: confirmedOrbitPositions.get(agent.agentId) } : agent);
+      showErrorMessage(error.message || 'Failed to update agent positions.');
+    } finally {
+      updates.forEach(update => {
+        if (pendingOrbitPositions.get(update.agentId)?.revision === revision) pendingOrbitPositions.delete(update.agentId);
+      });
+      render();
+    }
+  });
+  return orbitPositionSave;
 }
 
 /**
@@ -5264,6 +5558,7 @@ function refreshVisibleAgentActionStats(metadata = {}) {
 }
 
 async function refreshAgentActionStats(agentId, metadata = {}, options = {}) {
+  renderAgentGroupMembership(agentId);
   if (!agentId) {
     updateAgentMenuStatsDisplay({});
     return;
@@ -5553,12 +5848,47 @@ function setupScheduledMessageHold() {
 let pendingRunOverrides = null;
 let pendingRunOverridesAgentId = null;
 let runOverrideModelCatalog = null;
+const loadedAgentConfigs = new Map();
 const RUN_OVERRIDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const RUN_OVERRIDE_APPROVALS = [['full-auto', 'Full auto'], ['auto-edit', 'Auto-edit'], ['suggest', 'Suggest only']];
 const RUN_OVERRIDE_SANDBOXES = [['read-only', 'Read-only'], ['workspace-write', 'Workspace write'], ['none', 'No sandbox']];
 
+function isMcpAgent(agentOrName) {
+  if (!agentOrName) return false;
+  if (typeof agentOrName === 'object') {
+    if (String(agentOrName.externalProvider || '').toLowerCase() === 'mcp') return true;
+    const name = String(agentOrName.name || agentOrName.agentName || '').trim();
+    return /\bMCP(?:\s*\(\d+\))?$/i.test(name);
+  }
+  const key = String(agentOrName).trim();
+  const match = Array.isArray(currentAgentList)
+    ? currentAgentList.find((a) => a && (a.agentId === key || a.name === key))
+    : null;
+  if (match && String(match.externalProvider || '').toLowerCase() === 'mcp') return true;
+  const checkName = match?.name || key;
+  return /\bMCP(?:\s*\(\d+\))?$/i.test(String(checkName).trim());
+}
+
 function getPendingRunOverrides() {
   return pendingRunOverrides && pendingRunOverridesAgentId === selectedAgentId ? pendingRunOverrides : null;
+}
+
+function getEffectiveRunOverridesForSend() {
+  const explicit = getPendingRunOverrides();
+  const agentName = getResolvedSelectedAgentName();
+  if (isMcpAgent(selectedAgentId) || isMcpAgent(agentName)) return explicit || null;
+  const base = agentName ? loadedAgentConfigs.get(agentName) : null;
+  if (!explicit && !base) return null;
+  const merged = { ...(base || {}), ...(explicit || {}) };
+  const normalized = {};
+  if (merged.model_provider) normalized.model_provider = merged.model_provider;
+  if (merged.model && normalized.model_provider) normalized.model = merged.model;
+  if (merged.thinking_effort) normalized.thinking_effort = merged.thinking_effort;
+  if (merged.approval_mode) normalized.approval_mode = merged.approval_mode;
+  if (merged.sandbox_mode) {
+    normalized.sandbox_mode = merged.sandbox_mode === 'danger-full-access' ? 'none' : merged.sandbox_mode;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 function clearPendingRunOverrides() {
@@ -5938,22 +6268,27 @@ function updateComposerState() {
         : 'Voice input needs a Chromium browser (Chrome/Edge) with microphone access enabled.');
   }
 
-  // Enable/disable stop and config buttons (disable for news feed)
+  // Enable/disable stop and config buttons (disable for news feed and MCP agents)
   const stopBtn = document.getElementById('agentStopBtn');
   const configBtn = document.getElementById('agentConfigBtn');
   const configContainer = document.getElementById('agentConfigContainer');
+  const isMcp = hasAgent && (isMcpAgent(selectedAgentId) || isMcpAgent(selectedAgentName));
   if (stopBtn) stopBtn.disabled = !hasAgent || isNewsFeed;
-  if (configBtn) configBtn.disabled = !hasAgent || isNewsFeed;
+  if (configBtn) configBtn.disabled = !hasAgent || isNewsFeed || isMcp;
   const collaboratorView = selectedChatContext?.mode === 'shared' && selectedChatContext.role !== 'owner';
   if (stopBtn) stopBtn.hidden = collaboratorView;
-  if (configContainer) configContainer.hidden = collaboratorView;
-  // Hide the entire config container when no agent is selected to avoid showing the green "-" text
+  if (configContainer) configContainer.hidden = collaboratorView || isMcp;
+  // Hide the entire config container when no agent is selected or for MCP agents
   if (configContainer) {
-    if (!hasAgent || isNewsFeed || collaboratorView) {
+    if (!hasAgent || isNewsFeed || collaboratorView || isMcp) {
       configContainer.style.display = 'none';
     } else {
       configContainer.style.display = '';
     }
+  }
+  if (isMcp) {
+    document.getElementById('mobileAgentStatusStrip')?.classList.add('hidden');
+    document.getElementById('agentConfigDropdown')?.classList.add('hidden');
   }
   const chatPreparing = selectedChatContext?.state === 'preparing';
   if (chatPreparing || selectedChatContext?.privateHistory || selectedChatContext?.mode === 'shared' && !selectedChatContext.capabilities?.send) {
@@ -6316,6 +6651,7 @@ function setupAgentControls() {
         });
 
         if (response.ok) {
+          loadedAgentConfigs.set(agentName, { ...(loadedAgentConfigs.get(agentName) || {}), ...configData });
           showSuccessMessage('Config saved. Changes take effect next loop.');
           configDropdown?.classList.add('hidden');
           // Update status display
@@ -6385,6 +6721,17 @@ async function loadAgentConfig() {
   const agentName = getResolvedSelectedAgentName();
   if (!agentName) return;
 
+  if (isMcpAgent(selectedAgentId) || isMcpAgent(agentName)) {
+    const configContainer = document.getElementById('agentConfigContainer');
+    if (configContainer) {
+      configContainer.hidden = true;
+      configContainer.style.display = 'none';
+    }
+    document.getElementById('mobileAgentStatusStrip')?.classList.add('hidden');
+    document.getElementById('agentConfigDropdown')?.classList.add('hidden');
+    return;
+  }
+
   const requestId = ++_configRequestId;
   const configProvider = document.getElementById('configProvider');
   const statusProvider = document.getElementById('configStatusProvider');
@@ -6397,6 +6744,7 @@ async function loadAgentConfig() {
     if (response.ok) {
       const data = await response.json();
       const config = data.config || {};
+      loadedAgentConfigs.set(agentName, { ...config });
       const allowedPermissions = data.allowedPermissions || {};
       const allowedProviders = Object.keys(allowedPermissions).filter(k => k !== 'inter_agent' && k !== 'project_path');
       const normalizedSandboxMode = config.sandbox_mode === 'danger-full-access' ? 'none' : config.sandbox_mode;
@@ -7107,7 +7455,8 @@ async function sendUserMessage() {
       requestBody.attachmentIds = attachmentIds;
     }
 
-    const sentRunOverrides = getPendingRunOverrides();
+    const hadExplicitRunOverrides = Boolean(getPendingRunOverrides());
+    const sentRunOverrides = getEffectiveRunOverridesForSend();
     if (sentRunOverrides) {
       requestBody.runOverrides = sentRunOverrides;
     }
@@ -7127,7 +7476,7 @@ async function sendUserMessage() {
       throw buildRequestError(response, errorData, { fallbackMessage: 'Unable to send message' });
     }
 
-    if (sentRunOverrides) clearPendingRunOverrides();
+    if (hadExplicitRunOverrides) clearPendingRunOverrides();
     const data = await response.json();
 
     // Reload full message history so we rely on
@@ -8397,8 +8746,9 @@ async function selectAgent(agentId, agentName, metadata = {}) {
   lastMessageTimestamp = null;
   lastMessageCursor = null;
 
-  // Save this agent as the last opened conversation
-  localStorage.setItem(LAST_AGENT_STORAGE_KEY, agentId);
+  // Keep reloads and mobile reopening aligned with the visible conversation.
+  rememberLastChat(agentId, selectedChatContext);
+  window.RecentChats?.remember(agentId, selectedChatContext);
   recordChatNavigation(agentId, resolvedAgentName, metadata);
   if (metadata.skipMobileBrowserHistory !== true) {
     writeMobileBrowserNavigationState('chat', { agentId });
@@ -9442,7 +9792,7 @@ function renderSharedMessageInfo(message) {
   const icon = scope === 'owner'
     ? '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
     : '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/>';
-  return `<span class="shared-message-audience shared-message-audience--${scope}" title="Who can see this message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${icon}</svg><span>Visible to ${escapeHtml(label)}</span></span>`;
+  return `<details class="shared-message-visibility"><summary class="shared-message-audience shared-message-audience--${scope}" title="Who can see this message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${icon}</svg><span>Visible to ${escapeHtml(label)}</span></summary><p class="shared-message-visibility-hint">${escapeHtml(scope === 'owner' ? 'Only the owner can see this message.' : scope === 'all' ? 'Everyone with access to this conversation can see this message.' : `Only ${label} can see this message.`)}</p></details>`;
 }
 
 function createMessageElement(message) {
@@ -9509,8 +9859,8 @@ function createMessageElement(message) {
       <div class="flex justify-start">
         <div>
           ${agentNameLabel}
-          ${renderSharedMessageInfo(message)}
           <div class="message-bubble p-3 ${priorityClass} ${urgentClass} ${hiddenClass}">
+            ${renderSharedMessageInfo(message)}
             ${message.urgent ? '<span class="inline-block px-2 py-0.5 text-xs font-semibold text-red-200 bg-red-500/20 rounded mb-2">URGENT</span>' : ''}
             <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${contentHtml}</div>
             <div class="message-footer">
@@ -9637,10 +9987,10 @@ function createMessageElement(message) {
     div.innerHTML = `
       <div class="flex justify-end">
         <div>
-          ${sharedSenderLabel}
           ${userAgentNameLabel}
-          ${renderSharedMessageInfo(message)}
           <div class="message-bubble message-bubble--user${hiddenClass} p-3 text-right">
+            ${sharedSenderLabel}
+            ${renderSharedMessageInfo(message)}
             <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${userContentHtml}</div>
             <div class="message-footer">
               <p class="message-timestamp text-xs text-slate-400">${formatTimestamp(message.timestamp)}${readIcon}</p>
@@ -9653,6 +10003,7 @@ function createMessageElement(message) {
 
     const userBubble = div.querySelector('.message-bubble');
     attachMessageTtsButton(userBubble, message);
+    attachMessageInfoButton(userBubble, message);
 
     if (message.messageSubtype === 'queued_self_update') {
       const confirmBtn = userBubble.querySelector('.update-confirm-btn');
@@ -10637,14 +10988,66 @@ function showMessageInfoModal(message) {
   const copyBtn = document.getElementById('runCommandModalCopyBtn');
   if (!modal || !title || !subtitle || !body || !copyBtn) return;
 
+  modal.querySelector('[data-brief-history-link]')?.remove();
+  const linkRevision = (revision) => {
+    const agentId = message.agentId || (typeof selectedAgentId === 'undefined' ? null : selectedAgentId);
+    if (!Number.isInteger(revision) || revision < 1 || !agentId || !window.AgentBriefUI) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.briefHistoryLink = String(revision);
+    button.className = 'agent-brief-entry mx-6 mb-4';
+    button.textContent = `Review identity revision ${revision}`;
+    button.addEventListener('click', () => {
+      hideRunCommandModal();
+      window.AgentBriefUI.open(agentId, 'history', revision);
+    });
+    body.after(button);
+  };
+
   const agentLabel = message.agentName || selectedAgentName || 'Agent';
+  if (message.type === 'user_message') {
+    const fallbackConfig = loadedAgentConfigs.get(agentLabel) || {};
+    const overrides = (message.runOverrides && typeof message.runOverrides === 'object')
+      ? message.runOverrides
+      : fallbackConfig;
+    const providerVal = overrides.model_provider || fallbackConfig.model_provider || 'codex (default)';
+    const modelVal = overrides.model || fallbackConfig.model || 'default';
+    const sandboxVal = overrides.sandbox_mode || fallbackConfig.sandbox_mode || 'default';
+    const approvalVal = overrides.approval_mode || fallbackConfig.approval_mode || 'default';
+    const effortVal = overrides.thinking_effort || fallbackConfig.thinking_effort || 'default';
+    const deliveryStatus = message.readAt
+      ? `Read by agent at ${formatTimestamp(message.readAt)}`
+      : 'Queued (will run with these settings)';
+    title.textContent = `${agentLabel} message info`;
+    subtitle.textContent = `Sent to ${agentLabel} at ${formatTimestamp(message.timestamp)}`;
+    const infoText = [
+      `Recipient agent: ${agentLabel}`,
+      `Message ID: ${message.messageId || 'Unknown'}`,
+      `Provider: ${providerVal}`,
+      `Model: ${modelVal}`,
+      `Permissions / Sandbox: ${sandboxVal}`,
+      `Approval mode: ${approvalVal}`,
+      `Thinking effort: ${effortVal}`,
+      `Identity: ${message.briefRevision ? `revision ${message.briefRevision}` : 'Not recorded'}`,
+      `Status: ${deliveryStatus}`
+    ].join('\n');
+    body.textContent = infoText;
+    linkRevision(message.briefRevision);
+    copyBtn.disabled = false;
+    copyBtn.dataset.command = infoText;
+    modal.classList.remove('hidden');
+    return;
+  }
+
   title.textContent = `${agentLabel} message info`;
   subtitle.textContent = `Response sent at ${formatTimestamp(message.timestamp)}`;
+  const identityLine = `Identity: ${message.briefProvenance?.revision ? `revision ${message.briefProvenance.revision}` : 'Not recorded'}`;
   if (message.runCommand) {
     const parsed = parseRunCommandInfo(message.runCommand);
     body.textContent = [
       `Agent: ${agentLabel}`,
       `Message ID: ${message.messageId || 'Unknown'}`,
+      identityLine,
       `Provider: ${parsed.provider}`,
       `Model: ${parsed.model}`,
       `Executable: ${parsed.executable}`,
@@ -10660,6 +11063,7 @@ function showMessageInfoModal(message) {
     body.textContent = [
       `Agent: ${agentLabel}`,
       `Message ID: ${message.messageId || 'Unknown'}`,
+      identityLine,
       '',
       'No run command was recorded for this message.',
       '',
@@ -10669,6 +11073,7 @@ function showMessageInfoModal(message) {
       'agent to the latest agent-cli.sh to enable run info on new messages.'
     ].join('\n');
   }
+  linkRevision(message.briefProvenance?.revision);
   copyBtn.disabled = !message.runCommand;
   copyBtn.dataset.command = message.runCommand || '';
   modal.classList.remove('hidden');
@@ -11657,6 +12062,7 @@ async function checkEncryptionKey() {
   encryptionKey = await window.E2EEncryption.getStoredEncryptionKey();
 
   if (encryptionKey) {
+    sessionStorage.removeItem('pendingEncryptionPassword');
     console.log('Encryption key loaded from session');
     return;
   }
@@ -11671,7 +12077,9 @@ async function checkEncryptionKey() {
   if (pendingPassword && salt) {
     try {
       console.log('Deriving encryption key from login password...');
-      encryptionKey = await window.E2EEncryption.deriveKey(pendingPassword, salt);
+      const candidate = await window.E2EEncryption.deriveKey(pendingPassword, salt);
+      if (!await window.E2EEncryption.verifyMessageKey(candidate)) throw new Error('The login password does not match the message encryption password.');
+      encryptionKey = candidate;
       await window.E2EEncryption.storeEncryptionKey(encryptionKey);
 
       // Clear the plaintext password from storage immediately
@@ -11679,6 +12087,7 @@ async function checkEncryptionKey() {
       console.log('Encryption key derived and stored securely');
       return;
     } catch (error) {
+      sessionStorage.removeItem('pendingEncryptionPassword');
       console.error('Failed to derive key from pending password:', error);
     }
   }
@@ -11883,11 +12292,13 @@ function showDecryptionPasswordModal() {
       });
 
       // Derive the encryption key from the password
-      encryptionKey = await Promise.race([
+      const candidate = await Promise.race([
         window.E2EEncryption.deriveKey(password, salt),
         timeoutPromise
       ]);
 
+      if (!await window.E2EEncryption.verifyMessageKey(candidate)) throw new Error('This password does not match your existing messages. Use the original message encryption password.');
+      encryptionKey = candidate;
       await window.E2EEncryption.storeEncryptionKey(encryptionKey);
 
       console.log('Encryption key derived and stored from manual password entry');
@@ -11955,7 +12366,12 @@ function showDecryptionPasswordModal() {
  */
 function setupKeyboardNavigation() {
   document.addEventListener('keydown', (e) => {
+    // Keep native focus order and leave controls, dialogs and rich editors to
+    // their own handlers. Global agent shortcuts must never activate another chat
+    // while someone is using a menu, choosing a model or editing a form.
+    if (e.defaultPrevented || e.key === 'Tab') return;
     if (e.target.closest?.('.shared-galaxy, .shared-galaxy-dialog, .a2a-group-gateway')) return;
+    if (e.target.closest?.('dialog, [role="dialog"], [aria-modal="true"], [id$="Modal"], button, a, select, summary, [contenteditable]:not([contenteditable="false"])')) return;
     // Ignore if user is typing in an input (except Esc and Arrows for scrolling)
     const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
     const isEditableTarget = isInput || e.target.isContentEditable === true;
@@ -12000,8 +12416,9 @@ function setupKeyboardNavigation() {
       }
     }
 
-    // Handle Tab to toggle between council and list focus areas
-    if (e.key === 'Tab' && !isInput) {
+    // Explicit shortcut for the custom council/list navigation, without
+    // taking over the browser's Tab / Shift+Tab focus order.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'j' && !isEditableTarget) {
       e.preventDefault();
       if (isMobileListOnlyMode()) {
         setFocusArea(currentFocusArea === 'conversation' ? 'list' : 'conversation');
@@ -13337,6 +13754,16 @@ function bindMobileOverflowActionControls() {
   if (document.body.dataset.mobileOverflowDelegated === 'true') return;
   document.body.dataset.mobileOverflowDelegated = 'true';
 
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const openToggle = TOGGLES.find(({ bodyClass }) => document.body.classList.contains(bodyClass));
+    if (!openToggle) return;
+    event.preventDefault();
+    TOGGLES.forEach(({ bodyClass }) => document.body.classList.remove(bodyClass));
+    syncAriaState();
+    document.getElementById(openToggle.buttonId)?.focus();
+  });
+
   // Single delegated click handler. Previous versions tried to combine
   // pointerup + click with timing-based dedupe, which produced stale closures
   // when this function ran more than once and intermittently caused the menu
@@ -14438,10 +14865,32 @@ function showSuccessToast(message) {
   window.showSuccess(message);
 }
 
-/**
- * Setup restoration of the last opened agent on page load
- * Waits for the agent list to load, then attempts to restore the previously viewed agent
- */
+function lastChatStorageKey() {
+  const userId = document.getElementById('dashboardRoot')?.dataset.userId;
+  return userId ? `${LAST_AGENT_STORAGE_KEY}:${userId}` : null;
+}
+
+function rememberLastChat(agentId, context) {
+  const conversationId = context?.mode === 'shared' ? context.conversationId : null;
+  try {
+    const key = lastChatStorageKey();
+    if (key && agentId !== '__ALL__') {
+      // Store identifiers only. Access and current membership are checked again on restore.
+      localStorage.setItem(key, JSON.stringify({ agentId, conversationId }));
+    }
+  } catch (_) { /* Storage restrictions must not prevent opening a chat. */ }
+  try {
+    const url = new URL(window.location.href);
+    if (conversationId) url.searchParams.set('conversationId', conversationId);
+    else url.searchParams.delete('conversationId');
+    url.searchParams.delete('invitationId');
+    if (url.href !== window.location.href) {
+      window.history.replaceState(window.history.state, '', url.href);
+    }
+  } catch (_) { /* The selected chat still works when browser history is unavailable. */ }
+}
+
+/** Restore the last private or shared chat without overriding a new selection or direct link. */
 function setupLastAgentRestoration() {
   const signalReady = () => {
     dashboardAgentRestorationReady = true;
@@ -14458,8 +14907,21 @@ function setupLastAgentRestoration() {
   }
   lastAgentRestorationAttempted = true;
 
-  // Get the last agent ID from localStorage
-  const lastAgentId = localStorage.getItem(LAST_AGENT_STORAGE_KEY);
+  // Explicit conversation and invitation links take precedence over local memory.
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('conversationId') || params.has('invitationId')) {
+    signalReady();
+    return;
+  }
+
+  const selectionAtStart = sharedChatSelectionRequest;
+  let saved;
+  try {
+    const key = lastChatStorageKey();
+    const value = key && localStorage.getItem(key);
+    saved = value ? JSON.parse(value) : { agentId: localStorage.getItem(LAST_AGENT_STORAGE_KEY) };
+  } catch (_) { signalReady(); return; }
+  const lastAgentId = saved?.agentId;
 
   if (!lastAgentId) {
     // No last agent saved, nothing to restore
@@ -14472,12 +14934,35 @@ function setupLastAgentRestoration() {
     return;
   }
 
+  if (saved.conversationId && window.InPlaceChat && window.DashboardHelpers?.selectChatContext) {
+    void (async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch('/api/user/chat-threads/' + encodeURIComponent(saved.conversationId), {
+          credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+        });
+        if (!response.ok) return;
+        const context = await response.json();
+        if (sharedChatSelectionRequest !== selectionAtStart) return;
+        await window.DashboardHelpers.selectChatContext(context);
+      } catch (_) { /* Leave the picker usable when offline or access was removed. */ }
+      finally { clearTimeout(timeout); signalReady(); }
+    })();
+    return;
+  }
+
   // Poll for agent list to be available (up to 10 attempts with 500ms delay = 5 seconds max)
   let pollAttempts = 0;
   const maxPollAttempts = 10;
 
   const restoreInterval = setInterval(() => {
     pollAttempts++;
+    if (sharedChatSelectionRequest !== selectionAtStart) {
+      clearInterval(restoreInterval);
+      signalReady();
+      return;
+    }
 
     // Check if we have agents available
     if (currentAgentList && currentAgentList.length > 0) {
@@ -14488,11 +14973,11 @@ function setupLastAgentRestoration() {
 
       if (lastAgent) {
         // Auto-select the last agent
-        Promise.resolve(selectAgent(lastAgentId, lastAgent.agentName, {
+        Promise.resolve(selectAgent(lastAgentId, lastAgent.agentName || lastAgent.name, {
           agentType: lastAgent.agentType || 'standard',
           externalProvider: lastAgent.externalProvider || '',
           forceMainSelection: true
-        })).finally(signalReady);
+        })).catch(() => {}).finally(signalReady);
       } else {
         signalReady();
       }
@@ -15154,6 +15639,7 @@ window.DashboardHelpers = {
       ? undefined
       : openFloatingAgentMenuForAgent(agentId, agentName, metadata, anchorEl),
   getSelectedChatContext: () => selectedChatContext,
+  getChatSelectionVersion: () => sharedChatSelectionRequest,
   refreshSelectedChatContext: (context, details) => {
     if (context?.mode === 'shared' && context.conversationId === selectedChatContext?.conversationId) {
       selectedChatContext = context;
@@ -15243,8 +15729,8 @@ function setupCouncilResizeHandle() {
 
   const desktopQuery = window.matchMedia('(min-width: 1024px)');
   const WIDTH_LIMITS = {
-    single: { min: 380, max: 620, fallback: 470 },
-    multi: { min: 330, max: 570, fallback: 375 }
+    single: { min: 380, max: 820, fallback: 470 },
+    multi: { min: 330, max: 680, fallback: 375 }
   };
 
   const getModeLimits = () => dashboardGrid.classList.contains('dashboard-main-grid--multi-open')
@@ -15294,14 +15780,17 @@ function setupCouncilResizeHandle() {
 
   let activePointerId = null;
   let moveFrame = null;
+  let pendingClientX = null;
 
   const finishResize = () => {
+    if (activePointerId === null) return;
     const pointerId = activePointerId;
     if (moveFrame) {
       cancelAnimationFrame(moveFrame);
       moveFrame = null;
     }
     activePointerId = null;
+    pendingClientX = null;
     dashboardGrid.classList.remove('dashboard-main-grid--resizing');
     try {
       if (pointerId !== null) {
@@ -15311,15 +15800,32 @@ function setupCouncilResizeHandle() {
     window.dispatchEvent(new Event('resize'));
   };
 
+  const applyWidthFromPointer = (clientX) => {
+    const gridRect = dashboardGrid.getBoundingClientRect();
+    const panelRect = typeof councilPanel.getBoundingClientRect === 'function' ? councilPanel.getBoundingClientRect() : null;
+    const originLeft = (panelRect && Number.isFinite(panelRect.left) && panelRect.left > 0) ? panelRect.left : gridRect.left;
+    const desiredWidth = clientX - originLeft - (resizeHandle.offsetWidth / 2);
+    // Allow a short drag beyond the minimum before snapping to the collapsed rail.
+    if (desiredWidth < getModeLimits().min - 40) {
+      dashboardGrid.classList.add('council-minimized');
+      localStorage.setItem('council_minimized', 'true');
+      toggleHandleVisibility();
+      finishResize();
+      document.getElementById('maximizeCouncilBtn')?.focus({ preventScroll: true });
+      return;
+    }
+    const chatRect = chatContainer.getBoundingClientRect();
+    const rightEdge = (chatRect && Number.isFinite(chatRect.right) && chatRect.right > originLeft) ? chatRect.right : gridRect.right;
+    const maxAllowedByViewport = Math.max(getModeLimits().min, rightEdge - originLeft - 340);
+    applyWidth(Math.min(desiredWidth, maxAllowedByViewport));
+  };
+
   const queueWidthFromPointer = (clientX) => {
+    pendingClientX = clientX;
     if (moveFrame) return;
     moveFrame = requestAnimationFrame(() => {
       moveFrame = null;
-      const gridRect = dashboardGrid.getBoundingClientRect();
-      const chatRect = chatContainer.getBoundingClientRect();
-      const desiredWidth = clientX - gridRect.left - (resizeHandle.offsetWidth / 2);
-      const maxAllowedByViewport = Math.max(getModeLimits().min, chatRect.right - gridRect.left - 380);
-      applyWidth(Math.min(desiredWidth, maxAllowedByViewport));
+      if (activePointerId !== null) applyWidthFromPointer(pendingClientX);
     });
   };
 
@@ -15336,7 +15842,12 @@ function setupCouncilResizeHandle() {
     queueWidthFromPointer(event.clientX);
   });
 
-  resizeHandle.addEventListener('pointerup', finishResize);
+  resizeHandle.addEventListener('pointerup', (event) => {
+    if (activePointerId !== event.pointerId) return;
+    // A quick drag can finish before the queued animation frame runs.
+    applyWidthFromPointer(event.clientX);
+    finishResize();
+  });
   resizeHandle.addEventListener('pointercancel', finishResize);
   resizeHandle.addEventListener('lostpointercapture', finishResize);
 
@@ -15366,7 +15877,7 @@ function setupCouncilResizeHandle() {
   });
 
   toggleHandleVisibility();
-  window.addEventListener('resize', restoreWidth);
+  window.addEventListener('resize', toggleHandleVisibility);
   desktopQuery.addEventListener?.('change', toggleHandleVisibility);
   if (window.MultiChatManager && typeof window.MultiChatManager.onPanelsChanged === 'function') {
     window.MultiChatManager.onPanelsChanged(toggleHandleVisibility);

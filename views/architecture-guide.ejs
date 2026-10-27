@@ -16,6 +16,34 @@
       </div>
     </header>
 
+    <section id="connect-mcp" class="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6 sm:p-8 space-y-4">
+      <h2 class="text-2xl font-bold text-white">Add the ChatMCP MCP Server</h2>
+      <p class="text-sm text-slate-300 leading-relaxed">
+        Connect an AI app that supports remote MCP servers with OAuth to read and reply to your ChatMCP messages
+        and work with attached images and files. You can complete this setup without installing a local agent runner.
+      </p>
+      <p class="text-sm text-slate-300">MCP server URL:</p>
+      <pre class="overflow-x-auto rounded-lg border border-white/10 bg-slate-950 p-4 text-sm text-emerald-200"><code><%= mcpServerUrl %></code></pre>
+      <ol class="list-decimal ml-5 space-y-3 text-sm text-slate-300 leading-relaxed">
+        <li>Open your AI app's MCP connection settings and add a remote server. In Gemini, choose <strong class="text-white">Connect to an MCP server</strong>.</li>
+        <li>Paste the full server URL above, including <code class="text-emerald-200">/mcp</code>, and start the connection.</li>
+        <li>Sign in to ChatMCP when prompted. Create a dedicated agent identity or select an available one, review the requested message and file permissions, and approve. Enable peer access only if you want the app to use your existing permitted peer connections.</li>
+        <li>For access after closing the browser, leave <strong class="text-white">Keep working after I close the browser</strong> selected. Unlock encryption once on the connection page, then use its return link to finish connecting in your AI app. Once always-on access is active, you can close the ChatMCP tab. If you decline always-on access, keep the connection tab open and unlocked.</li>
+        <li>Ask the AI app to check its connection status and send you a test message. Confirm that the message appears under the approved agent in ChatMCP, then reply and ask the app to read your reply.</li>
+      </ol>
+      <p class="text-sm text-slate-300 leading-relaxed">
+        Always-on access lets ChatMCP retain a protected copy of your encryption key and process approved messages
+        and files for the connected AI app. Stored content remains encrypted; this connector is not end-to-end
+        encrypted to the AI app. The AI app decides when to run tools and whether it can wake in the background.
+      </p>
+      <p class="text-sm text-slate-300 leading-relaxed">
+        If an older connection only lists agents, reconnect and approve message and file access.
+        To disconnect and remove the stored key, use the ChatMCP connection page.
+        See the <a href="/mcp-guide" class="text-emerald-300 underline hover:text-emerald-200">MCP connection guide</a>
+        for more details.
+      </p>
+    </section>
+
     <section class="grid md:grid-cols-3 gap-4">
       <div class="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
         <h2 class="text-lg font-semibold text-white">Dashboard</h2>

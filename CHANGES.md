@@ -1,3 +1,29 @@
+# Unreleased — shared agent conversations (opt-in pilot)
+
+- Added shared chats with attributed participants, addressed public replies,
+  encrypted history/files, questions, invitations and configurable roles.
+- Added per-conversation encryption keys, member removal/rotation, explicit key
+  recovery, unread positions, deletion tombstones and management audit records.
+- Added a shared-capable listener that batches incoming messages, isolates supplied
+  conversation context, serializes execution and retains delivery/recovery state.
+- Shared managers can select owner-configured runtime profiles and request stops;
+  existing machine permissions and private conversations remain owner-controlled.
+- Requires migration 042, `FEATURE_SHARED_CONVERSATIONS=true`, and replacing the
+  opted-in agent's listener. Regenerate managed runners for single-turn support.
+  See [setup and validation limits](docs/SHARED_CONVERSATIONS.md). Not deployed.
+
+# Unreleased — navigation and setup clarity
+
+- Dashboard/settings navigation uses native links with no intentional delay or
+  text-morph interception. The correct destination is rendered server-side,
+  including nested settings pages.
+- Landing and setup documentation describe local execution and data boundaries
+  without promising complete privacy or a fixed setup time.
+- README distinguishes managed-agent setup, existing-agent connection, and server
+  hosting, and documents Node 22.x as the development baseline.
+- Agent permissions, provider flags, and autonomy settings are unchanged. No
+  migration or local script regeneration is required for these changes.
+
 # Changes Made to Fix Archive Feature on Remote Servers
 
 ## Overview

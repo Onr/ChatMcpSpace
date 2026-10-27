@@ -27,6 +27,12 @@ test('one ordinary chat renders guest identity and owner, selected and everyone 
   expect(document.querySelector('.shared-message-audience--selected').textContent).toBe('Visible to Owner + <img src=x onerror=alert(1)>');
   expect(document.querySelector('img')).toBeNull();
   expect(document.querySelectorAll('.shared-message-audience svg[aria-hidden="true"]')).toHaveLength(5);
+  expect(document.querySelector('[data-message-id="guest"] .message-bubble').textContent).toContain('Guest · Ari');
+  expect(document.querySelectorAll('.message-bubble .shared-message-audience')).toHaveLength(5);
+  const visibility = document.querySelector('[data-message-id="guest"] details');
+  visibility.querySelector('summary').click();
+  expect(visibility.open).toBe(true);
+  expect(visibility.textContent).toContain('Everyone with access to this conversation');
 });
 
 test('an ordinary chat times out even if its response body stalls, then permits a fresh request', async () => {

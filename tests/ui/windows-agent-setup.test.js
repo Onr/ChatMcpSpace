@@ -8,7 +8,7 @@ let api;
 
 beforeEach(() => {
   jest.resetModules();
-  document.body.innerHTML = '<button id="launcher" data-open-agent-setup data-setup-os="windows">Windows setup</button>' + markup;
+  document.body.innerHTML = '<button id="launcher" data-open-agent-setup data-setup-os="windows">Windows setup</button>' + ejs.render(markup, { apiKey: 'key-123' });
   const dialog = document.querySelector('dialog');
   dialog.showModal = jest.fn(() => { dialog.open = true; });
   dialog.close = jest.fn(() => { dialog.open = false; dialog.dispatchEvent(new Event('close')); });
@@ -17,12 +17,16 @@ beforeEach(() => {
   document.dispatchEvent(new Event('DOMContentLoaded'));
 });
 
-test('Windows opens native PowerShell setup with optional prerequisites', async () => {
+test('Windows opens native PowerShell setup with automatic Node.js notice', async () => {
   document.getElementById('launcher').click();
   expect(document.querySelector('dialog').showModal).toHaveBeenCalled();
   const section = document.querySelector('[data-setup-steps] section');
   expect(section.textContent).toContain('PowerShell');
   expect(section.textContent).not.toMatch(/WSL|Ubuntu/);
+  expect(document.querySelector('[data-setup-windows-note]').textContent).toContain('automatically installs Node.js');
+  expect(section.textContent).toContain('automatically installs Node.js LTS');
+  expect(section.textContent).toContain('no provider choice needed');
+  expect(document.querySelectorAll('details')).toHaveLength(1);
   expect(document.querySelector('details').open).toBe(false);
   section.querySelector('button').click();
   await Promise.resolve();
@@ -45,6 +49,18 @@ test('OS buttons switch commands and closing restores launcher focus', () => {
   expect(document.querySelector('[data-setup-windows-note]').hidden).toBe(true);
   document.querySelector('[data-setup-close]').click();
   expect(document.activeElement).toBe(launcher);
+});
+
+test('Windows setup explains automatic Node.js installation and offers diagnostics', () => {
+  const steps = api.setupSteps('https://example.test', 'windows');
+  expect(steps[0].note).toContain('Node.js 22+');
+  expect(steps[0].note).toContain('missing or too old');
+  expect(steps[0].note).toContain('same window');
+  expect(steps.some(step => /winget|Install it first/.test(step.command + step.title))).toBe(false);
+  const diagnostics = steps.find(step => step.command.endsWith(' doctor'));
+  expect(diagnostics.optional).toBe(true);
+  expect(diagnostics.command).toBe('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\\Jetspace\\windows-cli.ps1" doctor');
+  expect(diagnostics.command).not.toMatch(/API_KEY|PASSWORD/);
 });
 
 test('clipboard rejection selects the command with an actionable fallback', async () => {
@@ -104,4 +120,43 @@ test('Windows entry points are gated for immediate rollback', () => {
     if (old === undefined) delete process.env.WINDOWS_AGENT_SETUP_ENABLED;
     else process.env.WINDOWS_AGENT_SETUP_ENABLED = old;
   }
+});
+
+test('API key copies from below the setup command', async () => {
+  api.open({ platform: 'unix', baseUrl: 'https://example.test' });
+  const steps = document.querySelector('[data-setup-steps]');
+  const card = document.querySelector('[data-setup-api-key]');
+  expect(steps.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(document.querySelector('textarea').value).not.toContain('key-123');
+  card.querySelector('button').click();
+  await Promise.resolve();
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith('key-123');
+  expect(document.querySelector('[role=status]').textContent).toContain('API key copied');
+  document.querySelector('[data-setup-os-choice="windows"]').click();
+  expect(document.querySelector('[data-setup-api-key]')).toBe(card);
+});
+
+test('API key card is omitted when the page has no key', () => {
+  expect(ejs.render(markup)).not.toContain('data-setup-api-key');
+});
+
+test('top bar only keeps its API key button when the setup dialog is disabled', () => {
+  const layout = fs.readFileSync(path.join(__dirname, '../../views/layout.ejs'), 'utf8');
+  expect(layout).toMatch(/apiKey && process\.env\.WINDOWS_AGENT_SETUP_ENABLED === 'false'\) \{ %>\s*<button id="navCopyApiKeyButton"/);
+});
+
+test('API key copy falls back without showing the key, and reports failure', async () => {
+  navigator.clipboard.writeText.mockRejectedValue(new Error('denied'));
+  api.open({ platform: 'unix', baseUrl: 'https://example.test' });
+  const button = document.querySelector('[data-setup-copy-api-key]');
+  document.execCommand = jest.fn(() => true);
+  button.click();
+  await Promise.resolve(); await Promise.resolve();
+  expect(document.execCommand).toHaveBeenCalledWith('copy');
+  expect(document.querySelector('[role=status]').textContent).toContain('API key copied');
+  expect(document.querySelector('dialog').textContent).not.toContain('key-123');
+  document.execCommand = jest.fn(() => false);
+  button.click();
+  await Promise.resolve(); await Promise.resolve();
+  expect(document.querySelector('[role=status]').textContent).toContain('Settings > API key');
 });

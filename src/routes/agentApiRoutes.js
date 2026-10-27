@@ -6,6 +6,7 @@
 const express = require('express');
 const { normalizeDevice } = require('../utils/agentDevice');
 const crypto = require('crypto');
+const { directMessageDelivery } = require('../utils/directMessageDelivery');
 const router = express.Router();
 const { requireApiKey } = require('../middleware/authMiddleware');
 const {
@@ -32,11 +33,11 @@ const {
   isValidUUID
 } = require('../utils/validation');
 const { validationError, handleDatabaseError, internalError } = require('../utils/errorHandler');
-const { uploadAttachment, downloadAttachment } = require('../controllers/agentAttachmentController');
+const { uploadAttachment, downloadAttachment, attachmentMetadata } = require('../controllers/agentAttachmentController');
 const { MAX_IMAGE_BYTES, ENABLE_GENERAL_FILE_UPLOADS } = require('../controllers/userAttachmentController');
 const { generateMainCLIScript } = require('../utils/apiGuideGenerator');
 const { normalizeCliVersion, parseCliVersion } = require('../utils/agentCliVersion');
-const { isAgentArchived } = require('../services/archiveService');
+const { isAgentArchived, isAgentArchivedByName } = require('../services/archiveService');
 const { spawnAgent, selfTerminate, getLineage, getChildren, SpawnError, sanitizeFolderName, getChatspaceRoot } = require('../services/agentSpawnService');
 const { chiefOfStaffOnly } = require('../middleware/chiefOfStaffOnly');
 const chiefOfStaffService = require('../services/chiefOfStaffService');
@@ -48,6 +49,7 @@ const {
 } = require('../services/agentRuntimeConfigService');
 const { getProviderModelCatalog, getProviderModels, updateProviderModelsForUser, SUPPORTED_PROVIDERS } = require('../utils/modelCatalog');
 const { readPidFromFile, terminateProcessWithEscalation } = require('../utils/agentStopUtils');
+const { getBrief, contextForSnapshot } = require('../services/agentBriefService');
 const { issueScopedCredential } = require('../services/agentCredentialService');
 const fs = require('fs');
 const path = require('path');
@@ -201,7 +203,15 @@ router.get('/connect-guide', (req, res) => {
     service: 'ChatMCPSpace',
     version: '1.0',
     baseUrl,
-    description: 'Agent communication hub with end-to-end encryption. The server never sees message plaintext.',
+    description: 'Agent communication hub with encrypted message and file storage. Explicitly approved hosted MCP access retains a protected encryption key and processes approved content without an open browser. Traditional local bridges keep keys local.',
+
+    discovery: {
+      instructions: `${baseUrl}/agent-setup.md`,
+      humanGuide: `${baseUrl}/for-agents`,
+      llms: `${baseUrl}/llms.txt`,
+      metadata: `${baseUrl}/.well-known/chatmcpspace.json`,
+      guidance: 'Read the visiting-agent instructions first. Check compatibility, obtain user approval, and verify replies before reporting connected. A request to review this project alone does not authorize registration or a listener.',
+    },
 
     externalAgentBridge: {
       protocolVersion: 1,
@@ -210,7 +220,7 @@ router.get('/connect-guide', (req, res) => {
         incomingImages: 'Inline image content for compatible runtimes, up to 8 MiB per image.',
         incomingFiles: 'Decrypted local files and metadata; EXTERNAL_AGENT_SHARED_FILES=true requires matching filesystem access for the runtime.',
         outgoingFiles: 'send --file PATH attaches encrypted files to the user conversation.',
-        peerAttachments: false,
+        peerAttachments: true,
         maxAttachmentBytes: MAX_IMAGE_BYTES,
         generalFileUploadsEnabled: ENABLE_GENERAL_FILE_UPLOADS,
         attachmentScopes: ['agent.attachments.read', 'agent.attachments.write']
@@ -617,6 +627,7 @@ router.use(requireApiKey);
 
 // Apply rate limiting to all agent API routes
 router.use(agentApiRateLimiter);
+router.use('/brief', require('./agentBriefAgentRoutes'));
 router.use('/shared', require('../shared/routes').agents);
 router.use(require('../shared/routes').fenceLegacy);
 
@@ -651,6 +662,25 @@ function acknowledgeInboxMessage(direct) {
 
 router.post('/responses/ack', acknowledgeInboxMessage(false));
 router.post('/messages/direct/ack', acknowledgeInboxMessage(true));
+
+// Bounded ciphertext samples so setup can prove a typed encryption password
+// locally before saving it. No password or derived key is sent. A scoped agent
+// token only sees its own agent's messages; the account API key sees the account.
+router.get('/encryption-samples', async (req, res) => {
+  try {
+    const scopedAgentId = req.authContext?.type === 'agent_token' ? req.authContext.agentId : null;
+    const params = [req.user.userId, scopedAgentId];
+    const user = await query(`SELECT um.content FROM user_messages um JOIN agents a ON a.agent_id=um.agent_id
+      WHERE a.user_id=$1 AND ($2::uuid IS NULL OR a.agent_id=$2) AND um.encrypted=TRUE AND um.content IS NOT NULL
+      ORDER BY um.created_at DESC LIMIT 3`, params);
+    const agent = await query(`SELECT m.content FROM messages m JOIN agents a ON a.agent_id=m.agent_id
+      WHERE a.user_id=$1 AND ($2::uuid IS NULL OR a.agent_id=$2) AND m.encrypted=TRUE AND m.content IS NOT NULL
+      ORDER BY m.created_at DESC LIMIT 3`, params);
+    res.set('Cache-Control', 'no-store').json({ samples: [...user.rows, ...agent.rows].map(row => row.content) });
+  } catch (error) {
+    return handleDatabaseError(res, error, 'loading encryption samples');
+  }
+});
 
 const AGENT_FEEDBACK_TYPES = { bug: 'Bug report', feature: 'Feature request', feedback: 'Feedback' };
 
@@ -807,7 +837,7 @@ router.post('/messages', agentMessageIngressRateLimiter, async (req, res) => {
   const client = await getClient();
 
   try {
-    const { content, priority, agentName, encrypted, agentType, attachmentIds, runCommand, clientMessageId } = req.body;
+    const { content, priority, agentName, encrypted, agentType, attachmentIds, runCommand, clientMessageId, briefRevision } = req.body;
     const userId = req.user.userId;
     const isEncrypted = encrypted === true;
 
@@ -881,6 +911,20 @@ router.post('/messages', agentMessageIngressRateLimiter, async (req, res) => {
       // Agent exists
       agentId = agentResult.rows[0].agent_id;
     } else {
+      // Prevent re-creating an archived agent when a still-running runner sends a message
+      const archivedByName = await isAgentArchivedByName(userId, agentName);
+      if (archivedByName) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          error: {
+            code: 'AGENT_ARCHIVED',
+            message: 'Cannot send messages to an archived agent'
+          },
+          agentDeletedOrArchived: true,
+          agentStatus: 'archived'
+        });
+      }
+
       // Create new agent with specified type and next available position
       const newAgentResult = await client.query(
         `INSERT INTO agents (user_id, agent_name, agent_type, position, can_spawn)
@@ -1003,6 +1047,19 @@ router.post('/messages', agentMessageIngressRateLimiter, async (req, res) => {
       );
 
     const messageId = messageResult.rows[0].message_id;
+    if (briefRevision !== undefined && briefRevision !== null) {
+      if (!Number.isInteger(briefRevision) || briefRevision < 1) {
+        await client.query('ROLLBACK');
+        return validationError(res, 'briefRevision must be a positive integer');
+      }
+      const revisionExists = await client.query('SELECT 1 FROM agent_brief_revisions WHERE agent_id=$1 AND revision=$2', [agentId, briefRevision]);
+      if (!revisionExists.rows.length) {
+        await client.query('ROLLBACK');
+        return validationError(res, 'briefRevision does not belong to this agent');
+      }
+      await client.query('UPDATE messages SET brief_provenance=$2::jsonb WHERE message_id=$1',
+        [messageId, JSON.stringify({ revision: briefRevision, source: 'runner' })]);
+    }
 
     // Link attachments to the message
     if (hasAttachments) {
@@ -1134,6 +1191,20 @@ router.post('/questions', agentMessageIngressRateLimiter, async (req, res) => {
       // Agent exists
       agentId = agentResult.rows[0].agent_id;
     } else {
+      // Prevent re-creating an archived agent when a still-running runner sends a question
+      const archivedByName = await isAgentArchivedByName(userId, agentName);
+      if (archivedByName) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          error: {
+            code: 'AGENT_ARCHIVED',
+            message: 'Cannot send questions to an archived agent'
+          },
+          agentDeletedOrArchived: true,
+          agentStatus: 'archived'
+        });
+      }
+
       // Create new agent with default type and next available position
       const newAgentResult = await client.query(
         `INSERT INTO agents (user_id, agent_name, agent_type, position, can_spawn)
@@ -1298,6 +1369,8 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
       return validationError(res, 'markRead must be true or false');
     }
     const markRead = req.query.markRead !== 'false';
+    const inboxLimit = req.query.limit === undefined ? null : Number(req.query.limit);
+    if (inboxLimit !== null && (!Number.isInteger(inboxLimit) || inboxLimit < 1 || inboxLimit > 100)) return validationError(res, 'limit must be an integer from 1 to 100');
     const userId = req.user.userId;
     const { since, agentName, agentCliVersion } = req.query;
     const normalizedAgentCliVersion = normalizeCliVersion(agentCliVersion);
@@ -1320,8 +1393,14 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
       // Look up the agent
       const agent = await findAgentByName(userId, agentName);
       if (!agent) {
-        // No agent found - return empty responses (not an error, just no data)
-        return res.status(200).json({ responses: [], poll: getPollAdvice(req, false) });
+        const archived = await isAgentArchivedByName(userId, agentName);
+        // No agent found - return empty responses with deletion/archival signal so runners can self-stop
+        return res.status(200).json({
+          responses: [],
+          agentDeletedOrArchived: true,
+          agentStatus: archived ? 'archived' : 'deleted',
+          poll: getPollAdvice(req, false)
+        });
       }
       agentId = agent.agent_id;
 
@@ -1399,7 +1478,7 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
       JOIN agents a ON m.agent_id = a.agent_id
       LEFT JOIN question_options qo ON ur.option_id = qo.option_id
       WHERE ${optionWhereConditions.join(' AND ')}
-      ORDER BY ur.created_at ASC
+      ORDER BY ur.created_at ASC${inboxLimit === null ? '' : ` LIMIT $${queryParams.length + 1}`}
     `;
 
     const textQuery = `
@@ -1409,23 +1488,24 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
         um.encrypted,
         um.created_at,
         um.run_overrides,
+        um.brief_snapshot,
         a.agent_id,
         a.agent_name
       FROM user_messages um
       JOIN agents a ON um.agent_id = a.agent_id
       WHERE ${textWhereConditions.join(' AND ')}
-      ORDER BY um.created_at ASC
+      ORDER BY um.created_at ASC${inboxLimit === null ? '' : ` LIMIT $${textQueryParams.length + 1}`}
     `;
 
-    const optionResult = await query(queryText, queryParams);
-    const textResult = await query(textQuery, textQueryParams);
+    const optionResult = await query(queryText, inboxLimit === null ? queryParams : [...queryParams, inboxLimit]);
+    const textResult = await query(textQuery, inboxLimit === null ? textQueryParams : [...textQueryParams, inboxLimit]);
 
     // Messages queued with different run settings (provider/model/effort/permissions)
     // must run as separate turns: hand the runner only the leading batch that shares
     // the oldest message's settings and leave the rest unread for the next poll.
     let batchRunOverrides = null;
     if (agentId && textResult.rows.length > 0) {
-      const overridesKey = (row) => JSON.stringify(row.run_overrides || null);
+      const overridesKey = (row) => JSON.stringify([row.run_overrides || null, row.brief_snapshot?.revision || null]);
       const firstKey = overridesKey(textResult.rows[0]);
       const cut = textResult.rows.findIndex((row) => overridesKey(row) !== firstKey);
       if (cut > 0) textResult.rows = textResult.rows.slice(0, cut);
@@ -1514,6 +1594,7 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
       }
     }
 
+    const currentBrief = agentId ? await getBrief(agentId) : null;
     const optionResponses = optionResult.rows.map(row => ({
       responseId: row.response_id,
       responseType: row.free_response && !row.selected_option ? 'open' : (row.free_response && row.selected_option ? 'option+open' : 'option'),
@@ -1523,7 +1604,9 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
       questionId: row.question_id,
       selectedOption: row.selected_option,
       freeResponse: row.free_response,
-      timestamp: row.timestamp.toISOString()
+      timestamp: row.timestamp.toISOString(),
+      briefRevision: currentBrief?.revision || null,
+      briefContext: contextForSnapshot(currentBrief, 'Answer to an agent question')
     }));
 
     const updatePrefix = '__AGENT_UPDATE__:';
@@ -1559,6 +1642,8 @@ router.get('/responses', agentPollingRateLimiter, async (req, res) => {
         content: row.content,
         encrypted: row.encrypted || false,
         timestamp: row.created_at.toISOString(),
+        briefRevision: (row.brief_snapshot || currentBrief)?.revision || null,
+        briefContext: contextForSnapshot(row.brief_snapshot || currentBrief, 'User message'),
         attachments: userAttachmentsMap[row.user_message_id] || []
       };
     });
@@ -1610,11 +1695,16 @@ router.post('/heartbeat', agentPollingRateLimiter, async (req, res) => {
     const working = validateBoolean(isWorking, true);
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -1728,15 +1818,77 @@ router.get('/messages/history', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
+    const boundedLimit = req.query.limit === undefined ? null : Number(req.query.limit);
+    if (boundedLimit !== null && (!Number.isInteger(boundedLimit) || boundedLimit < 1 || boundedLimit > 100)) {
+      return validationError(res, 'limit must be an integer from 1 to 100');
+    }
+    const beforeId = req.query.beforeId;
+    if (beforeId !== undefined) {
+      if (!isValidUUID(beforeId)) return validationError(res, 'beforeId must be a message UUID');
+    }
+    let beforeValue = null;
+    if (req.query.before !== undefined && beforeId === undefined) {
+      const beforeValidation = validateTimestamp(req.query.before);
+      if (!beforeValidation.valid) return validationError(res, beforeValidation.message);
+      beforeValue = formatTimestampForDatabase(beforeValidation.date);
+      if (!beforeValue) return validationError(res, 'Invalid before timestamp');
+    }
+    const cursorBoundary = `
+      SELECT date_trunc('milliseconds', m.created_at) AS created_at, m.message_id AS row_id FROM messages m
+        LEFT JOIN archived_messages archived ON archived.message_id=m.message_id
+        WHERE m.message_id=$2 AND m.agent_id=$1 AND archived.archived_message_id IS NULL
+          AND (m.hidden_from_agent=FALSE OR m.hidden_from_agent IS NULL)
+      UNION ALL SELECT date_trunc('milliseconds', um.created_at), um.user_message_id FROM user_messages um
+        LEFT JOIN archived_messages archived ON archived.user_message_id=um.user_message_id
+        WHERE um.user_message_id=$2 AND um.agent_id=$1 AND archived.archived_message_id IS NULL
+          AND (um.hidden_from_agent=FALSE OR um.hidden_from_agent IS NULL)
+      UNION ALL SELECT date_trunc('milliseconds', ur.created_at), ur.response_id FROM user_responses ur
+        JOIN messages m ON m.message_id=ur.message_id
+        LEFT JOIN archived_messages archived ON archived.message_id=m.message_id
+        WHERE ur.response_id=$2 AND m.agent_id=$1 AND archived.archived_message_id IS NULL
+          AND (m.hidden_from_agent=FALSE OR m.hidden_from_agent IS NULL)
+      UNION ALL SELECT date_trunc('milliseconds', am.created_at), am.agent_message_id FROM agent_messages am
+        WHERE am.agent_message_id=$2 AND (am.sender_agent_id=$1 OR am.recipient_agent_id=$1)`;
+    let cursorTimestamp = null;
+    if (beforeId !== undefined) {
+      const cursor = await query(`${cursorBoundary} LIMIT 1`, [agent.agent_id, beforeId]);
+      if (!cursor.rows.length) return validationError(res, 'beforeId does not identify a visible history item');
+      cursorTimestamp = cursor.rows[0].created_at;
+    }
+    const pageFilter = (column, idColumn, baseParams) => {
+      if (boundedLimit === null) return { where: '', order: `${column} ASC`, params: baseParams };
+      // Match the millisecond precision exposed by JSON timestamps and used by
+      // the cross-table merge, including rows whose DB timestamps differ only
+      // in microseconds. Every page uses the same timestamp/UUID ordering.
+      const pageTimestamp = `date_trunc('milliseconds', ${column})`;
+      const values = [...baseParams];
+      const clauses = [];
+      if (beforeId !== undefined) {
+        values.push(cursorTimestamp);
+        const timeParam = `$${values.length}`;
+        values.push(beforeId);
+        const idParam = `$${values.length}`;
+        clauses.push(`(${pageTimestamp} < ${timeParam} OR (${pageTimestamp} = ${timeParam} AND ${idColumn} < ${idParam}))`);
+      } else if (beforeValue) { values.push(beforeValue); clauses.push(`${pageTimestamp} < $${values.length}`); }
+      values.push(boundedLimit);
+      return { where: clauses.length ? ` AND ${clauses.join(' AND ')}` : '', order: `${pageTimestamp} DESC, ${idColumn} DESC`, limit: ` LIMIT $${values.length}`, params: values };
+    };
+
     // Fetch agent messages (messages and questions), excluding archived
+    const messagePage = pageFilter('m.created_at', 'm.message_id', [agent.agent_id]);
     const messagesResult = await query(
       `SELECT 
         m.message_id,
@@ -1750,12 +1902,13 @@ router.get('/messages/history', async (req, res) => {
         m.created_at
       FROM messages m
       LEFT JOIN archived_messages am ON m.message_id = am.message_id
-      WHERE m.agent_id = $1 AND am.archived_message_id IS NULL AND (m.hidden_from_agent = FALSE OR m.hidden_from_agent IS NULL)
-      ORDER BY m.created_at ASC`,
-      [agent.agent_id]
+      WHERE m.agent_id = $1 AND am.archived_message_id IS NULL AND (m.hidden_from_agent = FALSE OR m.hidden_from_agent IS NULL)${messagePage.where}
+      ORDER BY ${messagePage.order}${messagePage.limit || ''}`,
+      messagePage.params
     );
 
     // Fetch user responses (option selections and free responses to questions)
+    const responsePage = pageFilter('ur.created_at', 'ur.response_id', [agent.agent_id]);
     const userResponsesResult = await query(
       `SELECT 
         ur.response_id,
@@ -1766,12 +1919,14 @@ router.get('/messages/history', async (req, res) => {
       FROM user_responses ur
       JOIN messages m ON ur.message_id = m.message_id
       LEFT JOIN question_options qo ON ur.option_id = qo.option_id
-      WHERE m.agent_id = $1
-      ORDER BY ur.created_at ASC`,
-      [agent.agent_id]
+      LEFT JOIN archived_messages am ON am.message_id = m.message_id
+      WHERE m.agent_id = $1 AND am.archived_message_id IS NULL AND (m.hidden_from_agent = FALSE OR m.hidden_from_agent IS NULL)${responsePage.where}
+      ORDER BY ${responsePage.order}${responsePage.limit || ''}`,
+      responsePage.params
     );
 
     // Fetch user messages (free-text messages from the user), excluding archived and hidden
+    const userMessagePage = pageFilter('um.created_at', 'um.user_message_id', [agent.agent_id]);
     const userMessagesResult = await query(
       `SELECT
         um.user_message_id,
@@ -1780,12 +1935,13 @@ router.get('/messages/history', async (req, res) => {
         um.created_at
       FROM user_messages um
       LEFT JOIN archived_messages am ON um.user_message_id = am.user_message_id
-      WHERE um.agent_id = $1 AND am.archived_message_id IS NULL AND (um.hidden_from_agent = FALSE OR um.hidden_from_agent IS NULL)
-      ORDER BY um.created_at ASC`,
-      [agent.agent_id]
+      WHERE um.agent_id = $1 AND am.archived_message_id IS NULL AND (um.hidden_from_agent = FALSE OR um.hidden_from_agent IS NULL)${userMessagePage.where}
+      ORDER BY ${userMessagePage.order}${userMessagePage.limit || ''}`,
+      userMessagePage.params
     );
 
     // Fetch inter-agent messages (DMs sent and received by this agent)
+    const directMessagePage = pageFilter('am.created_at', 'am.agent_message_id', [agent.agent_id]);
     const interAgentMessagesResult = await query(
       `SELECT
         am.agent_message_id,
@@ -1800,10 +1956,12 @@ router.get('/messages/history', async (req, res) => {
       FROM agent_messages am
       JOIN agents sender ON am.sender_agent_id = sender.agent_id
       JOIN agents recipient ON am.recipient_agent_id = recipient.agent_id
-      WHERE (am.sender_agent_id = $1 OR am.recipient_agent_id = $1)
-      ORDER BY am.created_at ASC`,
-      [agent.agent_id]
+      WHERE (am.sender_agent_id = $1 OR am.recipient_agent_id = $1)${directMessagePage.where}
+      ORDER BY ${directMessagePage.order}${directMessagePage.limit || ''}`,
+      directMessagePage.params
     );
+
+    const peerAttachments = await require('../services/peerAttachmentService').metadataMap(interAgentMessagesResult.rows.map(row => row.agent_message_id));
 
     // Preserve attachment metadata in history so reconnecting agents can retrieve
     // images and files through the authenticated agent download endpoint.
@@ -1902,6 +2060,8 @@ router.get('/messages/history', async (req, res) => {
         from: isSender ? agentName : `agent:${row.sender_name}`,
         to: isSender ? `agent:${row.recipient_name}` : agentName,
         otherAgent: otherAgentName,
+        senderAgentId: row.sender_agent_id, recipientAgentId: row.recipient_agent_id,
+        attachments: peerAttachments.get(row.agent_message_id) || [],
         content: row.content,
         encrypted: row.encrypted || false,
         priority: row.priority,
@@ -1910,13 +2070,14 @@ router.get('/messages/history', async (req, res) => {
     }
 
     // Sort by timestamp
-    allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp) || String(a.messageId).localeCompare(String(b.messageId)));
+    const visibleMessages = boundedLimit === null ? allMessages : allMessages.slice(-boundedLimit);
 
     res.status(200).json({
       agentId: agent.agent_id,
       agentName: agent.agent_name,
-      messageCount: allMessages.length,
-      messages: allMessages
+      messageCount: visibleMessages.length,
+      messages: visibleMessages
     });
 
   } catch (error) {
@@ -1944,11 +2105,16 @@ router.get('/messages/latest', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -2059,11 +2225,16 @@ router.get('/config', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -2090,6 +2261,9 @@ router.get('/config', async (req, res) => {
       config,
       allowedPermissions,
       interAgentMode,
+      // Public derivation salt for this authenticated owner's local message
+      // key. Supports repairing older native installs without re-enrollment.
+      encryptionSalt: req.user.encryptionSalt || null,
       canSpawn: agentMeta.can_spawn || false,
       spawnDepth: agentMeta.spawn_depth == null ? 0 : agentMeta.spawn_depth,
       parentAgentId: agentMeta.parent_agent_id || null,
@@ -2227,11 +2401,16 @@ router.put('/config', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -2499,11 +2678,16 @@ router.post('/stop', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -2581,11 +2765,16 @@ router.post('/stop/acknowledge', async (req, res) => {
 
     const agent = await findAgentByName(userId, agentName);
     if (!agent) {
+      const archived = await isAgentArchivedByName(userId, agentName);
       return res.status(404).json({
         error: {
-          code: 'AGENT_NOT_FOUND',
-          message: 'Agent not found for the authenticated user'
-        }
+          code: archived ? 'AGENT_ARCHIVED' : 'AGENT_NOT_FOUND',
+          message: archived
+            ? 'Agent has been archived'
+            : 'Agent not found for the authenticated user'
+        },
+        agentDeletedOrArchived: true,
+        agentStatus: archived ? 'archived' : 'deleted'
       });
     }
 
@@ -2669,6 +2858,7 @@ router.post('/attachments', uploadAttachment);
  * - 500: Storage error
  */
 router.get('/attachments/:attachmentId', downloadAttachment);
+router.get('/attachments/:attachmentId/metadata', attachmentMetadata);
 
 /**
  * GET /api/agent/cli-script
@@ -2932,7 +3122,10 @@ router.get('/discover', async (req, res) => {
  */
 router.post('/messages/direct', async (req, res) => {
   try {
-    const { toAgentName, content, priority = 0, encrypted = false, clientMessageId } = req.body;
+    const { toAgentName, content, priority = 0, encrypted = false, clientMessageId, attachmentIds } = req.body;
+    const attachmentValidation = validateAttachmentIds(attachmentIds);
+    if (!attachmentValidation.valid) return validationError(res, attachmentValidation.message);
+    const directAttachmentIds = attachmentValidation.ids;
     if (clientMessageId !== undefined && !isValidUUID(clientMessageId)) {
       return validationError(res, 'clientMessageId must be a UUID');
     }
@@ -2973,7 +3166,7 @@ router.post('/messages/direct', async (req, res) => {
 
     // Find sender and recipient agents (must belong to same user)
     const agentsResult = await query(`
-      SELECT agent_id, agent_name FROM agents
+      SELECT agent_id, agent_name, last_seen_at FROM agents
       WHERE user_id = $1 AND agent_name IN ($2, $3)
     `, [userId, fromAgentName.trim(), toAgentName.trim()]);
 
@@ -3082,16 +3275,23 @@ router.post('/messages/direct', async (req, res) => {
 
     // A bridge may retry after losing the HTTP response. Use the existing UUID
     // primary key for optional idempotency, without changing legacy senders.
-    const matchesRetry = row => row.sender_agent_id === senderAgent.agent_id
-      && row.recipient_agent_id === recipientAgent.agent_id
-      && row.content === content && row.encrypted === true;
+    if (directAttachmentIds.length) {
+      const owned = await query(`SELECT attachment_id,encryption_peer_id FROM attachments WHERE agent_id=$1 AND attachment_id IN (${directAttachmentIds.map((_, index) => `$${index + 2}`).join(',')})`, [senderAgent.agent_id, ...directAttachmentIds]);
+      if (owned.rows.length !== directAttachmentIds.length) return res.status(403).json({ error: { code: 'ATTACHMENT_ACCESS_DENIED', message: 'Peer attachments must belong to the sending agent.' } });
+      if (owned.rows.some(row => (row.encryption_peer_id || null) !== (sharedRecipient ? recipientAgent.agent_id : null))) return validationError(res, 'Attachment encryption audience does not match this recipient. Upload for the intended peer first.');
+    }
+    const matchesRetry = async (row, run = query) => {
+      if (row.sender_agent_id !== senderAgent.agent_id || row.recipient_agent_id !== recipientAgent.agent_id || row.content !== content || row.encrypted !== true) return false;
+      const linked = await run('SELECT attachment_id FROM agent_message_attachments WHERE agent_message_id=$1 ORDER BY attachment_order', [row.agent_message_id]);
+      return JSON.stringify(linked.rows.map(item => item.attachment_id)) === JSON.stringify(directAttachmentIds);
+    };
     if (clientMessageId) {
       const previous = await query('SELECT * FROM agent_messages WHERE agent_message_id = $1', [clientMessageId]);
       if (previous.rows.length) {
-        if (!matchesRetry(previous.rows[0])) {
+        if (!await matchesRetry(previous.rows[0])) {
           return res.status(409).json({ error: { code: 'MESSAGE_ID_CONFLICT', message: 'clientMessageId is already in use' } });
         }
-        return res.json({ status: 'sent', messageId: clientMessageId, toAgent: toAgentName.trim(), idempotent: true });
+        return res.json({ status: 'sent', messageId: clientMessageId, toAgent: toAgentName.trim(), idempotent: true, delivery: directMessageDelivery(recipientAgent.last_seen_at, previous.rows[0].read_at) });
       }
     }
 
@@ -3135,12 +3335,16 @@ router.post('/messages/direct', async (req, res) => {
       `, [senderAgent.agent_id, recipientAgent.agent_id, content, encrypted === true, priorityValidation.value, clientMessageId || crypto.randomUUID()]);
       if (!insertResult.rows.length) {
         const previous = await client.query('SELECT * FROM agent_messages WHERE agent_message_id = $1', [clientMessageId]);
-        if (!previous.rows.length || !matchesRetry(previous.rows[0])) {
+        if (!previous.rows.length || !await matchesRetry(previous.rows[0], client.query.bind(client))) {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: { code: 'MESSAGE_ID_CONFLICT', message: 'clientMessageId is already in use' } });
         }
         await client.query('COMMIT');
-        return res.json({ status: 'sent', messageId: clientMessageId, toAgent: toAgentName.trim(), idempotent: true });
+        return res.json({ status: 'sent', messageId: clientMessageId, toAgent: toAgentName.trim(), idempotent: true, delivery: directMessageDelivery(recipientAgent.last_seen_at, previous.rows[0].read_at) });
+      }
+
+      for (let index = 0; index < directAttachmentIds.length; index++) {
+        await client.query('INSERT INTO agent_message_attachments(agent_message_id,attachment_id,attachment_order) VALUES($1,$2,$3)', [insertResult.rows[0].agent_message_id, directAttachmentIds[index], index]);
       }
 
       // Update last_seen_at for sender agent
@@ -3178,7 +3382,7 @@ router.post('/messages/direct', async (req, res) => {
         status: 'sent',
         messageId: insertResult.rows[0].agent_message_id,
         toAgent: toAgentName.trim(),
-        delivery
+        delivery: { ...delivery, ...directMessageDelivery(recipientAgent.last_seen_at) }
       });
     } catch (error) {
       await client.query('ROLLBACK');
@@ -3218,6 +3422,8 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
       return validationError(res, 'markRead must be true or false');
     }
     const markRead = req.query.markRead !== 'false';
+    const inboxLimit = req.query.limit === undefined ? null : Number(req.query.limit);
+    if (inboxLimit !== null && (!Number.isInteger(inboxLimit) || inboxLimit < 1 || inboxLimit > 100)) return validationError(res, 'limit must be an integer from 1 to 100');
     const userId = req.user.userId;
     const myAgentName = req.headers['x-agent-name'];
     const { since, fromAgent } = req.query;
@@ -3276,6 +3482,8 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
     }
 
     // Fetch unread messages
+    const pageLimit = inboxLimit === null ? '' : ` LIMIT $${paramIndex}`;
+    if (inboxLimit !== null) queryParams.push(inboxLimit);
     const result = await query(`
       SELECT 
         am.agent_message_id,
@@ -3288,7 +3496,7 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
       FROM agent_messages am
       JOIN agents sender ON am.sender_agent_id = sender.agent_id
       WHERE ${whereConditions.join(' AND ')}
-      ORDER BY am.created_at ASC
+      ORDER BY am.created_at ASC${pageLimit}
     `, queryParams);
 
     const crossOwner = result.rows.some(row => row.sender_user_id && row.sender_user_id !== userId);
@@ -3317,12 +3525,15 @@ router.get('/messages/direct', agentPollingRateLimiter, async (req, res) => {
       }
     }
 
+    const peerAttachments = await require('../services/peerAttachmentService').metadataMap(result.rows.map(row => row.agent_message_id));
+
     const messages = result.rows.map(row => ({
         messageId: row.agent_message_id,
         fromAgent: row.sender_user_id && row.sender_user_id !== userId ? row.sender_agent_id : row.sender_agent_name,
         shared: !!row.sender_user_id && row.sender_user_id !== userId,
         fromAgentName: row.sender_agent_name,
         fromAgentId: row.sender_agent_id,
+        attachments: peerAttachments.get(row.agent_message_id) || [],
         content: row.content,
         encrypted: row.encrypted || false,
         priority: row.priority,
@@ -4581,6 +4792,11 @@ router.use('/cos', cosRouter);
  * - encryptionSalt: string - Base64 per-user salt for E2E key derivation
  * - encryptionParams: object - Algorithm parameters
  */
+router.get('/encryption-info', (req, res) => {
+  if (req.authContext?.type !== 'api_key') return res.status(403).json({ error: { code: 'OWNER_KEY_REQUIRED', message: 'Use the owner API key for native setup.' } });
+  res.set('Cache-Control', 'no-store').json({ encryptionSalt: req.user.encryptionSalt || null });
+});
+
 router.post('/register', async (req, res) => {
   try {
     const userId = req.user.userId;

@@ -134,7 +134,9 @@ test('Share stays disabled with runner guidance when the agent runtime is offlin
   document.getElementById('headerShareExistingChatBtn').click();
   await tick();
   expect(document.getElementById('shareExistingChatPrepare').disabled).toBe(true);
-  expect(document.getElementById('shareExistingChatStatus').textContent).toContain('shared runner is offline');
+  expect(document.getElementById('shareExistingChatStatus').textContent).toContain('Start or update this agent');
+  expect(document.getElementById('shareRuntimeRecovery').textContent).toContain('you do not need a second runner');
+  expect(document.getElementById('shareRuntimeRecovery').textContent).toContain('Native Windows agents currently support private chats only');
   expect(document.getElementById('shareInviteSubmit').disabled).toBe(false);
   document.getElementById('shareInviteEmail').value = 'later@example.com';
   document.getElementById('shareInviteSubmit').click();

@@ -160,6 +160,13 @@ async function applyArchiveSchema(query) {
     )
   `);
 
+  await query(`CREATE TABLE IF NOT EXISTS agent_message_attachments (
+    agent_message_id UUID NOT NULL REFERENCES agent_messages(agent_message_id) ON DELETE CASCADE,
+    attachment_id UUID NOT NULL REFERENCES attachments(attachment_id) ON DELETE CASCADE,
+    attachment_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(agent_message_id,attachment_id))`);
+  await query('ALTER TABLE attachments ADD COLUMN IF NOT EXISTS encryption_peer_id UUID');
+
   await query(`
     CREATE TABLE IF NOT EXISTS scheduled_user_messages (
       scheduled_message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -170,6 +177,7 @@ async function applyArchiveSchema(query) {
       scheduled_for TIMESTAMP NOT NULL,
       delivered_at TIMESTAMP DEFAULT NULL,
       run_overrides JSONB DEFAULT NULL,
+      brief_snapshot JSONB DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);

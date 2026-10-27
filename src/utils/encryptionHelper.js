@@ -5,8 +5,9 @@
  * SECURITY MODEL:
  * - Each user has a unique encryption_salt (stored in DB)
  * - Encryption key = PBKDF2(user_password, encryption_salt)
- * - Server NEVER stores the encryption key
- * - Server CANNOT decrypt messages (true end-to-end encryption)
+ * - Traditional local/browser clients keep the encryption key off the server
+ * - Hosted MCP is a separate, explicitly approved mode using mcpKeyVault; it
+ *   retains a protected key and decrypts approved content in the service
  * - Agent gets salt from API guide to derive key from password
  */
 

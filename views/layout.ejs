@@ -5,6 +5,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <meta name="theme-color" content="#020617">
+  <meta name="color-scheme" content="dark">
+  <style>
+    /* Paint the page and mobile browser bars dark before external CSS loads. */
+    html { background-color: #020617; color-scheme: dark; }
+  </style>
+  <link rel="help" href="/for-agents" title="Connect your agent">
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="Agent discovery">
+  <link rel="alternate" type="text/plain" href="/agent-setup.md" title="Agent setup instructions">
   <title>
     <%= typeof title !=='undefined' ? title : 'ChatMCPSpace' %>
   </title>
@@ -106,6 +114,7 @@
 </head>
 
 <body class="min-h-screen text-slate-100 antialiased <%= typeof pageBodyClass !== 'undefined' ? pageBodyClass : '' %>">
+  <a class="skip-link" href="#mainContent">Skip to content</a>
   <script nonce="<%= cspNonce %>">
     // Apply persisted mobile Fast Mode before dashboard markup paints, so the
     // full stats/header chrome does not flash or remain visible while JS loads.
@@ -180,7 +189,7 @@
               <div class="flex flex-wrap items-center gap-2 text-sm text-slate-300 overflow-visible nav-right-buttons">
                 <button id="mobileNavActionsToggle" type="button"
                   class="mobile-nav-actions-toggle hidden rounded-lg border border-slate-700/50 text-slate-200 hover:bg-slate-800 transition font-medium"
-                  aria-label="Open navigation actions" aria-expanded="false">
+                  aria-label="Open navigation actions" aria-expanded="false" aria-controls="mobileNavActionsMenu">
                   <svg class="mobile-nav-actions-toggle__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="4" y1="7" x2="20" y2="7"></line>
                     <line x1="4" y1="12" x2="20" y2="12"></line>
@@ -229,7 +238,7 @@
                       </svg>
                       Setup Script
                     </button>
-                    <% if (typeof apiKey !== 'undefined' && apiKey) { %>
+                    <% if (typeof apiKey !== 'undefined' && apiKey && process.env.WINDOWS_AGENT_SETUP_ENABLED === 'false') { %>
                     <button id="navCopyApiKeyButton" type="button" data-api-key="<%= apiKey %>"
                       class="hidden md:inline-flex px-3 py-1.5 rounded-lg border border-slate-700/60 text-slate-200 hover:bg-white/5 transition items-center gap-2 text-xs font-medium"
                       onclick="copyNavApiKey(this)">
@@ -370,7 +379,7 @@
         </script>
         <% } %>
 
-          <main class="<%= user ? 'py-8' : 'py-4' %>">
+          <main id="mainContent" tabindex="-1" class="<%= user ? 'py-8' : 'py-4' %>">
             <%- body %>
           </main>
           <% if (user && process.env.WINDOWS_AGENT_SETUP_ENABLED !== 'false') { %>
@@ -383,6 +392,14 @@
             (function () {
               function initSharedMobileNavActions() {
                 if (document.body.dataset.mobileOverflowDelegated === 'true') return;
+                // Dashboard initialization can await local encryption before
+                // binding menus. Give its complete navigation/council handler
+                // ownership now instead of claiming the shared binding flag
+                // with the smaller settings-page fallback.
+                if (document.getElementById('dashboardRoot') && typeof bindMobileOverflowActionControls === 'function') {
+                  bindMobileOverflowActionControls();
+                  return;
+                }
 
                 const button = document.getElementById('mobileNavActionsToggle');
                 const menu = document.getElementById('mobileNavActionsMenu');
@@ -396,6 +413,14 @@
 
                 document.body.dataset.mobileOverflowDelegated = 'true';
                 syncAriaState();
+
+                document.addEventListener('keydown', (event) => {
+                  if (event.key !== 'Escape' || !document.body.classList.contains('mobile-nav-actions-open')) return;
+                  event.preventDefault();
+                  document.body.classList.remove('mobile-nav-actions-open');
+                  syncAriaState();
+                  button.focus();
+                });
 
                 document.addEventListener('click', (event) => {
                   const target = event.target;
@@ -460,7 +485,8 @@
                 </svg>
               </button>
               <button id="feedbackSendBtn" type="button" class="feedback-send-btn" disabled>
-                Send Feedback
+                <span>Send Feedback</span>
+                <small class="feedback-send-shortcut">Ctrl / ⌘ + Enter to send</small>
               </button>
             </div>
 

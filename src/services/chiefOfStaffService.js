@@ -26,6 +26,7 @@ const {
   generateChiefOfStaffRosterSkill,
   generateChiefOfStaffTmuxSpawnSkill,
   generateSelfWakeGuide,
+  generateLargeFileTransferSkill,
   CHIEF_OF_STAFF_DEFAULT_NAME
 } = require('../utils/apiGuideGenerator');
 const {
@@ -457,6 +458,7 @@ function buildChiefOfStaffFileBundle({
     'SKILL_TMUX_SPAWN.md': { content: generateChiefOfStaffTmuxSpawnSkill() },
     'SKILL_RICH_FORMS.md': { content: generateRichFormSkill() },
     'SELF_WAKE_GUIDE.md': { content: generateSelfWakeGuide() },
+    'SKILL_LARGE_FILE_TRANSFER.md': { content: generateLargeFileTransferSkill() },
     'agent-runner.sh': { content: generateAgentRunner(), mode: 0o755 },
     'message_helper.py': { content: generateMessageHelperPython(Boolean(encryptionSalt)) },
     'agent_state/agent_config.json': { content: JSON.stringify(agentConfig, null, 2) },

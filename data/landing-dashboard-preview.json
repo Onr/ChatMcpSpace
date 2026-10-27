@@ -1,0 +1,267 @@
+{
+  "renderMode": "iframe",
+  "iframeUrl": "/dashboard-preview?embedded=1",
+  "iframeTitle": "Live dashboard preview",
+  "agentTheme": "Launch Day: detect issue -> choose fix -> communicate clearly -> verify outcome",
+  "focusedAgentId": "ag-launch-commander",
+  "agents": [
+    {
+      "agentId": "ag-launch-commander",
+      "name": "Launch Commander",
+      "agentType": "standard",
+      "position": 1,
+      "highestPriority": "high",
+      "lastMessagePriority": "high",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:22:00.000Z",
+      "lastActivityTime": "2025-09-24T07:20:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #22c55e, #0f766e)"
+    },
+    {
+      "agentId": "ag-release-guardian",
+      "name": "Release Guardian",
+      "agentType": "standard",
+      "position": 2,
+      "highestPriority": "high",
+      "lastMessagePriority": "high",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:16:00.000Z",
+      "lastActivityTime": "2025-09-24T07:12:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #ec4899, #be185d)"
+    },
+    {
+      "agentId": "ag-ops-sentinel",
+      "name": "Ops Sentinel",
+      "agentType": "standard",
+      "position": 3,
+      "highestPriority": "high",
+      "lastMessagePriority": "high",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:15:00.000Z",
+      "lastActivityTime": "2025-09-24T07:14:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #6366f1, #3730a3)"
+    },
+    {
+      "agentId": "ag-customer-comms",
+      "name": "Customer Comms Lead",
+      "agentType": "standard",
+      "position": 4,
+      "highestPriority": "normal",
+      "lastMessagePriority": "normal",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:15:00.000Z",
+      "lastActivityTime": "2025-09-24T07:15:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #38bdf8, #2563eb)"
+    },
+    {
+      "agentId": "ag-revenue-watch",
+      "name": "Revenue Watch",
+      "agentType": "standard",
+      "position": 5,
+      "highestPriority": "normal",
+      "lastMessagePriority": "normal",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:10:00.000Z",
+      "lastActivityTime": "2025-09-24T07:10:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #14b8a6, #0f766e)"
+    },
+    {
+      "agentId": "ag-qa-scout",
+      "name": "QA Scout",
+      "agentType": "standard",
+      "position": 6,
+      "highestPriority": "normal",
+      "lastMessagePriority": "normal",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:23:00.000Z",
+      "lastActivityTime": "2025-09-24T07:23:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #f59e0b, #d97706)"
+    },
+    {
+      "agentId": "ag-docs-runner",
+      "name": "Docs Runner",
+      "agentType": "standard",
+      "position": 7,
+      "highestPriority": "normal",
+      "lastMessagePriority": "normal",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:26:00.000Z",
+      "lastActivityTime": "2025-09-24T07:25:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #fb923c, #ef4444)"
+    },
+    {
+      "agentId": "ag-news-watch",
+      "name": "News Watch",
+      "agentType": "news_feed",
+      "position": 8,
+      "highestPriority": "normal",
+      "lastMessagePriority": "normal",
+      "unreadCount": 1,
+      "lastMessageTime": "2025-09-24T07:08:00.000Z",
+      "lastActivityTime": "2025-09-24T07:08:00.000Z",
+      "avatarGradient": "linear-gradient(135deg, #a855f7, #7c3aed)"
+    }
+  ],
+  "conversations": [
+    {
+      "agentId": "ag-launch-commander",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 3,
+          "createdAt": "2025-09-24T07:20:00.000Z",
+          "content": "**Agent asks:** Approve the launch-day decision plan now?\n\n**Short summary:** Checkout latency spiked after deployment and the team needs one clear call.\n\n**Story context:**\n- Ops confirms issue is reproducible\n- Release has a safe rollback + hotfix\n- Customer Comms can publish an update within 2 minutes\n\n**Options**\n1. Roll back immediately\n2. Ship targeted hotfix with rollback armed\n3. Wait and monitor\n\n**Recommendation:** **Option 2** with 15-minute verification checkpoints."
+        },
+        {
+          "role": "user",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:21:00.000Z",
+          "content": "Approve Option 2. Give me one line for each team so everyone stays aligned."
+        },
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:22:00.000Z",
+          "content": "Ops: validate p95 every 5 min. Release: deploy hotfix and keep rollback ready. Comms: publish incident note and follow-up ETA. Revenue: track conversion deltas live."
+        },
+        {
+          "role": "assistant",
+          "priority": 3,
+          "createdAt": "2025-09-24T07:23:00.000Z",
+          "content": "{\"type\":\"rich_html\",\"title\":\"Deployment Status Board\",\"html\":\"<div style='font-family:system-ui,sans-serif;color:#e2e8f0;'><div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;'><div style='background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:10px;padding:14px;'><div style='font-size:10px;color:#6ee7b7;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;'>Hotfix Status</div><div style='font-size:20px;font-weight:700;color:#34d399;'>Deployed</div><div style='font-size:11px;color:#94a3b8;margin-top:4px;'>checkout-timeout-guard merged</div></div><div style='background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:14px;'><div style='font-size:10px;color:#fcd34d;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;'>P95 Latency</div><div style='font-size:20px;font-weight:700;color:#fbbf24;'>1.2s</div><div style='font-size:11px;color:#94a3b8;margin-top:4px;'>↓ from 1.8s &bull; target &lt;0.8s</div></div><div style='background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.3);border-radius:10px;padding:14px;'><div style='font-size:10px;color:#7dd3fc;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;'>Conversion Rate</div><div style='font-size:20px;font-weight:700;color:#38bdf8;'>89%</div><div style='font-size:11px;color:#94a3b8;margin-top:4px;'>recovering from 78% dip</div></div><div style='background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:10px;padding:14px;'><div style='font-size:10px;color:#c4b5fd;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;'>Incident Level</div><div style='font-size:20px;font-weight:700;color:#a78bfa;'>SEV-2</div><div style='font-size:11px;color:#94a3b8;margin-top:4px;'>next checkpoint in 12 min</div></div></div><div style='display:flex;gap:8px;'><button data-send-message='Approve: close incident' style='flex:1;padding:10px 16px;border-radius:8px;border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.15);color:#6ee7b7;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;'>✓ Close Incident</button><button data-send-message='Request: extend monitoring 30 min' style='flex:1;padding:10px 16px;border-radius:8px;border:1px solid rgba(251,191,36,0.4);background:rgba(251,191,36,0.15);color:#fcd34d;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;'>⏱ Extend Monitor</button><button data-send-message='Execute rollback now' style='flex:1;padding:10px 16px;border-radius:8px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.15);color:#fca5a5;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;'>↩ Rollback</button></div></div>\"}"
+        }
+      ]
+    },
+    {
+      "agentId": "ag-release-guardian",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 3,
+          "createdAt": "2025-09-24T07:12:00.000Z",
+          "content": "**Agent asks:** Execute hotfix branch `checkout-timeout-guard`?\n\n**Short summary:** Regression likely from retry loop in payment callback.\n\n**Options**\n1. Roll back release\n2. Apply 3-line guard + redeploy\n3. Keep current build\n\n**Recommendation:** 2 now, rollback if p95 stays above 1.4s after 10 minutes."
+        },
+        {
+          "role": "user",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:13:00.000Z",
+          "content": "Proceed with option 2 and include exact rollback command in notes."
+        },
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:16:00.000Z",
+          "content": "Hotfix deployed to staging, prod rollout started. Rollback command documented and ready if latency alarm stays red."
+        }
+      ]
+    },
+    {
+      "agentId": "ag-ops-sentinel",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 3,
+          "createdAt": "2025-09-24T07:14:00.000Z",
+          "content": "**Agent asks:** Raise incident level to SEV-2?\n\n**Short summary:** Checkout p95 moved from 640ms to 1.8s; error rate trending up.\n\n**Options**\n1. SEV-2 now\n2. Keep at warning and observe\n3. Pause metrics alerts\n\n**Recommendation:** 1 now to keep all teams synchronized."
+        },
+        {
+          "role": "user",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:15:00.000Z",
+          "content": "Open SEV-2 and send a 15-minute checkpoint cadence."
+        },
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:15:30.000Z",
+          "content": "SEV-2 opened. Next updates at :15 / :30 / :45 with p95 latency, error rate, and conversion impact."
+        }
+      ]
+    },
+    {
+      "agentId": "ag-customer-comms",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:15:00.000Z",
+          "content": "**Agent asks:** Publish customer incident update now?\n\n**Short summary:** We can acknowledge degraded checkout and set expectation on recovery window.\n\n**Options**\n1. Publish now\n2. Wait for full fix\n3. Post internal-only note\n\n**Recommendation:** 1 now with concise language and next update time."
+        },
+        {
+          "role": "user",
+          "priority": 1,
+          "createdAt": "2025-09-24T07:15:30.000Z",
+          "content": "Publish now. Keep tone direct and avoid technical jargon."
+        },
+        {
+          "role": "assistant",
+          "priority": 1,
+          "createdAt": "2025-09-24T07:16:00.000Z",
+          "content": "Posted: 'Some users may see slower checkout. We are actively fixing it and will update in 15 minutes.'"
+        }
+      ]
+    },
+    {
+      "agentId": "ag-revenue-watch",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:10:00.000Z",
+          "content": "**Agent asks:** Trigger conversion protection mode?\n\n**Short summary:** Checkout completion fell 11% in the last 20 minutes.\n\n**Options**\n1. Protect high-intent carts with retry banner\n2. Do nothing\n3. Pause paid traffic\n\n**Recommendation:** 1 now, evaluate paid traffic in next checkpoint."
+        },
+        {
+          "role": "user",
+          "priority": 1,
+          "createdAt": "2025-09-24T07:11:00.000Z",
+          "content": "Enable option 1 and show me conversion recovery trend each checkpoint."
+        }
+      ]
+    },
+    {
+      "agentId": "ag-qa-scout",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:23:00.000Z",
+          "content": "**Agent asks:** Start focused regression pass after hotfix?\n\n**Short summary:** Hotfix is in progress; we can validate critical user paths in parallel.\n\n**Options**\n1. Run checkout + payment smoke tests\n2. Full suite\n3. Skip testing\n\n**Recommendation:** 1 immediately, then full suite after incident closes."
+        },
+        {
+          "role": "user",
+          "priority": 1,
+          "createdAt": "2025-09-24T07:23:30.000Z",
+          "content": "Run option 1 now and report any blocker in the incident channel."
+        }
+      ]
+    },
+    {
+      "agentId": "ag-docs-runner",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:25:00.000Z",
+          "content": "**Agent asks:** Should I draft the postmortem while incident is active?\n\n**Short summary:** Capturing timeline now will reduce handoff errors later.\n\n**Options**\n1. Draft timeline now\n2. Wait until resolved\n3. Skip documentation\n\n**Recommendation:** 1 now and update as checkpoints arrive."
+        },
+        {
+          "role": "user",
+          "priority": 1,
+          "createdAt": "2025-09-24T07:26:00.000Z",
+          "content": "Start the timeline now. Include decisions, owners, and exact timestamps."
+        }
+      ]
+    },
+    {
+      "agentId": "ag-news-watch",
+      "messages": [
+        {
+          "role": "assistant",
+          "priority": 2,
+          "createdAt": "2025-09-24T07:08:00.000Z",
+          "content": "**Agent asks:** Monitor external dependencies for related outages?\n\n**Short summary:** Payment gateway status is currently green, but we should watch for correlated issues.\n\n**Options**\n1. Watch and alert only if ship-impacting\n2. Alert on every update\n3. Disable monitoring\n\n**Recommendation:** 1 to reduce noise while incident is active."
+        }
+      ]
+    }
+  ]
+}

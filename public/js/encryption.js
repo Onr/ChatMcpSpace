@@ -16,6 +16,44 @@ const ENCRYPTION_STORAGE_KEY = 'encryptionKey';
 const LEGACY_ENCRYPTION_STORAGE_KEY = 'encryptionKey';
 const BASE64_CHUNK_SIZE = 0x8000;
 
+function encryptionSalt() {
+  if (typeof document === 'undefined') return null;
+  const salt = document.getElementById('dashboardRoot')?.getAttribute('data-encryption-salt') || window.apiGuideConfig?.encryptionSalt;
+  if (salt) return salt;
+  try { return JSON.parse(document.getElementById('mcp-config')?.textContent || '{}').encryptionSalt || null; }
+  catch (_) { return null; }
+}
+
+function encryptionStorageKey() {
+  const salt = encryptionSalt();
+  return salt ? `${ENCRYPTION_STORAGE_KEY}:${salt}` : ENCRYPTION_STORAGE_KEY;
+}
+
+async function matchesCiphertext(key, samples) {
+  for (const sample of samples.slice(0, 6)) {
+    try {
+      const [iv, tag, body] = String(sample).split(':').map(base64ToUint8Array);
+      const bytes = new Uint8Array(body.length + tag.length);
+      bytes.set(body); bytes.set(tag, body.length);
+      await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, bytes);
+      return true;
+    } catch (_) { /* Another historical key or malformed ciphertext. */ }
+  }
+  return false;
+}
+
+async function encryptionSamples() {
+  const response = await fetch('/api/user/encryption-samples', { credentials: 'same-origin', cache: 'no-store' });
+  if (!response.ok) throw new Error('Could not check message encryption. Refresh the page and try again.');
+  const data = await response.json();
+  return Array.isArray(data.samples) ? data.samples.slice(0, 6) : [];
+}
+
+async function verifyMessageKey(key) {
+  const samples = await encryptionSamples();
+  return samples.length === 0 || matchesCiphertext(key, samples);
+}
+
 function uint8ArrayToBase64(bytes) {
   if (!(bytes instanceof Uint8Array)) {
     bytes = new Uint8Array(bytes || []);
@@ -172,8 +210,8 @@ async function storeEncryptionKey(key) {
   // Export key for storage
   const exported = await window.crypto.subtle.exportKey('raw', key);
   const keyBase64 = uint8ArrayToBase64(new Uint8Array(exported));
-  localStorage.setItem(ENCRYPTION_STORAGE_KEY, keyBase64);
-  sessionStorage.setItem(LEGACY_ENCRYPTION_STORAGE_KEY, keyBase64);
+  localStorage.setItem(encryptionStorageKey(), keyBase64);
+  sessionStorage.setItem(encryptionStorageKey(), keyBase64);
   window.dispatchEvent(new Event('encryption:unlocked'));
 }
 
@@ -181,8 +219,17 @@ async function storeEncryptionKey(key) {
  * Retrieve encryption key from session storage
  * @returns {Promise<CryptoKey|null>} Stored encryption key or null
  */
-async function getStoredEncryptionKey() {
-  const keyBase64 = localStorage.getItem(ENCRYPTION_STORAGE_KEY) || sessionStorage.getItem(LEGACY_ENCRYPTION_STORAGE_KEY);
+async function getStoredEncryptionKey({ extractable = false } = {}) {
+  const storageKey = encryptionStorageKey();
+  let keyBase64 = localStorage.getItem(storageKey) || sessionStorage.getItem(storageKey);
+  let migrate = false;
+  if (!keyBase64 && storageKey !== ENCRYPTION_STORAGE_KEY) {
+    // An unscoped legacy key may belong to somebody else who used this browser.
+    // Migrate it only after it decrypts a ciphertext owned by the currently
+    // authenticated account. An account without messages cannot inherit it.
+    keyBase64 = localStorage.getItem(ENCRYPTION_STORAGE_KEY) || sessionStorage.getItem(LEGACY_ENCRYPTION_STORAGE_KEY);
+    migrate = Boolean(keyBase64);
+  }
   if (!keyBase64) {
     return null;
   }
@@ -195,10 +242,14 @@ async function getStoredEncryptionKey() {
         name: ENCRYPTION_PARAMS.algorithm,
         length: ENCRYPTION_PARAMS.keyLength
       },
-      false,
+      extractable === true,
       ['encrypt', 'decrypt']
     );
-    sessionStorage.setItem(LEGACY_ENCRYPTION_STORAGE_KEY, keyBase64);
+    if (migrate) {
+      if (!await matchesCiphertext(key, await encryptionSamples())) return null;
+      localStorage.setItem(storageKey, keyBase64);
+    }
+    sessionStorage.setItem(storageKey, keyBase64);
     return key;
   } catch (error) {
     console.error('Failed to retrieve stored key:', error);
@@ -210,8 +261,21 @@ async function getStoredEncryptionKey() {
  * Clear stored encryption key
  */
 function clearEncryptionKey() {
-  localStorage.removeItem(ENCRYPTION_STORAGE_KEY);
-  sessionStorage.removeItem(LEGACY_ENCRYPTION_STORAGE_KEY);
+  const storageKey = encryptionStorageKey();
+  const current = localStorage.getItem(storageKey) || sessionStorage.getItem(storageKey);
+  localStorage.removeItem(storageKey);
+  sessionStorage.removeItem(storageKey);
+  // Remove a legacy copy of this same key without clearing another account.
+  if (current && localStorage.getItem(ENCRYPTION_STORAGE_KEY) === current) localStorage.removeItem(ENCRYPTION_STORAGE_KEY);
+  if (current && sessionStorage.getItem(LEGACY_ENCRYPTION_STORAGE_KEY) === current) sessionStorage.removeItem(LEGACY_ENCRYPTION_STORAGE_KEY);
+}
+
+async function createAgentConnectionCode() {
+  const salt = encryptionSalt();
+  const key = await getStoredEncryptionKey({ extractable: true });
+  if (!key || !salt) throw new Error('Set your message encryption password in Settings first, then copy the connection code.');
+  const raw = await window.crypto.subtle.exportKey('raw', key);
+  return 'JETSPACE1.' + btoa(JSON.stringify({ version: 1, salt, key: uint8ArrayToBase64(new Uint8Array(raw)) }));
 }
 
 // ============================================================================
@@ -454,6 +518,9 @@ function deserializeEncryptedBinary(serializedData) {
 
 // Export functions
 window.E2EEncryption = {
+  verifyMessageKey,
+  encryptionStorageKey,
+  createAgentConnectionCode,
   // Text encryption (existing)
   deriveKey,
   encryptMessage,

@@ -548,4 +548,18 @@ describe('Mobile layout regression guards', () => {
     expect(js).not.toMatch(/shouldAutoLoadOlderMessages/);
     expect(js).toMatch(/convArea\.scrollTop > 300\) return;[\s\S]*?loadOlderMessagesInBackground\(selectedAgentId,\s*null\);/);
   });
+
+  it('keeps mobile browser bars dark on every standalone page, even before CSS loads', () => {
+    expect(layout).toContain('<meta name="theme-color" content="#020617">');
+    expect(layout).toContain('<meta name="color-scheme" content="dark">');
+    expect(layout).toMatch(/<style>[\s\S]*?html \{ background-color: #020617; color-scheme: dark; \}/);
+    expect(css).toMatch(/body \{[^}]*background-color: #020617;/);
+    for (const view of ['error', 'archive', 'for-agents', 'guest-shared']) {
+      const html = fs.readFileSync(path.join(__dirname, `../../views/${view}.ejs`), 'utf8');
+      expect(html).toContain('<meta name="theme-color" content="#020617">');
+      expect(html).toContain('<meta name="color-scheme" content="dark">');
+    }
+    const errorPage = fs.readFileSync(path.join(__dirname, '../../views/error.ejs'), 'utf8');
+    expect(errorPage).not.toMatch(/bg-gray-50|bg-white/);
+  });
 });

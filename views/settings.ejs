@@ -1,3 +1,4 @@
+<link rel="stylesheet" href="<%= assetUrl('/css/agent-brief.css') %>">
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
   <% const mfaEnabledSafe = typeof mfaEnabled !== 'undefined' && mfaEnabled === true; %>
   <div class="space-y-8">
@@ -30,10 +31,18 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <!-- Left Column -->
           <div class="lg:col-span-2 space-y-8">
+            <section class="glass-panel p-6" aria-labelledby="agentIdentitySettingsHeading">
+              <h2 id="agentIdentitySettingsHeading" class="text-xl font-semibold text-slate-100">Agents: identity &amp; goals</h2>
+              <p class="mt-2 text-sm text-slate-400">Edit each agent's role, goals and activity policy. Automatic work is off until explicitly available and enabled.</p>
+              <button type="button" id="agentBriefPauseAll" class="agent-brief-entry mt-3">Pause all proactive work</button>
+              <span id="agentBriefPauseAllStatus" class="ml-2 text-sm text-slate-400" role="status"></span>
+              <div id="agentBriefSettingsList" class="agent-brief-settings-list mt-4" aria-live="polite">Loading agents…</div>
+            </section>
 
-            <section class="glass-panel p-6" aria-labelledby="externalAgentsHeading">
+            <section id="existing-agent-setup" class="glass-panel p-6" aria-labelledby="externalAgentsHeading">
               <h2 id="externalAgentsHeading" class="text-xl font-semibold text-slate-100">Bring your own agent</h2>
               <p class="mt-2 text-sm text-slate-400">Connect an agent running elsewhere. Message it here, receive its replies, and let it collaborate with your other agents or a central coordinator.</p>
+              <p class="mt-3 text-sm text-slate-300">New here? <a href="/for-agents" class="text-emerald-300 underline">Let your agent check compatibility and guide setup</a>. Approval creates an identity; confirm a reply before treating it as connected.</p>
               <div class="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
                   <label for="externalAgentProvider" class="block text-sm text-slate-200">Agent type</label>
@@ -70,7 +79,7 @@
               <div class="border-b border-slate-700/50 pb-4 mb-6">
                 <h2 class="text-xl font-semibold text-slate-100">API Configuration</h2>
                 <p class="mt-1 text-sm text-slate-400">Your secret key for authenticating AI agents</p>
-                <p class="mt-2 text-sm text-slate-300">Connect your tools with the <a href="/mcp-guide" class="text-emerald-400 underline">ChatMCP MCP server</a>.</p>
+                <p class="mt-2 text-sm text-slate-300">Connect an AI app through the <a href="/architecture#connect-mcp" class="text-emerald-400 underline">ChatMCP MCP server setup instructions</a> to read and send messages and files. Approve an agent and unlock once for always-on access.</p>
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                   <code id="mcpServerAddress" class="rounded-lg bg-slate-900 px-3 py-2 text-sm break-all"><%= String(baseUrl).replace(/\/+$/, '') %>/mcp</code>
                   <button type="button" id="copyMcpAddress" class="settings-copy-button">Copy MCP address</button>
@@ -156,7 +165,7 @@
             </details>
 
             <!-- Main CLI Setup Section -->
-            <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.15s;">
+            <div id="cli-setup" class="glass-panel p-6 slide-in-up" style="animation-delay: 0.15s;">
               <div class="border-b border-slate-700/50 pb-4 mb-6">
                 <div>
                   <h2 class="text-xl font-semibold text-slate-100 flex items-center gap-3">
@@ -559,6 +568,13 @@
                   class="text-sm text-red-400 hover:text-red-300 font-medium transition-colors focus:outline-none hover:underline">
                   Clear Saved Encryption Key
                 </button>
+                <div class="space-y-2 border-t border-slate-700/50 pt-4">
+                  <button id="copyAgentConnectionCodeBtn" type="button"
+                    class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-50">
+                    Copy Agent Connection Code
+                  </button>
+                  <p class="text-xs text-slate-400">Use this code in Windows setup to match this browser's message encryption. Treat it like a password: paste it only into your trusted local Jetspace installer, never into chat.</p>
+                </div>
               </div>
             </div>
 
@@ -588,8 +604,12 @@
                   </h3>
                   <dl class="space-y-2.5">
                     <div class="flex items-center justify-between gap-3">
-                      <dt class="text-xs text-slate-400">Cycle focus (Council → List → Chat)</dt>
+                      <dt class="text-xs text-slate-400">Move between controls (Shift+Tab to go back)</dt>
                       <dd class="shrink-0"><kbd class="settings-kbd">Tab</kbd></dd>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                      <dt class="text-xs text-slate-400">Switch council / list navigation</dt>
+                      <dd class="shrink-0"><kbd class="settings-kbd">Alt+J</kbd></dd>
                     </div>
                     <div class="flex items-center justify-between gap-3">
                       <dt class="text-xs text-slate-400">Move between agents</dt>
@@ -771,6 +791,7 @@
 <script src="<%= assetUrl('/js/encryption.js') %>"></script>
 <script src="<%= assetUrl('/js/voice-control.js') %>"></script>
 <script src="<%= assetUrl('/js/settings.js') %>"></script>
+<script src="<%= assetUrl('/js/agent-brief.js') %>"></script>
 <script src="<%= assetUrl('/js/external-agent-setup.js') %>"></script>
 
 <%- include('partials/cos-install-modal') %>

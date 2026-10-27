@@ -21,6 +21,7 @@ test.each(['codex', 'default'])('%s saves selected effort in the agent config re
     document, window: { csrfToken: 'test' }, console,
     saveConfigBtn: { addEventListener: (_, fn) => { callback = fn; } },
     configProvider: { value: provider }, configDropdown: null,
+    loadedAgentConfigs: new Map(),
     getResolvedSelectedAgentName: () => 'Agent', csrfFetch, loadAgentConfig,
     showSuccessMessage: jest.fn(), showErrorMessage
   });

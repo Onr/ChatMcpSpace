@@ -1,5 +1,6 @@
 <% const inPlaceSharingEnabled = typeof featureInPlaceAgentSharing === 'boolean' ? featureInPlaceAgentSharing : process.env.FEATURE_IN_PLACE_AGENT_SHARING === 'true'; %>
 <link rel="stylesheet" href="<%= assetUrl('/css/agent-actions.css') %>">
+<link rel="stylesheet" href="<%= assetUrl('/css/agent-brief.css') %>">
 <%- include('partials/agent-actions', { inPlaceSharingEnabled }) %>
 <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && inPlaceSharingEnabled) { %>
 <link rel="stylesheet" href="<%= assetUrl('/css/in-place-sharing.css') %>">
@@ -209,6 +210,7 @@
                 </div>
             </div>
 
+            <div class="council-chat-shortcuts">
             <!-- Group Back Button (shown in group zoom view, placed below the council header divider) -->
             <button id="groupBackBtn"
                 class="hidden relative group-back-btn z-30 self-start ml-6 mt-3 flex items-center backdrop-blur-sm"
@@ -220,6 +222,18 @@
                 </span>
                 <span id="groupBackLabel">Back</span>
             </button>
+            <div class="recent-chats-panel" title="Recent chats · Last 3 opened, newest to oldest">
+                <div class="recent-chats-heading">
+                    <svg class="recent-chats-heading__icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+                        <circle cx="8" cy="8" r="5.75" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 5v3.25l2.25 1.25" />
+                    </svg>
+                    <span id="recentChatsTitle">Recent<span class="sr-only"> chats</span></span>
+                    <span id="recentChatsHint" class="sr-only">Last 3 opened · Newest first</span>
+                </div>
+                <nav id="recentChats" class="recent-chats" aria-labelledby="recentChatsTitle" aria-describedby="recentChatsHint" hidden></nav>
+            </div>
+            </div>
 
             <!-- Circular Agent Display -->
             <div id="councilCircle" class="flex-1 flex items-center justify-center p-8 min-h-0 relative">
@@ -387,7 +401,7 @@
                             <% }); %>
                                 <% } else { %>
                                     <div class="absolute inset-0 flex items-center justify-center">
-                                        <div class="text-center text-slate-500">
+                                        <div class="council-empty-state text-center text-slate-400">
                                             <svg class="w-16 h-16 mx-auto mb-4 text-slate-600 opacity-50" fill="none"
                                                 stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -397,6 +411,7 @@
                                                 council yet</p>
                                             <p class="text-xs text-slate-600 mt-1">Agents will appear here once
                                                 they connect</p>
+                                            <a class="workspace-setup-link" href="/for-agents">Connect your first agent →</a>
                                         </div>
                                     </div>
                                     <% } %>
@@ -406,7 +421,7 @@
                 <!-- Keyboard Hints -->
                 <div class="absolute bottom-4 left-0 right-0 text-center pointer-events-none">
                     <p class="text-[10px] text-slate-500 font-medium tracking-wide uppercase opacity-60">
-                        <span class="mx-1"><kbd class="font-sans">Tab</kbd> switch view</span>
+                        <span class="mx-1"><kbd class="font-sans">Alt+J</kbd> switch view</span>
                         <span class="mx-1">•</span>
                         <span class="mx-1"><kbd class="font-sans">←/→</kbd> or <kbd class="font-sans">J/K</kbd> to
                             move</span>
@@ -460,30 +475,31 @@
                                 <p class="text-slate-400">Active Agents</p>
                             </button>
                         </div>
-                        <div>
-                            <p class="text-amber-400 font-bold text-lg" id="statsAttention">
-                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
-                            </p>
-                            <p class="text-slate-400">Need Attention</p>
+                        <div class="flex items-center justify-center">
+                            <button type="button" id="statsFilterAttentionBtn" data-agent-status-filter="attention" aria-pressed="false"
+                                class="agent-status-filter-btn px-1.5 py-0.5 rounded-lg text-center"
+                                title="Filter by agents needing attention">
+                                <p class="text-amber-400 font-bold text-lg" id="statsAttention">
+                                    <%= agents ? agents.filter(a=> a.lastMessagePriority === 'normal').length : 0 %>
+                                </p>
+                                <p class="text-slate-400">Need Attention</p>
+                            </button>
                         </div>
-                        <div>
-                            <p class="text-red-400 font-bold text-lg" id="statsUrgent">
-                                <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
-                            </p>
-                            <p class="text-slate-400">Urgent</p>
+                        <div class="flex items-center justify-center">
+                            <button type="button" id="statsFilterUrgentBtn" data-agent-status-filter="urgent" aria-pressed="false"
+                                class="agent-status-filter-btn px-1.5 py-0.5 rounded-lg text-center"
+                                title="Filter by urgent agents">
+                                <p class="text-red-400 font-bold text-lg" id="statsUrgent">
+                                    <%= agents ? agents.filter(a=> a.lastMessagePriority === 'high').length : 0 %>
+                                </p>
+                                <p class="text-slate-400">Urgent</p>
+                            </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Agent List Panel (scrollable list below orbit) -->
                 <div id="agentListPanel" class="agent-list-panel">
-                    <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && inPlaceSharingEnabled) { %>
-                    <section id="sharedConversationSection" hidden aria-label="Shared conversations">
-                        <div class="shared-conversation-heading"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M22 21v-2a4 4 0 00-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 010 7.75"/></svg><h2>Shared with you</h2><span id="sharedConversationCount">0</span></div>
-                        <div id="incomingSharingInvitations" class="space-y-1"></div>
-                        <div id="sharedConversationList" class="space-y-1"></div>
-                    </section>
-                    <% } %>
                     <div class="agent-list-header flex items-center justify-between">
                         <div class="agent-list-header__meta agent-list-filter-pills flex items-center gap-1.5" role="group" aria-label="Filter agent list by total or active">
                             <button type="button" class="agent-list-filter-pill is-active" data-agent-status-filter="all" aria-pressed="true" title="Show all agents">
@@ -601,9 +617,17 @@
                         <% }); } else { %>
                             <div class="agent-list-empty">
                                 <p>No agents connected</p>
+                                <a class="workspace-setup-link" href="/for-agents">Connect an agent →</a>
                             </div>
                             <% } %>
                     </div>
+                    <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && inPlaceSharingEnabled) { %>
+                    <section id="sharedConversationSection" hidden aria-label="Shared conversations">
+                        <div class="shared-conversation-heading"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M22 21v-2a4 4 0 00-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 010 7.75"/></svg><h2>Shared with you</h2><span id="sharedConversationCount">0</span></div>
+                        <div id="incomingSharingInvitations" class="space-y-1"></div>
+                        <div id="sharedConversationList" class="space-y-1"></div>
+                    </section>
+                    <% } %>
                 </div>
             </div>
 
@@ -669,6 +693,13 @@
                                 </div>
                             </div>
                             <p id="agentLastActive" class="text-xs text-slate-400 mt-0.5"></p>
+                            <div class="agent-brief-header-status">
+                                <button type="button" id="agentBriefRole" data-open-agent-brief data-quick-brief="role" aria-label="Edit agent role">Set a role</button>
+                                <span aria-hidden="true">·</span>
+                                <button type="button" id="agentBriefGoal" data-open-agent-brief data-quick-brief="goal" aria-label="Edit active goal">Set a goal</button>
+                                <button type="button" id="agentBriefProactive" data-open-agent-brief data-brief-tab="policy">Proactive: Off</button>
+                                <button type="button" id="agentBriefOpen" data-open-agent-brief class="agent-brief-entry">Identity &amp; goals</button>
+                            </div>
 
                             <!-- Context Menu (Floating) -->
                             <div id="agentContextMenu"
@@ -699,6 +730,7 @@
         </svg>
         Copy name
     </button>
+    <button type="button" data-open-agent-brief class="w-full px-4 py-3 text-left text-xs text-cyan-300 hover:bg-cyan-900/30 border-b border-slate-700/50">Edit identity &amp; goals</button>
     <button id="updateAgentBtn" type="button" hidden
         class="hidden w-full px-4 py-3 text-left text-xs text-cyan-300 hover:bg-cyan-900/30 hover:text-cyan-200 transition-colors flex items-center gap-2 border-b border-slate-700/50">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -742,6 +774,7 @@
                                     </svg>
                                     Delete Agent
                                 </button>
+                                <div class="agent-menu-groups" data-agent-groups></div>
                             </div>
                         </div>
                         <div class="chat-header__actions">
@@ -767,14 +800,14 @@
 
                 <!-- Placeholder -->
                 <div id="agentPanelPlaceholder" class="flex-1 flex items-center justify-center p-6">
-                    <div class="text-center text-slate-500">
+                    <div class="workspace-welcome text-center text-slate-400">
                         <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor"
                             viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p class="text-sm font-semibold">Select an agent from the council</p>
-                        <p class="text-xs text-slate-600 mt-1">Click on any agent to view their messages</p>
+                        <h2 class="workspace-welcome__title">Your agents. One conversation away.</h2>
+                        <p class="workspace-welcome__description">Choose an agent from the circles or the agent list to open a chat. Conversations shared with you are in the same list.</p>
                         <!-- Fast-mode mobile: visible button to open chats list -->
                         <button id="fastModePlaceholderOpenChats" type="button"
                             class="fast-mode-placeholder-open-chats"
@@ -782,6 +815,18 @@
                             <%- include('partials/agent-list-icon') %>
                             Open Chats
                         </button>
+                        <div class="workspace-welcome__paths" aria-label="Agent setup options">
+                            <a href="/for-agents" class="workspace-welcome__path">
+                                <strong>Bring your agent</strong>
+                                <span>Let an existing agent check compatibility and guide you.</span>
+                                <span class="workspace-welcome__action">Connect an existing agent →</span>
+                            </a>
+                            <a href="/settings#cli-setup" class="workspace-welcome__path">
+                                <strong>Set up on your computer</strong>
+                                <span>Create and run agents with the CLI on your machine.</span>
+                                <span class="workspace-welcome__action">Open computer setup →</span>
+                            </a>
+                        </div>
                     </div>
                 </div>
 
@@ -1825,7 +1870,10 @@
 <script src="<%= assetUrl('/js/in-place-chat.js') %>"></script>
 <% } %>
 <script src="<%= assetUrl('/js/device-badge.js') %>"></script>
+<link rel="stylesheet" href="<%= assetUrl('/css/recent-chats.css') %>">
+<script src="<%= assetUrl('/js/recent-chats.js') %>"></script>
 <script src="<%= assetUrl('/js/dashboard.js') %>"></script>
+<script src="<%= assetUrl('/js/agent-brief.js') %>"></script>
 <script src="<%= assetUrl('/js/multi-chat.js') %>"></script>
 <% if (process.env.FEATURE_SHARED_CONVERSATIONS === 'true' && inPlaceSharingEnabled) { %>
 <script src="<%= assetUrl('/js/chat-history-import.js') %>"></script>

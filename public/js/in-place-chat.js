@@ -154,7 +154,6 @@
         const context = await contextResponse.json();
         setContext(context);
         await root.DashboardHelpers?.selectChatContext?.(context);
-        root.history.replaceState({}, '', `?conversationId=${encodeURIComponent(context.conversationId)}`);
         await refreshList();
       } catch (error) {
         feedback.hidden = false;
@@ -805,6 +804,7 @@
       if (!response.ok) { section.hidden = true; return; }
       const allContexts = await response.json();
       root.CouncilSharing?.updateContexts(allContexts);
+      root.RecentChats?.updateContexts(allContexts);
       const selectedContext = root.DashboardHelpers?.getSelectedChatContext?.();
       if (selectedContext?.state === 'preparing' && !preparingContextRefresh) {
         const latest = allContexts.find(item => item.agentId === selectedContext.agentId && item.role === 'owner');
@@ -855,7 +855,6 @@
             if (!contextResponse.ok) throw new Error('The invited conversation is unavailable.');
             const context = await contextResponse.json();
             await root.DashboardHelpers?.selectChatContext?.(context);
-            root.history.replaceState({}, '', `?conversationId=${encodeURIComponent(context.conversationId)}`);
             await refreshList();
           } catch (error) { join.disabled = false; feedback.hidden = false; feedback.textContent = error.message; }
         });
@@ -911,7 +910,6 @@
             const context = await current.json();
             if (root.DashboardHelpers?.selectChatContext) await root.DashboardHelpers.selectChatContext(context);
             if (root.innerWidth < 1024) root.setMobileListExpanded?.(false, { skipBrowserHistory: true });
-            root.history.replaceState({}, '', `?conversationId=${encodeURIComponent(context.conversationId)}`);
             await refreshList();
           } catch (error) { feedback.textContent = error.message; feedback.hidden = false; }
           finally { button.disabled = false; status.textContent = statusText; }
@@ -1054,10 +1052,11 @@
     });
     startMaintenance();
     void refreshList();
-    if (!root.dashboardReady) await new Promise(resolve => root.addEventListener('dashboard:ready', resolve, { once: true }));
     const entryEpoch = contextEpoch;
+    if (!root.dashboardReady) await new Promise(resolve => root.addEventListener('dashboard:ready', resolve, { once: true }));
     const conversationId = new URLSearchParams(location.search).get('conversationId');
     const invitationId = new URLSearchParams(location.search).get('invitationId');
+    if ((conversationId || invitationId) && entryEpoch !== contextEpoch) return;
     if (!conversationId && !invitationId && entryEpoch === contextEpoch) {
       const selected = root.DashboardHelpers?.getSelectedAgentIdentity?.();
       if (selected?.agentId && selected.mode !== 'shared' && selected.role === 'owner' && selected.agentType !== 'news_feed') {

@@ -33,7 +33,7 @@ function toQueryRunner(client) {
   return (text, params) => query(text, params);
 }
 
-async function issueScopedCredential({ agentId, scopes = [], expiresAt = null, rotatedFrom = null, client = null }) {
+async function issueScopedCredential({ agentId, scopes = [], expiresAt = null, rotatedFrom = null, mcpGrantId = null, client = null }) {
   const run = toQueryRunner(client);
   const rawToken = generateAgentToken();
   const tokenHash = hashToken(rawToken);
@@ -42,10 +42,10 @@ async function issueScopedCredential({ agentId, scopes = [], expiresAt = null, r
 
   const result = await run(
     `INSERT INTO agent_api_credentials
-      (agent_id, token_hash, token_prefix, scopes_json, expires_at, rotated_from)
-     VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+      (agent_id, token_hash, token_prefix, scopes_json, expires_at, rotated_from, mcp_grant_id)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
      RETURNING credential_id, created_at`,
-    [agentId, tokenHash, tokenPrefix, JSON.stringify(normalizedScopes), expiresAt, rotatedFrom]
+    [agentId, tokenHash, tokenPrefix, JSON.stringify(normalizedScopes), expiresAt, rotatedFrom, mcpGrantId]
   );
 
   return {
@@ -78,6 +78,7 @@ async function verifyScopedCredential(rawToken) {
       c.scopes_json,
       c.expires_at,
       c.revoked_at,
+      c.mcp_grant_id,
       a.agent_name,
       a.user_id,
       u.email,
@@ -98,6 +99,11 @@ async function verifyScopedCredential(rawToken) {
   }
 
   const row = result.rows[0];
+  if (row.mcp_grant_id) {
+    const grant = await query(`SELECT 1 FROM mcp_oauth_tokens
+      WHERE grant_id=$1 AND revoked_at IS NULL AND refresh_expires_at > NOW() LIMIT 1`, [row.mcp_grant_id]);
+    if (!grant.rows.length) return null;
+  }
   return {
     credentialId: row.credential_id,
     agentId: row.agent_id,

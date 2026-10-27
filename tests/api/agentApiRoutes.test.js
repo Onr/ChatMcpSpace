@@ -4,11 +4,16 @@ const { v4: uuidv4 } = require('uuid');
 
 const { createTestDatabase, applyRuntimeUserColumns, seedUser, applyArchiveSchema, applyLineageSchema } = require('../utils/pgMemTestUtils');
 
-async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
+async function createAgentApiTestContext({ scopedAgentId = null, scopedContext = null, storage = null, encryptionSalt = null } = {}) {
   jest.resetModules();
 
   const { db, pool, query } = createTestDatabase();
   db.public.registerFunction({ name: 'current_schema', returns: 'text', implementation: () => 'public' });
+  db.public.registerFunction({ name: 'date_trunc', args: ['text', 'timestamp'], returns: 'timestamp',
+    implementation: (unit, value) => {
+      if (unit !== 'milliseconds') throw new Error('Unexpected timestamp unit in history fixture');
+      return new Date(value);
+    } });
   await applyRuntimeUserColumns(query);
   await applyArchiveSchema(query);
   const { userId } = await seedUser(query);
@@ -34,8 +39,8 @@ async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
 
   jest.doMock('../../src/middleware/authMiddleware', () => ({
     requireApiKey: (req, _res, next) => {
-      req.user = { userId };
-      req.authContext = scopedAgentId ? { type: 'agent_token', agentId: scopedAgentId } : { type: 'api_key' };
+      req.user = { userId, encryptionSalt };
+      req.authContext = scopedContext || (scopedAgentId ? { type: 'agent_token', agentId: scopedAgentId } : { type: 'api_key' });
       next();
     },
   }));
@@ -47,6 +52,8 @@ async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
         feedbackRateLimiter: (_req, _res, next) => next(),
       }));
 
+  if (storage) jest.doMock('../../src/storage', () => ({ initializeStorage: async () => storage }));
+  else jest.dontMock('../../src/storage');
   const agentApiRoutes = require('../../src/routes/agentApiRoutes');
   const app = express();
   app.use(express.json());
@@ -56,6 +63,69 @@ async function createAgentApiTestContext({ scopedAgentId = null } = {}) {
 }
 
 describe('Agent API routes', () => {
+  it('returns bounded encrypted samples, scoped to the agent for agent tokens', async () => {
+    const own = uuidv4(), other = uuidv4();
+    const f = await createAgentApiTestContext({ scopedAgentId: own });
+    try {
+      await applyLineageSchema(f.query);
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1),($4,$2,$5,2)', [own, f.userId, 'Own', other, 'Other']);
+      await f.query(`INSERT INTO user_messages(user_message_id,agent_id,content,encrypted) VALUES
+        ($1,$2,'own-cipher',TRUE),($3,$2,'own-plain',FALSE),($4,$5,'other-cipher',TRUE)`, [uuidv4(), own, uuidv4(), uuidv4(), other]);
+      const scoped = await request(f.app).get('/api/agent/encryption-samples').expect(200);
+      expect(scoped.headers['cache-control']).toBe('no-store');
+      expect(scoped.body.samples).toEqual(['own-cipher']);
+    } finally { await f.pool.end(); }
+    const account = await createAgentApiTestContext();
+    try {
+      await applyLineageSchema(account.query);
+      await account.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1),($4,$2,$5,2)', [own, account.userId, 'Own', other, 'Other']);
+      await account.query(`INSERT INTO user_messages(user_message_id,agent_id,content,encrypted) VALUES
+        ($1,$2,'own-cipher',TRUE),($3,$4,'other-cipher',TRUE)`, [uuidv4(), own, uuidv4(), other]);
+      const response = await request(account.app).get('/api/agent/encryption-samples').expect(200);
+      expect(response.body.samples.sort()).toEqual(['other-cipher', 'own-cipher']);
+    } finally { await account.pool.end(); }
+  });
+
+  it('accepts the runner plain-text decryption warning under a private execution lease', async () => {
+    const agentId = uuidv4();
+    const previous = process.env.FEATURE_IN_PLACE_AGENT_SHARING;
+    process.env.FEATURE_IN_PLACE_AGENT_SHARING = 'true';
+    const f = await createAgentApiTestContext({ scopedContext: { type: 'agent_token', agentId, agentName: 'Locked Out' } });
+    try {
+      const fs = require('fs'), path = require('path');
+      for (const migration of ['041_add_message_idempotency.sql', '042_add_shared_conversations.sql', '054_add_agent_chat_threads.sql']) {
+        await f.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations', migration), 'utf8'));
+      }
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'Locked Out']);
+      const runtimeId = uuidv4(), executionId = uuidv4();
+      await f.query("INSERT INTO shared_runtimes(agent_id,runtime_id,capabilities,execution_id,execution_kind,execution_uncertain) VALUES($1,$2,'{}',$3,'private',FALSE)", [agentId, runtimeId, executionId]);
+      await request(f.app).post('/api/agent/messages')
+        .set('x-shared-runtime', runtimeId).set('x-shared-private-execution', executionId)
+        .send({ agentName: 'Locked Out', encrypted: false, priority: 2, clientMessageId: uuidv4(), content: 'Locked Out is running but cannot read your message.' })
+        .expect(201);
+      const rows = (await f.query('SELECT content, encrypted FROM messages WHERE agent_id=$1', [agentId])).rows;
+      expect(rows).toEqual([{ content: 'Locked Out is running but cannot read your message.', encrypted: false }]);
+    } finally {
+      if (previous === undefined) delete process.env.FEATURE_IN_PLACE_AGENT_SHARING; else process.env.FEATURE_IN_PLACE_AGENT_SHARING = previous;
+      await f.pool.end();
+    }
+  });
+
+  it('returns the authenticated owner derivation salt for native recovery without re-enrollment', async () => {
+    const agentId = uuidv4(), encryptionSalt = Buffer.alloc(32, 3).toString('base64');
+    const f = await createAgentApiTestContext({ scopedAgentId: agentId, encryptionSalt });
+    try {
+      await applyLineageSchema(f.query);
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'EncryptionFixture']);
+      const response = await request(f.app).get('/api/agent/config?agentName=EncryptionFixture').expect(200);
+      expect(response.body).toMatchObject({ agentId, encryptionSalt });
+      expect(response.body.token).toBeUndefined();
+      expect(response.body.apiKey).toBeUndefined();
+      expect(response.body.password).toBeUndefined();
+      await request(f.app).get('/api/agent/config?agentName=MissingFixture').expect(404);
+      expect((await f.query('SELECT * FROM agent_api_credentials WHERE agent_id=$1', [agentId])).rows).toHaveLength(0);
+    } finally { await f.pool.end(); }
+  });
   it('enrolls an owned native runtime without shared conversations or broad account access', async () => {
     const f = await createAgentApiTestContext();
     const previous = process.env.FEATURE_SHARED_CONVERSATIONS;
@@ -84,6 +154,67 @@ describe('Agent API routes', () => {
     const f = await createAgentApiTestContext({ scopedAgentId: 'scoped-fixture' });
     try { await request(f.app).post('/api/agent/runtime-enroll').send({ agentName: 'Native Fixture' }).expect(403); }
     finally { await f.pool.end(); }
+  });
+
+  it('filters hidden and archived answers and pages same-timestamp history without skips', async () => {
+    const f = await createAgentApiTestContext();
+    try {
+      await f.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS hidden_from_agent BOOLEAN DEFAULT FALSE');
+      await f.query('ALTER TABLE user_messages ADD COLUMN IF NOT EXISTS hidden_from_agent BOOLEAN DEFAULT FALSE');
+      const agentId = uuidv4();
+      const ids = [1, 2, 3, 4, 5].map(n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`);
+      const at = new Date('2026-01-02T03:04:05.000Z');
+      await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'History Cursor']);
+      await f.query("INSERT INTO messages(message_id,agent_id,message_type,content,created_at) VALUES($1,$2,'message','first',$3),($4,$2,'message','second',$3)", [ids[0], agentId, at, ids[1]]);
+      await f.query('INSERT INTO user_messages(user_message_id,agent_id,content,created_at) VALUES($1,$2,$3,$4)', [ids[2], agentId, 'third', at]);
+      await f.query("INSERT INTO messages(message_id,agent_id,message_type,content,hidden_from_agent,created_at) VALUES($1,$2,'question','hidden',TRUE,$3),($4,$2,'question','archived',FALSE,$3)", [ids[3], agentId, at, ids[4]]);
+      await f.query('INSERT INTO user_responses(response_id,message_id,free_response,created_at) VALUES($1,$2,$3,$4),($5,$6,$7,$4)', [uuidv4(), ids[3], 'hidden answer', at, uuidv4(), ids[4], 'archived answer']);
+      await f.query("INSERT INTO archived_messages(message_id,agent_id,user_id,message_type) VALUES($1,$2,$3,'question')", [ids[4], agentId, f.userId]);
+
+      const firstPage = await request(f.app).get('/api/agent/messages/history')
+        .query({ agentName: 'History Cursor', limit: 2 }).expect(200);
+      expect(firstPage.body.messages.map(item => item.messageId)).toEqual([ids[1], ids[2]]);
+      const secondPage = await request(f.app).get('/api/agent/messages/history')
+        .query({ agentName: 'History Cursor', limit: 2, beforeId: ids[1] }).expect(200);
+      expect(secondPage.body.messages.map(item => item.messageId)).toEqual([ids[0]]);
+      const all = [...firstPage.body.messages, ...secondPage.body.messages];
+      expect(all.map(item => item.messageId)).toEqual([ids[1], ids[2], ids[0]]);
+      expect(JSON.stringify(all)).not.toContain('hidden answer');
+      expect(JSON.stringify(all)).not.toContain('archived answer');
+      for (const invisibleId of [ids[3], ids[4], uuidv4()]) {
+        await request(f.app).get('/api/agent/messages/history')
+          .query({ agentName: 'History Cursor', limit: 2, beforeId: invisibleId }).expect(400);
+      }
+    } finally { await f.pool.end(); }
+  });
+
+  it('delivers encrypted peer attachments and rechecks recipient permissions on each download', async () => {
+    const senderId = uuidv4(), recipientId = uuidv4(), attachmentId = uuidv4(), messageId = uuidv4();
+    const actor = { type: 'agent_token', agentId: senderId, agentName: 'File Sender', scopes: ['agent.dm.read', 'agent.attachments.read'] };
+    const encrypted = Buffer.from('encrypted-file-bytes');
+    const f = await createAgentApiTestContext({ scopedContext: actor, storage: { name: 'fixture', retrieve: async () => encrypted } });
+    try {
+      await f.query("INSERT INTO agents(agent_id,user_id,agent_name,position,inter_agent_mode) VALUES($1,$2,'File Sender',1,'listen_all'),($3,$2,'File Recipient',2,'listen_all')", [senderId, f.userId, recipientId]);
+      await f.query("INSERT INTO attachments(attachment_id,agent_id,content_type,file_name,size_bytes,storage_key,encrypted,iv_base64,auth_tag_base64,uploaded_by) VALUES($1,$2,'application/pdf','peer.pdf',$3,'fixture-key',TRUE,$4,$5,'agent')", [attachmentId, senderId, encrypted.length, Buffer.alloc(12).toString('base64'), Buffer.alloc(16).toString('base64')]);
+      const payload = { toAgentName: 'File Recipient', content: 'encrypted-peer-message', encrypted: true, clientMessageId: messageId, attachmentIds: [attachmentId] };
+      await request(f.app).post('/api/agent/messages/direct').set('X-Agent-Name', 'File Sender').send(payload).expect(201);
+      await request(f.app).post('/api/agent/messages/direct').set('X-Agent-Name', 'File Sender').send(payload).expect(200);
+      await request(f.app).post('/api/agent/messages/direct').set('X-Agent-Name', 'File Sender').send({ ...payload, attachmentIds: [] }).expect(409);
+      expect((await f.query('SELECT attachment_id FROM agent_message_attachments WHERE agent_message_id=$1', [messageId])).rows).toHaveLength(1);
+      actor.agentId = recipientId; actor.agentName = 'File Recipient';
+      const inbox = await request(f.app).get('/api/agent/messages/direct').set('X-Agent-Name', 'File Recipient').query({ markRead: false }).expect(200);
+      expect(inbox.body.messages[0].attachments[0]).toMatchObject({ attachmentId, contentType: 'application/pdf' });
+      const metadata = await request(f.app).get(`/api/agent/attachments/${attachmentId}/metadata`).expect(200);
+      expect(metadata.body.peerAgentId).toBe(senderId);
+      const file = await request(f.app).get(`/api/agent/attachments/${attachmentId}`).expect(200);
+      expect(file.body).toEqual(encrypted);
+      actor.scopes = ['agent.attachments.read'];
+      await request(f.app).get(`/api/agent/attachments/${attachmentId}/metadata`).expect(404);
+      actor.scopes.push('agent.dm.read');
+      await f.query("UPDATE agents SET inter_agent_mode='disabled' WHERE agent_id=$1", [senderId]);
+      await request(f.app).get(`/api/agent/attachments/${attachmentId}/metadata`).expect(404);
+      await request(f.app).get(`/api/agent/attachments/${attachmentId}`).expect(404);
+    } finally { await f.pool.end(); }
   });
 
   it('stores agent bug reports and feature requests as anonymous feedback', async () => {
@@ -815,5 +946,58 @@ describe('Agent API routes', () => {
     const expected = crypto.createHash('sha256').update(res.text, 'utf8').digest('hex');
     // Old clients ignore this header; new bootstrap clients verify it before chmod +x.
     expect(res.headers['x-script-sha256']).toBe(expected);
+  });
+
+  it('signals agentDeletedOrArchived when polling a deleted or archived agent and prevents re-creating archived agents', async () => {
+    const { app, query, pool, userId } = await createAgentApiTestContext();
+
+    // 1. Deleted/non-existent agent returns agentDeletedOrArchived on /responses
+    const deletedRes = await request(app)
+      .get('/api/agent/responses')
+      .query({ agentName: 'DeletedGhostAgent' })
+      .expect(200);
+    expect(deletedRes.body).toMatchObject({
+      responses: [],
+      agentDeletedOrArchived: true,
+      agentStatus: 'deleted',
+    });
+
+    // 2. Archived agent returns agentDeletedOrArchived: true (status: archived) and blocks POST /api/agent/messages from re-creating it
+    await query(
+      'INSERT INTO archived_agents (archived_agent_id, agent_id, user_id, agent_name, agent_type) VALUES ($1, $2, $3, $4, $5)',
+      [uuidv4(), uuidv4(), userId, 'ArchivedRunnerAgent', 'standard']
+    );
+
+    const archivedPollRes = await request(app)
+      .get('/api/agent/responses')
+      .query({ agentName: 'ArchivedRunnerAgent' })
+      .expect(200);
+    expect(archivedPollRes.body).toMatchObject({
+      responses: [],
+      agentDeletedOrArchived: true,
+      agentStatus: 'archived',
+    });
+
+    const sendRes = await request(app)
+      .post('/api/agent/messages')
+      .send({
+        agentName: 'ArchivedRunnerAgent',
+        content: 'Trying to resurrect archived agent',
+        encrypted: false,
+      })
+      .expect(403);
+    expect(sendRes.body).toMatchObject({
+      agentDeletedOrArchived: true,
+      agentStatus: 'archived',
+      error: { code: 'AGENT_ARCHIVED' },
+    });
+
+    const recreated = await query('SELECT agent_id FROM agents WHERE user_id = $1 AND agent_name = $2', [
+      userId,
+      'ArchivedRunnerAgent',
+    ]);
+    expect(recreated.rows).toHaveLength(0);
+
+    await pool.end();
   });
 });

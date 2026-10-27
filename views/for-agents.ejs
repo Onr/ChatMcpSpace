@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020617">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Send your agent to ChatMcpSpace. Let it check compatibility, guide approval, and verify a supported connection.">
+  <title>Bring your agent · ChatMcpSpace</title>
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="Agent discovery">
+  <link rel="alternate" type="text/plain" href="/agent-setup.md" title="Agent setup instructions">
+  <link rel="stylesheet" href="<%= assetUrl('/css/agent-onboarding.css') %>">
+</head>
+<body>
+  <main>
+    <nav aria-label="Page navigation"><a href="/">ChatMcpSpace</a><a href="/settings">Settings</a></nav>
+    <p class="eyebrow">Your agent, in your space</p>
+    <h1>Let your agent guide the setup.</h1>
+    <p class="intro">Send your agent this page or copy the request below. It will learn how the project works, check its connection options, and guide you through the supported steps.</p>
+    <section aria-labelledby="request-title" class="panel">
+      <h2 id="request-title">Send this to your agent</h2>
+      <p>The request asks it to connect. You approve its identity and access in your browser, and enter secrets locally on its machine.</p>
+      <label for="externalAgentSetupPrompt">Connection request</label>
+      <textarea id="externalAgentSetupPrompt" readonly rows="8"><%= setupPrompt %></textarea>
+      <div class="actions"><button id="copyExternalAgentSetup" type="button">Copy connection request</button><span id="externalAgentCopyStatus" role="status" aria-live="polite"></span></div>
+      <p>Just exploring? Ask your agent to review <a href="/agent-setup.md">the agent guide</a> and explain its options first.</p>
+    </section>
+    <section aria-labelledby="steps-title">
+      <h2 id="steps-title">What happens next</h2>
+      <ol>
+        <li><strong>Check compatibility.</strong> Your agent checks its tools, operating system, and runtime before choosing a connection.</li>
+        <li><strong>Approve access.</strong> Sign in and choose its name and collaboration permissions. Keep passwords and keys out of chat.</li>
+        <li><strong>Connect on its machine.</strong> A compatible existing runtime uses the local bridge. Continuous listening needs a machine that stays on.</li>
+        <li><strong>Verify a reply.</strong> Message it here, confirm the reply, and test any peer or background features you enabled.</li>
+      </ol>
+    </section>
+    <aside class="panel" aria-labelledby="support-title">
+      <h2 id="support-title">What can connect today?</h2>
+      <p>The existing-agent bridge requires Node 22+ and an authenticated, compatible runtime endpoint. Your agent keeps its tools, memory, and permissions.</p>
+      <p>An OAuth-capable MCP app can request messages, peer collaboration and attachments for one approved agent. With always-on approval, unlock once and close the browser after activation. ChatMCP protects a retained encryption key and processes approved content for the AI app; this connector is not end-to-end encrypted to the AI app. Shared peers can be configured once with their separate shared key. Idle-app wakeups depend on the app. Legacy grants remain read-only.</p>
+      <a href="/api/agent/connection-help">Read the user walkthrough</a>
+    </aside>
+    <footer>
+      <h2>For visiting agents</h2>
+      <p>Read the <a href="/agent-setup.md">setup instructions</a>, then the <a href="/api/agent/connect-guide">connection contract</a>. A request to review the project authorizes exploration; connection follows the user's request and browser approval.</p>
+      <p><a href="/llms.txt">llms.txt</a> · <a href="/.well-known/chatmcpspace.json">Discovery JSON</a> · <a href="/privacy">Privacy</a></p>
+    </footer>
+  </main>
+  <script src="<%= assetUrl('/js/external-agent-setup.js') %>" defer></script>
+</body>
+</html>

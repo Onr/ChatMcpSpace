@@ -71,6 +71,84 @@ ${body}
 }
 
 describe('Python message_helper', () => {
+  it('keeps DMs pending until a successful runner turn, preserving text about errors', () => {
+    const fixture = createHelperFixture();
+    const result = runHelper(fixture.helperPath, `
+calls = []
+cipher = mod._encrypt_message("Please fix the error; usage: example and unknown command are relevant")
+def api(method, path, data=None):
+    calls.append([method, path, data])
+    if method == "GET":
+        return {"messages": [{"messageId": "test-id", "content": cipher, "encrypted": True}]}
+    return {"acknowledged": True}
+mod._api_request = api
+first = mod.check_dm(defer_ack=True)
+assert all(c[0] == "GET" for c in calls)
+second = mod.check_dm(defer_ack=True)
+assert first == second
+assert mod.acknowledge_dm_batch()
+assert not mod._dm_batch_path().exists()
+print(json.dumps({"messages": first, "calls": calls}))
+`);
+    expect(result.status).toBe(0);
+    const payload = JSON.parse(result.stdout.trim());
+    expect(payload.messages[0].content).toContain('fix the error');
+    expect(payload.calls[0][1]).toBe('/agent/messages/direct?markRead=false');
+    expect(payload.calls.filter(call => call[0] === 'POST')).toEqual([
+      ['POST', '/agent/messages/direct/ack', { messageId: 'test-id' }]
+    ]);
+  });
+
+  it('does not acknowledge failed decryption or a failed poll from an earlier turn', () => {
+    const fixture = createHelperFixture();
+    const result = runHelper(fixture.helperPath, `
+calls = []
+def api(method, path, data=None):
+    calls.append(method)
+    return {"messages": [{"messageId": "bad", "content": "bad:bad:bad", "encrypted": True}]}
+mod._api_request = api
+assert mod.check_dm(defer_ack=True) == []
+assert calls == ["GET"]
+mod._dm_batch_path().write_text('["earlier-failed-turn"]')
+mod._api_request = lambda *args: {"error": "offline"}
+try:
+    mod.check_dm(defer_ack=True)
+    raise AssertionError("poll should fail")
+except RuntimeError:
+    pass
+assert json.loads(mod._dm_batch_path().read_text()) == []
+assert mod.acknowledge_dm_batch()
+print("ok")
+`);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('ok');
+    expect(result.stderr).toContain('remains pending');
+  });
+
+  it('manual polling acknowledges only decryptable messages and retries a failed acknowledgement', () => {
+    const fixture = createHelperFixture();
+    const result = runHelper(fixture.helperPath, `
+calls = []
+def api(method, path, data=None):
+    calls.append([method, path, data])
+    if method == "GET":
+        return {"messages": [{"messageId": "good", "content": mod._encrypt_message("Task"), "encrypted": True},
+                             {"messageId": "bad", "content": "bad:bad:bad", "encrypted": True}]}
+    return {"error": "offline"}
+mod._api_request = api
+assert len(mod.check_dm(from_agent="Peer One")) == 1
+assert calls[0][1].endswith("&fromAgent=Peer%20One")
+assert [c[2]["messageId"] for c in calls if c[0] == "POST"] == ["good"]
+mod._dm_batch_path().parent.mkdir(parents=True, exist_ok=True)
+mod._dm_batch_path().write_text('["good"]')
+assert not mod.acknowledge_dm_batch()
+assert mod._dm_batch_path().exists()
+print("ok")
+`);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('ok');
+  });
+
   it('loads configuration from .env and env fallback', () => {
     const fixture = createHelperFixture({ encryptionEnabled: true, agentName: 'Config Agent' });
 

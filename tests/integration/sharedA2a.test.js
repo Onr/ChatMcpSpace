@@ -25,22 +25,29 @@ suite('shared A2A on isolated real PostgreSQL', () => {
       CREATE TABLE shared_audit(conversation_id UUID,actor_id UUID,action TEXT);
       CREATE TABLE agent_groups(group_id UUID,group_name TEXT);
       CREATE TABLE agent_group_members(group_id UUID,agent_id UUID);
-      CREATE TABLE agent_messages(agent_message_id UUID PRIMARY KEY,sender_agent_id UUID,recipient_agent_id UUID,content TEXT,encrypted BOOLEAN,priority INTEGER,created_at TIMESTAMP DEFAULT NOW(),read_at TIMESTAMP);`);
+      CREATE TABLE agent_messages(agent_message_id UUID PRIMARY KEY,sender_agent_id UUID,recipient_agent_id UUID,content TEXT,encrypted BOOLEAN,priority INTEGER,created_at TIMESTAMP DEFAULT NOW(),read_at TIMESTAMP);
+      CREATE TABLE attachments(attachment_id UUID PRIMARY KEY,agent_id UUID,content_type TEXT,file_name TEXT,size_bytes BIGINT,encrypted BOOLEAN,iv_base64 TEXT,auth_tag_base64 TEXT,storage_provider TEXT,storage_key TEXT,width INTEGER,height INTEGER,encryption_peer_id UUID);
+      CREATE TABLE agent_message_attachments(agent_message_id UUID,attachment_id UUID,attachment_order INTEGER);
+      CREATE TABLE messages(message_id UUID,agent_id UUID);
+      CREATE TABLE message_attachments(message_id UUID,attachment_id UUID);
+      CREATE TABLE user_messages(user_message_id UUID,agent_id UUID);
+      CREATE TABLE user_message_attachments(user_message_id UUID,attachment_id UUID);`);
     await query(fs.readFileSync(path.join(__dirname,'../../src/db/migrations/060_shared_agent_a2a.sql'),'utf8'));
     jest.resetModules();
     jest.doMock('../../src/db/connection', () => ({query, getClient:()=>pool.connect(), pool}));
+    jest.doMock('../../src/storage',()=>({initializeStorage:async()=>({name:'fixture',retrieve:async()=>Buffer.from('encrypted-file-bytes')})}));
     jest.doMock('../../src/middleware/authMiddleware',()=>({requireApiKey:(req,res,next)=>{req.user={userId:viewer};next();},attachUserFromSession:(_req,_res,next)=>next()}));
     jest.doMock('../../src/middleware/rateLimitMiddleware',()=>Object.fromEntries(['agentPollingRateLimiter','agentApiRateLimiter','agentMessageIngressRateLimiter','feedbackRateLimiter','userPollingRateLimiter'].map(k=>[k,(_req,_res,next)=>next()])));
     access=require('../../src/shared/a2aAccess');
     app=express();app.use(express.json());
-    app.use((req,res,next)=>{req.user={userId:viewer};next();});
+    app.use((req,res,next)=>{req.user={userId:viewer};if(req.get('x-fixture-agent'))req.authContext={type:'agent_token',agentId:req.get('x-fixture-agent'),scopes:['agent.dm.read','agent.attachments.read']};next();});
     app.use('/api/agent',require('../../src/routes/agentApiRoutes'));
     app.use('/api/user/shared',require('../../src/shared/routes').users);
     app.use('/api/user',require('../../src/routes/userApiRoutes'));
   });
   afterAll(async()=>{if(pool)await pool.end();if(admin){await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}delete process.env.FEATURE_SHARED_CONVERSATIONS;});
   beforeEach(async()=>{
-    await query('TRUNCATE agents,archived_agents,shared_conversations,shared_members,shared_audit,agent_messages,shared_runtimes,agent_chat_threads');
+    await query('TRUNCATE agents,archived_agents,shared_conversations,shared_members,shared_audit,agent_messages,shared_runtimes,agent_chat_threads,attachments,agent_message_attachments');
     owner=id();member=id();caller=id();target=id();room=id();runtimeId=id();viewer=member;
     await query("INSERT INTO agents(agent_id,user_id,agent_name) VALUES($1,$2,'Same Name'),($3,$4,'Same Name')",[caller,member,target,owner]);
     await query('INSERT INTO shared_conversations(id,agent_id,owner_id) VALUES($1,$2,$3)',[room,target,owner]);
@@ -92,6 +99,20 @@ suite('shared A2A on isolated real PostgreSQL', () => {
     expect((await send({encrypted:false})).status).toBe(400);
     expect((await send({content:'plain text despite the encryption flag'})).status).toBe(400);
     expect((await query('SELECT * FROM agent_messages')).rows).toEqual([]);
+  });
+  test('shared attachments require the correct encryption audience and current membership',async()=>{
+    await enable(); const attachment=id();
+    await query("INSERT INTO attachments(attachment_id,agent_id,content_type,file_name,size_bytes,encrypted,iv_base64,auth_tag_base64,encryption_peer_id) VALUES($1,$2,'application/pdf','shared.pdf',20,TRUE,$3,$4,$5)", [attachment,caller,Buffer.alloc(12).toString('base64'),Buffer.alloc(16).toString('base64'),target]);
+    const sent=await send({attachmentIds:[attachment]});expect(sent.status).toBe(201);
+    viewer=owner;
+    const inbox=await request(app).get('/api/agent/messages/direct?markRead=false').set('X-Agent-Name','Same Name').set('x-shared-runtime',runtimeId);
+    expect(inbox.body.messages[0].attachments[0].attachmentId).toBe(attachment);
+    await request(app).get(`/api/agent/attachments/${attachment}/metadata`).set('x-fixture-agent',target).set('x-shared-runtime',runtimeId).expect(200);
+    const file=await request(app).get(`/api/agent/attachments/${attachment}`).set('x-fixture-agent',target).set('x-shared-runtime',runtimeId).expect(200);
+    expect(file.body).toEqual(Buffer.from('encrypted-file-bytes'));
+    await access.settings(owner,room,false);
+    await request(app).get(`/api/agent/attachments/${attachment}/metadata`).set('x-fixture-agent',target).set('x-shared-runtime',runtimeId).expect(404);
+    await request(app).get(`/api/agent/attachments/${attachment}`).set('x-fixture-agent',target).set('x-shared-runtime',runtimeId).expect(404);
   });
   test('visualization exposes authorized cross-account metadata only, with no ciphertext',async()=>{
     await enable();expect((await send()).status).toBe(201);

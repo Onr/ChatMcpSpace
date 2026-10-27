@@ -120,6 +120,27 @@
 .shared-conversation-open:disabled { opacity: .65; cursor: progress; }
 .shared-conversation-feedback { grid-column: 1 / -1; margin: 0; padding: 4px 10px; color: #fcd34d; font-size: 12px; overflow-wrap: anywhere; }
 #sharedConversationSection [hidden] { display: none !important; }
+
+/* Keep your agents first, followed by incoming shared chats on one scroll
+   surface. Neither section should squeeze the other out on short panels. */
+#agentListPanel:has(#sharedConversationSection:not([hidden])) {
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+#agentListPanel #sharedConversationSection {
+  max-height: none;
+  overflow: visible;
+}
+#agentListPanel:has(#sharedConversationSection:not([hidden])) .agent-list-header {
+  flex-shrink: 0;
+}
+#agentListPanel:has(#sharedConversationSection:not([hidden])) .agent-list-scroll {
+  flex: 0 0 auto;
+  overflow: visible;
+}
 /* Shared forms stay with their messages instead of a separate empty panel. */
 body.dashboard-shared-chat #mainInteractiveSpace { display: none !important; }
 .shared-message-audience {
@@ -141,6 +162,10 @@ body.dashboard-shared-chat #mainInteractiveSpace { display: none !important; }
 .shared-message-audience--owner { color: #fcd34d; border-color: #fbbf2426; background: #fbbf240a; }
 .shared-message-audience--selected { color: #7dd3fc; border-color: #38bdf826; background: #38bdf80a; }
 .shared-message-audience--all { color: #a7f3d0; border-color: #34d39926; background: #34d3990a; }
+.shared-message-visibility summary { cursor: pointer; list-style: none; }
+.shared-message-visibility summary::-webkit-details-marker { display: none; }
+.shared-message-visibility summary:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.shared-message-visibility-hint { max-width: 32ch; margin: 0 0 8px; color: #cbd5e1; font-size: 11px; text-align: left; overflow-wrap: anywhere; }
 [data-shared-sender-kind="guest"] .message-bubble--user {
   border-color: #38bdf84d;
   background: linear-gradient(145deg, #163044, #13273a);

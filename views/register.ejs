@@ -56,7 +56,9 @@
           Sign in
         </a>
       </p>
-    
+
+      <p id="registrationClientError" role="alert" tabindex="-1" class="hidden bg-red-500/10 border border-red-500/20 text-red-300 px-4 py-3 rounded-lg mb-6 text-sm"></p>
+
       <% if (error) { %>
       <div class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm" role="alert">
         <span class="block sm:inline"><%= error %></span>
@@ -90,18 +92,18 @@
         </div>
       </div>
       <% } %>
-      
+
       <form class="space-y-4" action="/register" method="POST" id="registerForm">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <% if (invitationId) { %><input type="hidden" name="invitationId" value="<%= invitationId %>"><p class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">You’re creating an account to join a shared conversation. Verify the invited email address to continue.</p><% } %>
         <div class="space-y-4">
           <div>
             <label for="email" class="block text-sm font-medium text-slate-300 mb-1">Email address</label>
-            <input 
-              id="email" 
-              name="email" 
-              type="email" 
-              required 
+            <input
+              id="email"
+              name="email" autocomplete="username" autocapitalize="none" spellcheck="false"
+              type="email"
+              required
               class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
               placeholder="you@example.com"
               value="<%= email || '' %>"
@@ -109,9 +111,9 @@
           </div>
           <div>
             <label for="password" class="block text-sm font-medium text-slate-300 mb-1">Password</label>
-            <input 
+            <input
               id="password"
-              name="password"
+              name="password" autocomplete="new-password" aria-describedby="registerPasswordHint" pattern="(?=.*[a-zA-Z])(?=.*[0-9]).{12,128}" title="12–128 characters, including a letter and a number"
               type="password"
               required
               minlength="12"
@@ -119,13 +121,13 @@
               class="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors text-sm"
               placeholder="Min 12 characters"
             >
-            <p class="mt-1 text-xs text-slate-400">At least 12 characters, including a letter and a number.</p>
+            <p id="registerPasswordHint" class="mt-1 text-xs text-slate-400">12–128 characters, including a letter and a number.</p>
           </div>
           <div>
             <label for="confirmPassword" class="block text-sm font-medium text-slate-300 mb-1">Confirm Password</label>
-            <input 
+            <input
               id="confirmPassword"
-              name="confirmPassword"
+              name="confirmPassword" autocomplete="new-password"
               type="password"
               required
               minlength="12"
@@ -147,15 +149,15 @@
               class="mt-0.5 h-4 w-4 rounded border-amber-500/50 bg-slate-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0 cursor-pointer"
             >
             <label for="agreeTerms" class="text-xs text-slate-300 cursor-pointer">
-              <span class="text-amber-400 font-medium">⚠️ Notice:</span> By registering, I agree to the 
-              <a href="/terms" target="_blank" class="text-amber-400 hover:text-amber-300 underline">Terms of Service</a> 
+              <span class="text-amber-400 font-medium">⚠️ Notice:</span> By registering, I agree to the
+              <a href="/terms" target="_blank" class="text-amber-400 hover:text-amber-300 underline">Terms of Service</a>
               and <a href="/privacy" target="_blank" class="text-amber-400 hover:text-amber-300 underline">Privacy Policy</a>.
             </label>
           </div>
         </div>
 
-        <button 
-          type="submit" 
+        <button
+          type="submit"
           class="w-full py-3.5 rounded-lg text-sm font-medium bg-white hover:bg-slate-200 text-slate-900 transition-all shadow-lg"
         >
           Create Account
@@ -178,16 +180,23 @@
   const form = document.getElementById('registerForm');
   const submitButton = form.querySelector('button[type="submit"]');
   const originalButtonText = submitButton.textContent;
+  function showRegistrationError(message) {
+    const notice = document.getElementById('registrationClientError');
+    notice.textContent = message;
+    notice.classList.remove('hidden');
+    notice.focus({ preventScroll: true });
+    notice.scrollIntoView({ block: 'center', behavior: 'instant' });
+  }
 
   // Helper function to start countdown on the button
   function startButtonCountdown(seconds) {
     submitButton.disabled = true;
     submitButton.classList.add('opacity-50', 'cursor-not-allowed');
     submitButton.classList.remove('hover:bg-blue-700');
-    
+
     let remaining = seconds;
     submitButton.textContent = `Wait ${remaining}s`;
-    
+
     const interval = setInterval(() => {
       remaining--;
       if (remaining <= 0) {
@@ -204,45 +213,29 @@
 
   form.addEventListener('submit', async function(e) {
     e.preventDefault();
-    
+
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
-    
+
     if (!email || !email.includes('@')) {
-      if (typeof window.showError === 'function') {
-        window.showError('Please enter a valid email address');
-      } else {
-        console.error('Error: Please enter a valid email address');
-      }
+      showRegistrationError('Please enter a valid email address');
       return;
     }
 
-    if (password.length < 8) {
-      if (typeof window.showError === 'function') {
-        window.showError('Password must be at least 8 characters long');
-      } else {
-        console.error('Error: Password must be at least 8 characters long');
-      }
+    if (password.length < 12 || password.length > 128 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+      showRegistrationError('Use 12–128 characters, including a letter and a number.');
       return;
     }
 
     if (password !== confirmPassword) {
-      if (typeof window.showError === 'function') {
-        window.showError('Passwords do not match');
-      } else {
-        console.error('Error: Passwords do not match');
-      }
+      showRegistrationError('Passwords do not match');
       return;
     }
 
     const agreeTerms = document.getElementById('agreeTerms').checked;
     if (!agreeTerms) {
-      if (typeof window.showError === 'function') {
-        window.showError('You must agree to the Terms of Service and Privacy Policy to create an account');
-      } else {
-        console.error('Error: You must agree to the Terms of Service and Privacy Policy to create an account');
-      }
+      showRegistrationError('You must agree to the Terms of Service and Privacy Policy to create an account');
       return;
     }
 
@@ -253,13 +246,14 @@
       console.warn('Unable to cache password for encryption setup', err);
     }
 
+    document.getElementById('registrationClientError').classList.add('hidden');
     submitButton.textContent = 'Creating account...';
     submitButton.disabled = true;
 
     try {
       const formData = new FormData(form);
       const data = new URLSearchParams(formData);
-      
+
       const response = await fetch(form.action, {
         method: 'POST',
         headers: {
@@ -268,21 +262,22 @@
         body: data,
         redirect: 'follow'
       });
-      
+
       // Check if rate limited
       if (response.status === 429) {
         const result = await response.json();
         const retryAfter = result.error?.retryAfter || 30;
+        showRegistrationError('Too many attempts. Please wait before trying again.');
         startButtonCountdown(retryAfter);
         return;
       }
-      
+
       // If redirected, follow it
       if (response.redirected) {
         window.location.href = response.url;
         return;
       }
-      
+
       // Check if response is HTML (success or error page)
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('text/html')) {
@@ -292,8 +287,12 @@
         document.close();
         return;
       }
+      showRegistrationError('We could not complete your request. Please try again.');
+      submitButton.textContent = originalButtonText;
+      submitButton.disabled = false;
     } catch (error) {
       console.error('Form submission error:', error);
+      showRegistrationError('Could not reach the server. Check your connection and try again.');
       submitButton.textContent = originalButtonText;
       submitButton.disabled = false;
     }

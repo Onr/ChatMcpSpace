@@ -14,6 +14,7 @@ for (const width of [390, 1280]) {
     const html = await ejs.renderFile(path.join(root, 'views/settings.ejs'), {
       success: null, apiKey: 'fixture-key', baseUrl: 'https://chat.example', defaultAgentName: 'Fixture',
       csrfToken: 'fixture', cspNonce: 'fixture', user: { email: 'fixture@example.test' },
+      assetUrl: url => url,
       safeJsonForScript: require('../../src/utils/safeJsonHelper').safeJsonForScript
     });
     const dom = new JSDOM(html); dom.window.document.querySelectorAll('script').forEach(node => node.remove());

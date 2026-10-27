@@ -42,6 +42,7 @@ if (fs.existsSync(serviceAccountPath)) {
 
 // Import route handlers
 const pageRoutes = require('./src/routes/pageRoutes');
+const agentDiscoveryRoutes = require('./src/routes/agentDiscoveryRoutes');
 const mcpRoutes = require('./src/routes/mcpRoutes');
 const agentApiRoutes = require('./src/routes/agentApiRoutes');
 const userApiRoutes = require('./src/routes/userApiRoutes');
@@ -157,6 +158,11 @@ app.use(compression());
 // Configure Express middleware
 app.use(requestLogger);
 // Parse JSON request bodies with explicit size limits
+// File tools accept base64 up to the configured attachment limit. Other API
+// routes retain their existing small JSON limit; tool validation bounds decoded
+// file bytes and simultaneous hosted operations separately.
+const mcpJsonBytes = Math.ceil(Number(process.env.MAX_ATTACHMENT_SIZE_MB || process.env.MAX_IMAGE_SIZE_MB || 20) * 1_000_000 / 3) * 4 + 65536;
+app.use('/mcp', express.json({ limit: mcpJsonBytes }));
 app.use(express.json({ limit: '2mb' }));
 
 // Parse URL-encoded request bodies (for form submissions)
@@ -249,6 +255,8 @@ if (IS_PROD) {
 app.use('/', mcpRoutes);
 
 // Page routes (HTML rendering)
+// Public instructions have no account access and require no sign-in.
+app.use('/', agentDiscoveryRoutes);
 app.get('/guest', (req, res) => {
   if (process.env.FEATURE_SHARED_CONVERSATIONS !== 'true' || process.env.FEATURE_GUEST_SHARING !== 'true') {
     return res.status(404).send('Not found');
@@ -441,6 +449,7 @@ async function startServer() {
     }
 
     startScheduledMessageDelivery();
+    require('./src/services/mcpHostedService').startCleanup();
     require('./src/services/modelRefreshService').startModelRefresh();
 
     const tlsConfig = loadTlsConfig();

@@ -81,17 +81,13 @@ describe('Rate limit middleware', () => {
     const nowMs = 5_000_000;
     dateNowSpy.mockImplementation(() => nowMs);
 
-    const incr = jest.fn().mockResolvedValue(1);
-    const pExpire = jest.fn().mockResolvedValue(1);
-    const pTTL = jest.fn().mockResolvedValue(-1);
+    const evalScript = jest.fn().mockResolvedValue([1, -1]);
 
     jest.doMock('../../src/utils/securityLogger', () => ({ logRateLimitViolation: jest.fn() }));
     jest.doMock('../../src/utils/redisClient', () => ({
       rateLimitRedisClient: {
         isReady: true,
-        incr,
-        pExpire,
-        pTTL,
+        eval: evalScript,
       },
     }));
 

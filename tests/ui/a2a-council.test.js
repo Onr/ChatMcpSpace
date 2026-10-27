@@ -108,3 +108,23 @@ test('galaxy keyboard controls do not activate council navigation or delete shor
   setup();const target=document.getElementById('sharedGalaxy');
   for(const key of ['Enter','ArrowRight','Delete','Tab']) expect(()=>listener({key,target})).not.toThrow();
 });
+test('agent chat shows queued offline status and refreshes to confirmed receipt', async () => {
+  document.body.insertAdjacentHTML('beforeend', '<div id="agentChatsScroll"></div><div id="agentPanelHeader"></div><div id="conversationArea"></div><div id="agentInputBox"></div>');
+  const conn = { ...connection(), pendingCount: 1 };
+  const message = { messageId: 'task', senderId: 'a', recipientId: 'b', content: 'Please fix this error', timestamp: new Date().toISOString(), delivery: { state: 'pending', recipientOnline: false } };
+  window.fetch.mockResolvedValue({ ok: true, json: async () => ({ connections: [conn], messages: [message] }) });
+  await window.AgentConnections.refresh();
+  expect(document.getElementById('agentChatsScroll').textContent).toContain('1 pending');
+  document.querySelector('.agent-chat-item').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.getElementById('conversationArea').textContent).toContain('Queued · recipient offline');
+  const bubble = document.querySelector('[data-direct-message-id]');
+  document.getElementById('conversationArea').scrollTop = 123;
+  window.fetch.mockResolvedValue({ ok: true, json: async () => ({ connections: [{ ...conn, pendingCount: 0 }], messages: [{ ...message, delivery: { state: 'received', recipientOnline: true } }] }) });
+  await window.AgentConnections.refresh();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.getElementById('conversationArea').textContent).toContain('Received by agent');
+  expect(document.getElementById('agentChatsScroll').textContent).not.toContain('pending');
+  expect(document.querySelector('[data-direct-message-id]')).toBe(bubble);
+  expect(document.getElementById('conversationArea').scrollTop).toBe(123);
+});

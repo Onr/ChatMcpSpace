@@ -178,11 +178,20 @@ describe('User API routes (messaging)', () => {
     const overrides = { model_provider: 'claude', model: 'claude-sonnet-5', thinking_effort: 'high', approval_mode: 'full-auto', sandbox_mode: 'read-only' };
 
     const sent = await request(app).post('/api/user/messages').send({ agentId, content: 'hi', runOverrides: overrides }).expect(201);
+    const secondOverrides = { model_provider: 'codex', model: 'gpt-6.1-terra', thinking_effort: 'medium', approval_mode: 'suggest', sandbox_mode: 'workspace-write' };
+    const sentSecond = await request(app).post('/api/user/messages').send({ agentId, content: 'second', runOverrides: secondOverrides }).expect(201);
     const plain = await request(app).post('/api/user/messages').send({ agentId, content: 'plain' }).expect(201);
     const rows = await query('SELECT user_message_id, run_overrides FROM user_messages WHERE agent_id = $1', [agentId]);
     const byId = Object.fromEntries(rows.rows.map((r) => [r.user_message_id, r.run_overrides]));
     expect(byId[sent.body.messageId]).toEqual(overrides);
+    expect(byId[sentSecond.body.messageId]).toEqual(secondOverrides);
     expect(byId[plain.body.messageId]).toBeNull();
+
+    const thread = await request(app).get(`/api/user/messages/${agentId}`).expect(200);
+    const threadById = Object.fromEntries(thread.body.messages.map((m) => [m.messageId, m.runOverrides]));
+    expect(threadById[sent.body.messageId]).toEqual(overrides);
+    expect(threadById[sentSecond.body.messageId]).toEqual(secondOverrides);
+    expect(threadById[plain.body.messageId]).toBeNull();
 
     const scheduledFor = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const created = await request(app).post('/api/user/messages/schedule').send({ agentId, content: 'later', scheduledFor, runOverrides: overrides }).expect(201);

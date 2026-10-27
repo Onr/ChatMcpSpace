@@ -31,6 +31,10 @@ async function createDirectMessagesTestContext() {
             req.user = { userId };
             next();
         },
+        attachUserFromSession: (req, _res, next) => {
+            req.user = { userId };
+            next();
+        },
     }));
 
     jest.doMock('../../src/middleware/rateLimitMiddleware', () => ({
@@ -38,12 +42,14 @@ async function createDirectMessagesTestContext() {
         agentApiRateLimiter: (_req, _res, next) => next(),
         agentMessageIngressRateLimiter: (_req, _res, next) => next(),
         feedbackRateLimiter: (_req, _res, next) => next(),
+        userPollingRateLimiter: (_req, _res, next) => next(),
     }));
 
     const agentApiRoutes = require('../../src/routes/agentApiRoutes');
     const app = express();
     app.use(express.json());
     app.use('/api/agent', agentApiRoutes);
+    app.use('/api/user', require('../../src/routes/userApiRoutes'));
 
     return { app, query, pool, userId };
 }
@@ -333,5 +339,52 @@ describe('Direct Messaging API - Poll', () => {
         expect(res.body.messages[0].content).toBe('From Agent1');
 
         await pool.end();
+    });
+});
+
+describe('Direct message delivery confirmation', () => {
+    afterEach(() => { jest.resetModules(); jest.clearAllMocks(); });
+    it('reports an offline queue and keeps a DM until the actual recipient acknowledges it', async () => {
+        const { app, query, pool, userId } = await createDirectMessagesTestContext();
+        try {
+            for (const name of ['Sender', 'Recipient', 'Other']) {
+                await query('INSERT INTO agents (agent_id,user_id,agent_name,inter_agent_mode,position,last_seen_at) VALUES ($1,$2,$3,$4,0,NULL)', [uuidv4(), userId, name, 'listen_all']);
+            }
+            const sent = await request(app).post('/api/agent/messages/direct').set('X-Agent-Name', 'Sender')
+                .send({ toAgentName: 'Recipient', content: 'encrypted task', encrypted: true }).expect(201);
+            expect(sent.body.delivery).toMatchObject({ state: 'pending', recipientOnline: false, readAt: null });
+            const messageId = sent.body.messageId;
+            const dashboard = await request(app).get('/api/user/agent-messages').expect(200);
+            expect(dashboard.body.messages[0].delivery).toMatchObject({ state: 'pending', recipientOnline: false });
+            expect(dashboard.body.connections[0].pendingCount).toBe(1);
+            for (let i = 0; i < 2; i++) {
+                const polled = await request(app).get('/api/agent/messages/direct?markRead=false').set('X-Agent-Name', 'Recipient').expect(200);
+                expect(polled.body.messages.map(m => m.messageId)).toContain(messageId);
+            }
+            await request(app).post('/api/agent/messages/direct/ack').set('X-Agent-Name', 'Other').send({ messageId }).expect(404);
+            expect((await query('SELECT read_at FROM agent_messages WHERE agent_message_id=$1', [messageId])).rows[0].read_at).toBeNull();
+            await request(app).post('/api/agent/messages/direct/ack').set('X-Agent-Name', 'Recipient').send({ messageId }).expect(200);
+            const confirmed = await request(app).get('/api/user/agent-messages').expect(200);
+            expect(confirmed.body.messages[0].delivery.state).toBe('received');
+            expect(confirmed.body.connections[0].pendingCount).toBe(0);
+            const polled = await request(app).get('/api/agent/messages/direct?markRead=false').set('X-Agent-Name', 'Recipient').expect(200);
+            expect(polled.body.messages).toEqual([]);
+        } finally { await pool.end(); }
+    });
+
+    it('does not call an online recipient delivery received before acknowledgement, including retries', async () => {
+        const { app, query, pool, userId } = await createDirectMessagesTestContext();
+        try {
+            for (const name of ['Sender', 'Recipient']) {
+                await query('INSERT INTO agents (agent_id,user_id,agent_name,inter_agent_mode,last_seen_at,position) VALUES ($1,$2,$3,$4,NOW(),0)', [uuidv4(), userId, name, 'listen_all']);
+            }
+            const body = { toAgentName: 'Recipient', content: 'encrypted task', encrypted: true, clientMessageId: uuidv4() };
+            const send = () => request(app).post('/api/agent/messages/direct').set('X-Agent-Name', 'Sender').send(body);
+            const sent = await send().expect(201);
+            expect(sent.body.delivery).toMatchObject({ state: 'pending', recipientOnline: true });
+            expect((await send().expect(200)).body.delivery.state).toBe('pending');
+            await request(app).post('/api/agent/messages/direct/ack').set('X-Agent-Name', 'Recipient').send({ messageId: body.clientMessageId }).expect(200);
+            expect((await send().expect(200)).body.delivery).toMatchObject({ state: 'received', readAt: expect.any(String) });
+        } finally { await pool.end(); }
     });
 });

@@ -400,6 +400,7 @@
           <div class="chat-tile__agent-text">
             <div class="chat-tile__name-row">
               <span class="chat-tile__name chat-tile__name--menu-trigger" role="button" tabindex="0" title="${escapeHtml(agentName)}" aria-label="Open actions menu for ${escapeHtml(agentName)}">${escapeHtml(agentName)}</span>
+              <button type="button" data-open-agent-brief data-agent-id="${agentId}" class="agent-brief-entry" aria-label="Edit ${escapeHtml(agentName)} identity">⚙</button>
               <span class="chat-tile__working-indicator" style="display:none;" title="Agent is working..."></span>
             </div>
             <button type="button" class="chat-tile__a2a-btn" title="Toggle agent-to-agent communication">
@@ -1057,6 +1058,7 @@
         }
 
         // Wire Config Dropdown
+        const configContainer = panelEl.querySelector('.chat-tile__config-container');
         const configBtn = panelEl.querySelector('.chat-tile__config-btn');
         const configDropdown = panelEl.querySelector('.chat-tile__config-dropdown');
         const providerSelect = panelEl.querySelector('.chat-tile__config-provider-select');
@@ -1064,6 +1066,12 @@
         const saveConfigBtn = panelEl.querySelector('.chat-tile__save-config-btn');
         const configProviderDisplay = panelEl.querySelector('.chat-tile__config-provider');
         const modeDisplay = panelEl.querySelector('.chat-tile__config-mode');
+        const isMcpTile = String(metadata?.externalProvider || '').toLowerCase() === 'mcp' ||
+            /\bMCP(?:\s*\(\d+\))?$/i.test(String(agentName || '').trim());
+        if (isMcpTile && configContainer) {
+            configContainer.hidden = true;
+            configContainer.style.display = 'none';
+        }
 
         // Provider-specific option containers
         const codexOptions = panelEl.querySelector('.chat-tile__codex-options');
@@ -1274,6 +1282,7 @@
                 });
 
                 if (!res.ok) throw new Error('Failed to save config');
+                currentConfig = { ...(currentConfig || {}), ...configData };
 
                 saveConfigBtn.textContent = 'Saved!';
                 saveConfigBtn.classList.replace('text-emerald-400', 'text-white');
@@ -1304,7 +1313,9 @@
 
 
         // Initial fetch of config provider name to display on the button
-        loadConfig();
+        if (!isMcpTile) {
+            loadConfig();
+        }
 
         // ─── Drag and Drop Reordering ──────────────────────────────────────────
         panelEl.addEventListener('dragstart', (e) => {
@@ -1625,6 +1636,19 @@
 
         updateInteractiveHistoryControls(0, 0);
 
+        const getCurrentRunOverrides = () => {
+            if (isMcpTile || !currentConfig) return null;
+            const overrides = {};
+            if (currentConfig.model_provider) overrides.model_provider = currentConfig.model_provider;
+            if (currentConfig.model && overrides.model_provider) overrides.model = currentConfig.model;
+            if (currentConfig.thinking_effort) overrides.thinking_effort = currentConfig.thinking_effort;
+            if (currentConfig.approval_mode) overrides.approval_mode = currentConfig.approval_mode;
+            if (currentConfig.sandbox_mode) {
+                overrides.sandbox_mode = currentConfig.sandbox_mode === 'danger-full-access' ? 'none' : currentConfig.sandbox_mode;
+            }
+            return Object.keys(overrides).length > 0 ? overrides : null;
+        };
+
         return {
             panelEl,
             pollingTimer: null,
@@ -1635,6 +1659,7 @@
             lastMessagePollAt: 0,
             lastReadStatusPollAt: 0,
             updateInteractiveHistory: syncInteractiveHistory,
+            getCurrentRunOverrides,
             agentName,
             metadata
         };
@@ -2108,7 +2133,8 @@
             </svg>`;
             infoButton.addEventListener('click', (e) => {
                 e.stopPropagation();
-                window.showMessageInfoModal(message);
+                const tileAgentName = wrapper.closest('.chat-tile')?.dataset?.agentName || message.agentName;
+                window.showMessageInfoModal({ ...message, agentName: tileAgentName });
             });
             utilities.appendChild(infoButton);
         }
@@ -2324,6 +2350,8 @@
             }
         }
 
+        const tileRunOverrides = typeof tile.getCurrentRunOverrides === 'function' ? tile.getCurrentRunOverrides() : null;
+
         // Optimistic render (we use standard placeholders since the true attachment URL needs decrypt keys)
         const optimisticMsg = {
             messageId: `opt-${Date.now()}`,
@@ -2333,6 +2361,7 @@
             encrypted: isEncrypted,
             timestamp: new Date().toISOString(),
             readAt: null,
+            runOverrides: tileRunOverrides || null,
             attachments: pendingImages.map(img => ({
                 attachmentId: img.attachmentId,
                 contentType: img.file.type,
@@ -2347,6 +2376,7 @@
             const reqBody = { agentId, encrypted: isEncrypted };
             if (contentToSend) reqBody.content = contentToSend;
             if (attachmentIds && attachmentIds.length > 0) reqBody.attachmentIds = attachmentIds;
+            if (tileRunOverrides) reqBody.runOverrides = tileRunOverrides;
 
             const res = await csrfFetch(`/api/user/messages`, {
                 method: 'POST',

@@ -4,6 +4,10 @@
 
 ## Getting started
 
+- [Visiting-agent start guide](AGENT_START_HERE.md)
+- [Manifesto](../MANIFESTO.md) and [White paper](WHITE_PAPER.md)
+- [Private access over Tailscale](TAILSCALE_BRIDGE.md)
+
 - [Connect your agent](CONNECT_YOUR_AGENT.md)
 - [External agent instructions](EXTERNAL_AGENT_INSTRUCTIONS.md)
 - [Conversation and settings improvements](FEATURE_CATCHUP_2026-10-15.md)
@@ -21,7 +25,13 @@
 
 - [Gemini MCP](GEMINI_MCP.md)
 - [MCP verification](MCP_VERIFICATION.md)
+- [Always-on MCP messages and files](MCP_HOSTED_CONNECTOR.md)
+
+## Agent identity and goals
+
+- [Implementation and rollback](AGENT_IDENTITY_IMPLEMENTATION_AND_ROLLBACK.md)
 
 ## Latest release
 
+- [Agent identity, always-on MCP, recent chats, and Windows setup](RELEASE_2026-10-27.md)
 - [Device badges, Windows setup, and shared-agent galaxy](RELEASE_2026-10-20.md)

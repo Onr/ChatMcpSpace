@@ -13,7 +13,16 @@ const {
 async function createContext() {
   jest.resetModules();
 
-  const { pool, query } = createTestDatabase();
+  const { db, pool, query } = createTestDatabase();
+  // pg-mem lacks jsonb_set. This fixture implements only heartbeat's top-level
+  // {device} update; reject other paths rather than silently model them wrongly.
+  db.public.registerFunction({
+    name: 'jsonb_set', args: ['jsonb', 'text', 'jsonb'], returns: 'jsonb',
+    implementation: (target, field, replacement) => {
+      if (field !== '{device}') throw new Error('Unsupported jsonb_set path in external-agent fixture');
+      return { ...target, device: replacement };
+    }
+  });
   await applyRuntimeUserColumns(query);
   await applyArchiveSchema(query);
   const { userId, apiKey } = await seedUser(query);
@@ -69,6 +78,7 @@ async function createContext() {
 
   const app = express();
   app.use(express.json());
+  app.use(require('../../src/routes/agentDiscoveryRoutes'));
   app.use((req, _res, next) => {
     req.session = { userId };
     next();
@@ -133,6 +143,7 @@ describe('External OpenClaw bot onboarding', () => {
       const token = paired.body.credential.agentToken;
       const agentId = paired.body.agent.agentId;
       const key = crypto.randomBytes(32).toString('base64');
+      await query('UPDATE agents SET runtime_config = $1::jsonb WHERE agent_id = $2', [JSON.stringify({ model: 'existing-model' }), agentId]);
       const central = await query("INSERT INTO agents (user_id, agent_name, inter_agent_mode, position) VALUES ($1, 'Central', 'listen_all', 2) RETURNING agent_id", [userId]);
       const userMessage = await query('INSERT INTO user_messages (agent_id, content, encrypted) VALUES ($1, $2, TRUE) RETURNING user_message_id',
         [agentId, seal('Please summarize this project.', key)]);
@@ -167,6 +178,8 @@ describe('External OpenClaw bot onboarding', () => {
       const state = { version: 1, baseUrl: 'https://chatspace.test', agentName: 'Hermes', agentId, token, key, history: {}, pending: null };
       const bridge = new Bridge(state, { fetchImpl, runtimeKey: 'local-runtime-key' });
       await bridge.tick();
+      const runtimeConfig = (await query('SELECT runtime_config FROM agents WHERE agent_id = $1', [agentId])).rows[0].runtime_config;
+      expect(runtimeConfig).toMatchObject({ model: 'existing-model', device: { id: expect.any(String), name: expect.any(String) } });
       expect(calls[0].messages.at(-1).content).toBe('Please summarize this project.');
       const reply = await query('SELECT content, encrypted FROM messages WHERE agent_id = $1', [agentId]);
       expect(reply.rows).toHaveLength(1);
@@ -242,6 +255,9 @@ describe('External OpenClaw bot onboarding', () => {
       .expect(200);
 
     expect(res.body.preferredOnboarding.mode).toBe('agent_started_pairing');
+    expect(res.body.discovery.instructions).toMatch(/\/agent-setup\.md$/);
+    const startHere = await request(app).get(new URL(res.body.discovery.instructions).pathname).expect(200);
+    expect(startHere.text).toContain('Check capabilities before promising a connection');
     expect(res.body.preferredOnboarding.userPromptExample).toContain('Connect to ChatMCP');
     expect(res.body.preferredOnboarding.userPromptExample).toContain('guide me through what needs to be done');
     expect(res.body.preferredOnboarding.agentSetupGoal).toContain('read this guide');

@@ -1,13 +1,33 @@
-# AI Agent Messaging Platform
+# ChatMcpSpace
+
+[User connection walkthrough](docs/CONNECT_YOUR_AGENT.md) · [External agent operating instructions](docs/EXTERNAL_AGENT_INSTRUCTIONS.md)
+
+**Sending your agent to check out this project?** Start with the
+[visiting-agent guide](docs/AGENT_START_HERE.md). On a running site, visit
+`/for-agents` for a copyable connection request, or let your agent read `/llms.txt`
+and `/agent-setup.md`. It can explain its options and guide user-approved setup
+when its runtime supports the connection. Discovery alone does not connect it.
+
+## Gemini MCP server
+
+Connect an OAuth-capable MCP client using `https://chatmcp.space/mcp`. Approve one agent, leave always-on access selected, and unlock once; the browser can then close. Message, peer, and file tools use protected server-held encryption keys under explicit consent, while stored messages and files remain encrypted. Existing grants need fresh consent for new capabilities. See [the MCP connection guide](docs/GEMINI_MCP.md) and [hosted connector operations](docs/MCP_HOSTED_CONNECTOR.md).
 
 <div align="center">
   <img src="public/images/logo.png" alt="ChatMcpSpace Logo" width="200" />
 </div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/badge/node-22.x-brightgreen)](https://nodejs.org)
 
-A web-based platform that enables bidirectional communication between users and their AI agents through a chat-like interface.
+A shared home for you and your agents. Talk to agents running across your machines, bring existing agents into the same space, and let a central agent coordinate their work under your direction.
+
+Read the [Manifesto](MANIFESTO.md) for our purpose and principles, and the [White paper](docs/WHITE_PAPER.md) for the product direction and feature decisions.
+
+[Connect an existing Hermes-style agent](docs/EXTERNAL_AGENT_BRIDGE.md) through the external agent bridge. It preserves the external runtime and supports user conversations, peer messages, central-agent assignments, history retrieval, and encrypted image/file exchange with the user. See the guide for setup and current verification limits.
+
+To reach a self-hosted instance privately from other devices, use the
+[Tailscale communication bridge](docs/TAILSCALE_BRIDGE.md). It uses Tailscale
+Serve over HTTPS and keeps the app inside your tailnet.
 
 ## Hosted Version
 
@@ -20,6 +40,24 @@ Watch or download the launch promo video: **[ChatMCP.Space Launch Video (`public
 <div align="center">
   <video src="https://raw.githubusercontent.com/Onr/ChatMcpSpace/main/public/videos/ChatMCP.Space-Launch-Video.mp4" controls width="720"></video>
 </div>
+
+For opt-in multi-user conversations with one agent, see the [shared conversation pilot guide](docs/SHARED_CONVERSATIONS.md).
+
+## Choose how to connect
+
+- **Start a managed agent:** use the Setup Script in the signed-in navigation and
+  follow the provider prompts on the machine where it will run.
+- **Bring an existing agent:** follow the [connection walkthrough](docs/CONNECT_YOUR_AGENT.md).
+  Its runtime keeps its tools, memory, and permissions. The external bridge
+  requires Node 22+ and a compatible runtime; pairing alone does not prove that
+  messages or attachments work.
+- **Host ChatMcpSpace yourself:** follow the prerequisites and installation below.
+
+Local execution does not mean all data stays on your machine. ChatMcpSpace stores
+account data, agent metadata, and message records. Supported clients encrypt
+message content; agents and configured model providers process decrypted content.
+Optional voice features can use external services. See `/privacy` on your server
+and the [bridge data boundaries](docs/EXTERNAL_AGENT_BRIDGE.md#data-and-current-limits).
 
 ## Features
 
@@ -40,7 +78,7 @@ Watch or download the launch promo video: **[ChatMCP.Space Launch Video (`public
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
+- Node.js 22.x (the development baseline; the external agent bridge requires 22+)
 - PostgreSQL (v12 or higher)
 - Redis (v6 or higher) - required for session storage and rate limiting
 - npm or yarn
@@ -378,7 +416,6 @@ curl -X GET "http://localhost:3000/api/agent/responses?since=2024-01-01T00:00:00
 │       ├── voice-control.js
 │       ├── feedback.js
 │       ├── marble-generator.js
-│       ├── page-transitions.js
 │       ├── setup-script.js
 │       └── vendor/
 └── tests/                    # Test suite
@@ -491,6 +528,19 @@ Run with coverage:
 npm run test:coverage
 ```
 
+Check message receipts and sharing regressions:
+
+```bash
+npm run test:receipts
+npm run test:sharing
+```
+
+The sharing command creates a disposable database and runs the owner/member and
+guest browser checks, including gray/blue double checks and mobile scroll. The
+[Sharing regressions workflow](.github/workflows/sharing-regressions.yml) runs
+these checks automatically on pushes and pull requests once committed and pushed.
+See the [verification guide](docs/AGENT_SHARING_SIMPLE_VERIFICATION.md).
+
 ## Additional Documentation
 
 See the `docs/` folder for detailed guides:
@@ -525,3 +575,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 Quoted replies, Council Chamber group drops, compact usage details, Pi onboarding,
 MCP address copying, explicit owner permission grants, and automatic model discovery
 are described in [the October 15 release notes](docs/FEATURE_CATCHUP_2026-10-15.md).
+Later changes are listed in [the October 27 release notes](docs/RELEASE_2026-10-27.md).

@@ -213,7 +213,7 @@ function initializeFeedbackWidget() {
         }
 
         // Cmd/Ctrl+Enter to send
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && textarea === document.activeElement) {
+        if (!e.isComposing && (e.metaKey || e.ctrlKey) && e.key === 'Enter' && textarea === document.activeElement) {
             e.preventDefault();
             if (!sendBtn.disabled) {
                 submitFeedback('feedback');

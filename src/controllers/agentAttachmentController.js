@@ -11,7 +11,7 @@
 
 const crypto = require('crypto');
 const multer = require('multer');
-const { query } = require('../db/connection');
+const { query, getClient } = require('../db/connection');
 const { validateAgentName, isValidUUID } = require('../utils/validation');
 const {
   validationError,
@@ -103,6 +103,7 @@ function handleMulterError(err, res) {
 async function uploadAttachment(req, res) {
   // Wrap multer in a promise for better error handling
   uploadMiddleware(req, res, async (multerErr) => {
+    let uploadLock;
     try {
       // Handle multer errors
       if (multerErr) {
@@ -177,6 +178,8 @@ async function uploadAttachment(req, res) {
       }
 
       const agentId = agentResult.rows[0].agent_id;
+      const encryptionPeerId = req.body.encryptionPeerId || null;
+      if (encryptionPeerId && (!isValidUUID(encryptionPeerId) || !await require('../services/peerAttachmentService').permitted(userId, agentId, encryptionPeerId))) return forbiddenError(res, 'Attachment peer encryption requires a currently permitted peer');
 
       // Validate optional numeric fields
       let parsedWidth = null;
@@ -210,17 +213,36 @@ async function uploadAttachment(req, res) {
       const sanitizedFilename = sanitizeFilename(req.file.originalname);
 
       // Generate attachment ID
-      const attachmentId = crypto.randomUUID();
+      const attachmentId = req.body.clientAttachmentId || crypto.randomUUID();
 
       // Get storage provider and store the encrypted bytes
       const storage = await initializeStorage();
+
+      // Hosted MCP retries keep the same ciphertext and upload UUID across
+      // restarts. Serialize that UUID before touching storage to avoid an
+      // uncertain retry overwriting an already committed encrypted file.
+      if (req.body.clientAttachmentId !== undefined) {
+        if (!isValidUUID(req.body.clientAttachmentId) || !validatedSha256) return validationError(res, 'clientAttachmentId requires a UUID and SHA-256');
+        uploadLock = await getClient();
+        await uploadLock.query('SELECT pg_advisory_lock(hashtext($1))', [req.body.clientAttachmentId]);
+        const previous = await query('SELECT * FROM attachments WHERE attachment_id=$1', [req.body.clientAttachmentId]);
+        if (previous.rows[0]) {
+          const old = previous.rows[0];
+          const matches = old.agent_id === agentId && old.sha256 === validatedSha256 && old.content_type === normalizedContentType
+            && old.file_name === sanitizedFilename && Number(old.size_bytes) === req.file.buffer.length
+            && old.iv_base64 === ivBase64 && old.auth_tag_base64 === authTagBase64 && (old.encryption_peer_id || null) === encryptionPeerId;
+          if (!matches || !(await storage.retrieve(old.storage_key)).equals(req.file.buffer)) return res.status(409).json({ error: { code: 'ATTACHMENT_ID_CONFLICT' } });
+          return res.json({ attachmentId: old.attachment_id, contentType: old.content_type, sizeBytes: Number(old.size_bytes), encrypted: true, idempotent: true,
+            encryption: { alg: 'AES-GCM', ivBase64: old.iv_base64, tagBase64: old.auth_tag_base64 } });
+        }
+      }
 
       // Cleanup oldest images if user is at limit
       await cleanupOldestUserImages(userId, storage);
 
       const storageKey = await storage.store(
         req.file.buffer,
-        attachmentId,
+        req.body.clientAttachmentId || attachmentId,
         userId,
         agentId
       );
@@ -242,11 +264,11 @@ async function uploadAttachment(req, res) {
           iv_base64,
           auth_tag_base64,
           agent_id,
-          uploaded_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          uploaded_by, encryption_peer_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING attachment_id, created_at`,
         [
-          attachmentId,
+          req.body.clientAttachmentId || attachmentId,
           normalizedContentType,
           sanitizedFilename,
           req.file.buffer.length,
@@ -259,7 +281,8 @@ async function uploadAttachment(req, res) {
           ivBase64,
           authTagBase64,
           agentId,
-          'agent' // uploaded_by - this is the key difference from user uploads
+          'agent', // uploaded_by - this is the key difference from user uploads
+          encryptionPeerId
         ]
       );
 
@@ -307,6 +330,12 @@ async function uploadAttachment(req, res) {
       }
 
       return handleDatabaseError(res, error, 'uploading attachment');
+    } finally {
+      if (uploadLock) {
+        try { await uploadLock.query('SELECT pg_advisory_unlock(hashtext($1))', [req.body.clientAttachmentId]); }
+        catch (_error) { logWarn('agent_attachment_upload_unlock_failed', {}); }
+        finally { uploadLock.release(); }
+      }
     }
   });
 }
@@ -326,28 +355,16 @@ async function uploadAttachment(req, res) {
  * @param {Object} req - Express request
  * @param {Object} res - Express response
  */
-async function downloadAttachment(req, res) {
-  try {
-    const userId = req.user.userId;
-    const { attachmentId } = req.params;
-
-    // Validate attachmentId format
-    if (!isValidUUID(attachmentId)) {
-      return validationError(res, 'Invalid attachment ID format');
-    }
-
-    // Look up attachment and verify agent belongs to authenticated user through any path:
-    // 1. Direct agent_id on attachment
-    // 2. Through message_attachments -> messages -> agents
-    // 3. Through user_message_attachments -> user_messages -> agents
-    const accessResult = await query(`
+async function findAccessibleAttachment(req, attachmentId) {
+  const userId = req.user.userId;
+  const accessResult = await query(`
       SELECT
         a.attachment_id,
         a.content_type,
         a.file_name,
         a.size_bytes,
         a.storage_provider,
-        a.storage_key
+        a.storage_key, a.encrypted, a.iv_base64, a.auth_tag_base64, a.width, a.height, a.encryption_peer_id
       FROM attachments a
       LEFT JOIN agents ag ON a.agent_id = ag.agent_id
       LEFT JOIN message_attachments ma ON a.attachment_id = ma.attachment_id
@@ -364,6 +381,38 @@ async function downloadAttachment(req, res) {
         )
       LIMIT 1
     `, [attachmentId, userId, req.authContext?.type === 'agent_token' ? req.authContext.agentId : null]);
+  if (!accessResult.rows.length) {
+    const shared = await require('../services/peerAttachmentService').accessible(req, attachmentId);
+    if (shared) accessResult.rows.push(shared);
+  }
+  return accessResult;
+}
+
+async function attachmentMetadata(req, res) {
+  try {
+    if (!isValidUUID(req.params.attachmentId)) return validationError(res, "Invalid attachment ID format");
+    const result = await findAccessibleAttachment(req, req.params.attachmentId);
+    if (!result.rows[0]) return res.status(404).json({ error: { code: "ATTACHMENT_NOT_FOUND" } });
+    const a = result.rows[0];
+    return res.set("Cache-Control", "no-store").json({ attachmentId: a.attachment_id, fileName: a.file_name, contentType: a.content_type, sizeBytes: Number(a.size_bytes), encrypted: a.encrypted, peerAgentId: a.peer_agent_id || null, encryptionPeerId: a.encryption_peer_id || null, width: a.width, height: a.height, encryption: a.encrypted ? { alg: "AES-GCM", ivBase64: a.iv_base64, tagBase64: a.auth_tag_base64 } : null });
+  } catch (error) { return handleDatabaseError(res, error, "reading attachment metadata"); }
+}
+
+async function downloadAttachment(req, res) {
+  try {
+    const userId = req.user.userId;
+    const { attachmentId } = req.params;
+
+    // Validate attachmentId format
+    if (!isValidUUID(attachmentId)) {
+      return validationError(res, 'Invalid attachment ID format');
+    }
+
+    // Look up attachment and verify agent belongs to authenticated user through any path:
+    // 1. Direct agent_id on attachment
+    // 2. Through message_attachments -> messages -> agents
+    // 3. Through user_message_attachments -> user_messages -> agents
+    const accessResult = await findAccessibleAttachment(req, attachmentId);
 
     if (accessResult.rows.length === 0) {
       // Return 404 for both missing and unauthorized to avoid leaking existence
@@ -510,5 +559,6 @@ async function downloadAttachment(req, res) {
 module.exports = {
   uploadAttachment,
   downloadAttachment,
+  attachmentMetadata,
   uploadMiddleware
 };

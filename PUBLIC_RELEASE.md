@@ -21,8 +21,8 @@ Before publishing:
 4. If you want TTS support, provide your own `keys/service-account.json` outside git or use `GOOGLE_APPLICATION_CREDENTIALS`.
 5. Run `npm ci` to install the dependencies pinned in `package-lock.json`.
 6. Run `npm run migrate` to apply the migrations in `src/db/migrations/`, including
-   `060_shared_agent_a2a.sql`. Back up your database and configuration first.
-7. Review [the latest release notes](docs/RELEASE_2026-10-20.md).
+   `063_agent_identity_and_proactivity.sql`. Back up your database and configuration first.
+7. Review [the latest release notes](docs/RELEASE_2026-10-27.md).
 
 ## Self-hosting with built-in account verification
 

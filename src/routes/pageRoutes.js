@@ -80,7 +80,8 @@ function postLoginRedirectUrl(req) {
   const expiresAt = req.session?.mcpOAuthReturnToExpiresAt;
   delete req.session?.mcpOAuthReturnTo;
   delete req.session?.mcpOAuthReturnToExpiresAt;
-  if (typeof pending === 'string' && pending.startsWith('/oauth/authorize?') && !pending.startsWith('//') && Number(expiresAt) > Date.now()) return pending;
+  if (typeof pending === 'string' && !pending.startsWith('//') && Number(expiresAt) > Date.now() &&
+      (pending.startsWith('/oauth/authorize?') || /^\/mcp\/connection\?grant_id=[0-9a-f-]{36}$/i.test(pending))) return pending;
   return dashboardInvitationUrl(req);
 }
 
@@ -1117,7 +1118,8 @@ router.get('/privacy', (req, res) => {
  */
 router.get('/architecture', (req, res) => {
   res.render('architecture-guide', {
-    title: 'ChatMCPSpace Architecture Guide'
+    title: 'ChatMCPSpace Architecture Guide',
+    mcpServerUrl: `${(process.env.BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '')}/mcp`
   });
 });
 
@@ -1692,6 +1694,23 @@ router.get('/dashboard', protectRoute, async (req, res) => {
     // Format agent data
     const MarbleGenerator = require('../../public/js/marble-generator');
 
+    let mcpAgentIds = new Set();
+    try {
+      const mcpRows = await query(
+        `SELECT DISTINCT agent_id FROM (
+           SELECT agent_id FROM mcp_oauth_tokens WHERE user_id = $1 AND agent_id IS NOT NULL AND revoked_at IS NULL
+           UNION
+           SELECT agent_id FROM mcp_hosted_connections WHERE user_id = $1 AND agent_id IS NOT NULL
+           UNION
+           SELECT agent_id FROM mcp_oauth_codes WHERE user_id = $1 AND agent_id IS NOT NULL
+         ) mcp_agents`,
+        [userId]
+      );
+      mcpAgentIds = new Set(mcpRows.rows.map((r) => r.agent_id));
+    } catch (_mcpErr) {
+      // Non-fatal if MCP tables are not present in minimal test schemas
+    }
+
     const agents = agentsResult.rows.map(row => {
       // Use last_seen_at (when agent sent message or checked for updates) as the primary activity indicator
       const lastActivityTime = row.last_seen_at || row.last_message_time;
@@ -1707,6 +1726,7 @@ router.get('/dashboard', protectRoute, async (req, res) => {
         name: row.agent_name,
         agentType: row.agent_type || 'standard',
         device: require('../utils/agentDevice').normalizeDevice(row.runtime_config?.device),
+        externalProvider: mcpAgentIds.has(row.agent_id) ? 'mcp' : null,
         position: row.position,
         isWorking,
         lastWorkingHeartbeatTime: lastWorkingHeartbeatTime ? lastWorkingHeartbeatTime.toISOString() : null,
@@ -2309,6 +2329,27 @@ router.put('/dashboard/config', protectRoute, validateCsrfToken, async (req, res
     );
     if (agentResult.rows.length === 0) {
       return res.status(404).json({ error: { message: 'Agent not found' } });
+    }
+
+    // Preserve the active config on any already-queued unread user messages that didn't specify
+    // explicit runOverrides so switching providers mid-queue doesn't retroactively alter them.
+    try {
+      const prevOverrides = {};
+      if (runtimeState.config?.model_provider) prevOverrides.model_provider = runtimeState.config.model_provider;
+      if (runtimeState.config?.model) prevOverrides.model = runtimeState.config.model;
+      if (runtimeState.config?.approval_mode) prevOverrides.approval_mode = runtimeState.config.approval_mode;
+      if (runtimeState.config?.sandbox_mode) {
+        prevOverrides.sandbox_mode = runtimeState.config.sandbox_mode === 'danger-full-access' ? 'none' : runtimeState.config.sandbox_mode;
+      }
+      if (runtimeState.config?.thinking_effort) prevOverrides.thinking_effort = runtimeState.config.thinking_effort;
+      if (Object.keys(prevOverrides).length > 0) {
+        await query(
+          'UPDATE user_messages SET run_overrides = $1::jsonb WHERE agent_id = $2 AND read_at IS NULL AND run_overrides IS NULL',
+          [JSON.stringify(prevOverrides), agentResult.rows[0].agent_id]
+        );
+      }
+    } catch (_backfillErr) {
+      // Non-fatal if user_messages.run_overrides is unavailable in minimal test schemas
     }
 
     let config = { ...runtimeState.config };

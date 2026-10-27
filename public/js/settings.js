@@ -817,10 +817,22 @@ async function setupEncryptionSettings() {
   const passwordInput = document.getElementById('settingsDecryptionPassword');
   const saveBtn = document.getElementById('settingsDecryptionSaveBtn');
   const clearBtn = document.getElementById('clearEncryptionKeyBtn');
+  const connectionBtn = document.getElementById('copyAgentConnectionCodeBtn');
   const statusIcon = document.getElementById('encryptionKeyStatusIcon');
   const statusText = document.getElementById('encryptionKeyStatusText');
 
   if (!passwordInput || !saveBtn) return;
+
+  connectionBtn?.addEventListener('click', async () => {
+    connectionBtn.disabled = true;
+    try {
+      const code = await window.E2EEncryption.createAgentConnectionCode();
+      await navigator.clipboard.writeText(code);
+      showSuccessMessage('Connection code copied. Paste it only into the Jetspace installer on your computer.');
+    } catch (error) {
+      showErrorMessage(error.message || 'Could not copy the connection code. Allow clipboard access and try again.');
+    } finally { connectionBtn.disabled = false; }
+  });
 
   // Check current encryption key status
   await updateEncryptionKeyStatus();
@@ -845,6 +857,7 @@ async function setupEncryptionSettings() {
     try {
       // Derive and store the encryption key
       const key = await window.E2EEncryption.deriveKey(password, salt);
+      if (!await window.E2EEncryption.verifyMessageKey(key)) throw new Error('This password does not match your existing messages. Copy the Agent Connection Code to connect your current browser key, or enter the original message password.');
       await window.E2EEncryption.storeEncryptionKey(key);
 
       passwordInput.value = '';
@@ -852,7 +865,7 @@ async function setupEncryptionSettings() {
       await updateEncryptionKeyStatus();
     } catch (error) {
       console.error('Failed to save encryption key:', error);
-      showErrorMessage('Failed to save encryption key. Please try again.');
+      showErrorMessage(error.message || 'Failed to save encryption key. Please try again.');
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save';

@@ -1,23 +1,54 @@
-# Gemini MCP connection
+# MCP connection
 
-ChatMCP.Space exposes a Streamable HTTP MCP server at:
+Connect an OAuth-capable MCP client to:
 
 ```text
 https://chatmcp.space/mcp
 ```
 
-In Gemini, choose **Connect to an MCP server** and enter that full URL. Gemini discovers the ChatMCP OAuth authorization server, registers as a public OAuth client, and opens ChatMCP sign-in and consent when needed. Sign in to the verified account whose agents you want to see, then approve the requested access.
+Sign in, approve one agent and the desired message/file permissions, leave
+**Keep working after I close the browser** selected, and unlock encryption once.
+Use the return link to finish OAuth in the AI app. When the connection page says
+always-on access is active, you can close the browser. No local listener install
+or repeated pairing is needed.
 
-The first integration exposes one read-only tool, `list_agents`, which returns the names and IDs of agents owned by the consenting account. It does not provide chat contents, API keys, or encryption keys. OAuth access tokens expire after 15 minutes; clients can renew access using their rotated refresh token. The server supports token revocation; remove the custom app in Gemini to disconnect it.
+Always-on mode retains a protected copy of the approved encryption key on the
+server and processes messages/files for the connected AI app. The account key
+has account-wide cryptographic power; API permissions bind operations to the
+approved agent and permitted peers. Messages, files and retry payloads remain
+encrypted at rest. This connector is not end-to-end encrypted to the AI app.
+Browser-only mode is still available if you decline hosted key access.
+
+Tools include `list_agents`, `get_connection_status`, `read_inbox`, `read_thread`,
+`send_message`, `send_peer_message`, `ack_message`, `upload_attachment`, and
+`read_attachment`. Files of any MIME type are supported within the configured
+size/quota limits (20 MB per file by default). Upload once, then pass returned
+attachment IDs to user or peer messages. Downloads use bounded chunks and MCP
+resources, with native image blocks for complete small images. An AI app's own
+file interpretation and UI capabilities still apply.
+
+For shared peers in other accounts, configure their separate shared encryption
+password and salt once in the optional connection-page panel. Passwords are
+used locally to derive a key; only the derived key is protected by the hosted
+service. Existing collaboration permissions are checked again for delivery and
+file access. See [hosted operations](MCP_HOSTED_CONNECTOR.md) for details.
+
+Existing grants never silently acquire message/file/hosted access. Reconnect for
+fresh consent when upgrading. Access tokens last 15 minutes and refresh tokens
+rotate. Disconnect on the connection page or revoke OAuth to remove hosted keys,
+retry records and credentials. Hosted availability does not automatically wake
+an idle AI app; the app determines when it invokes tools.
 
 ## Deployment checks
 
-- Apply database migration `059_add_mcp_oauth.sql`.
-- Configure `BASE_URL` to the public HTTPS site origin.
-- Ensure the reverse proxy forwards `/.well-known/*`, `/oauth/*`, `/mcp`, and `/mcp-guide` to the Express app without rewriting MCP POST requests.
-- In a Gemini account that offers custom connected apps, enter `https://chatmcp.space/mcp`, complete login and consent, then invoke `list_agents`. This browser acceptance check remains pending until tested after deployment.
+- Apply migrations 059, 061 and 062 through the normal migration runner, alongside earlier application migrations.
+- Set `BASE_URL` to the public HTTPS origin and allow the application to reach its own authenticated agent API on that origin. Credentialed internal calls reject redirects.
+- Use a durable private wrapping-key file, or set `MCP_HOSTED_WRAPPING_KEY` from a secret manager. All replicas must share the wrapping key, database and attachment storage. Back up the wrapping key separately from the database.
+- Forward `/.well-known/*`, `/oauth/*` and `/mcp*` to Express; allow the configured file size plus base64 overhead in proxy request limits. Other JSON APIs retain their normal small limit.
+- Verify fresh OAuth and message/file round trips in each actual AI client before claiming compatibility. Local tests do not establish vendor acceptance.
 
-The browser guide is available at [https://chatmcp.space/mcp-guide](https://chatmcp.space/mcp-guide).
+The optional legacy browser worker requires one process or grant-aware routing.
+Always-on mode uses durable database state and does not require browser affinity.
 
 ## Live verification on October 13, 2026
 

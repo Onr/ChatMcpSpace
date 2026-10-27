@@ -38,6 +38,29 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const MAX_OUTPUT_BYTES = 20 * 1000 * 1000;
 const INTERRUPTED_REPLY = 'My previous run was interrupted before I could finish. I am ready for your next message.';
 
+async function fetchServer(url, options, fetchImpl = global.fetch) {
+  try { return await fetchImpl(url, options); }
+  catch (cause) {
+    const codes = [cause?.code, cause?.cause?.code, ...(cause?.cause?.errors || []).map(error => error.code)];
+    const code = codes.find(value => /^(E[A-Z0-9_]+|UND_ERR_[A-Z_]+)$/.test(value || '')) || 'NETWORK_ERROR';
+    const error = new Error(`Cannot connect to ${new URL(url).host} (${code}). Check your connection, DNS, proxy and firewall, then restart this agent. Your local state is retained.`);
+    error.retryable = true;
+    throw error;
+  }
+}
+
+async function retryStartup(operation, { wait = sleep, report = message => console.error(message), attempts = 4 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await operation(); }
+    catch (error) {
+      if (attempt >= attempts || !(error.retryable || error.status === 429 || error.status >= 500)) throw error;
+      const delay = Math.max(Math.min(30000, error.retryMs || 0), 2000 * 2 ** (attempt - 1));
+      report(`${error.message} Reconnecting in ${delay / 1000}s (${attempt}/${attempts - 1})…`);
+      await wait(delay);
+    }
+  }
+}
+
 function runtimeTimeout(env, managed = false) {
   const value = Number(env.EXTERNAL_AGENT_TIMEOUT_MS || (managed ? 3600000 : 600000));
   if (!Number.isInteger(value) || value < 1000 || value > 3600000) {
@@ -118,9 +141,14 @@ class SharedRunner {
     executionMode = null,
     deviceId = null,
     profileConfigPath = null,
-    supervisorRoot
+    supervisorRoot,
+    recoveryCommand = null
   } = {}) {
     this.bridge = bridge;
+    this.recoveryCommand = recoveryCommand;
+    // Message ID this process could not decrypt. Retrying with the same key
+    // cannot succeed, so it waits for a restart with a corrected password.
+    this.undecryptableMessage = null;
     this.state = bridge.state;
     this.fetch = fetchImpl;
     this.profiles = profiles;
@@ -187,30 +215,52 @@ class SharedRunner {
     this.bridge.persist();
   }
   async api(route, body, method, timeoutMs = 30000) {
-    const r = await this.fetch(this.state.baseUrl + '/api/agent/shared' + route, {
-      method: method || (body !== undefined ? 'POST' : 'GET'),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-agent-token': this.state.token,
-        'x-agent-name': this.state.agentName,
-        'x-shared-runtime': this.runtimeId
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: 'error'
-    });
+    let r;
+    try {
+      r = await fetchServer(this.state.baseUrl + '/api/agent/shared' + route, {
+        method: method || (body !== undefined ? 'POST' : 'GET'),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-agent-token': this.state.token,
+          'x-agent-name': this.state.agentName,
+          'x-shared-runtime': this.runtimeId
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'error'
+      }, this.fetch);
+    } catch (error) {
+      if (this.bridge?.checkInactivity && Date.now() - this.bridge.lastCommunicationAt >= this.bridge.inactivityTimeoutMs) {
+        this.bridge.checkInactivity();
+      }
+      throw error;
+    }
     const data = await r.json().catch(() => {
       if (r.ok) throw new Error('Shared API returned an invalid response; pending work is retained.');
       return {};
     });
     if (!r.ok) {
+      if (this.bridge?.checkInactivity && Date.now() - this.bridge.lastCommunicationAt >= this.bridge.inactivityTimeoutMs) {
+        this.bridge.checkInactivity();
+      }
       const error = new Error(data.error?.message || `Shared API HTTP ${r.status}`);
       error.status = r.status;
+      if (r.status === 401 || ((r.status === 404 || r.status === 410) && (route === '/runtime' || route === '/identity'))) {
+        if (this.bridge) {
+          this.bridge.stopped = true;
+          this.bridge.terminatedReason = data.agentStatus || 'deleted';
+          this.bridge.controller?.abort();
+        }
+        this.controller?.abort();
+        error.code = 'AGENT_TERMINATED';
+        error.retryable = false;
+      }
       const retryAfter = r.headers?.get?.('retry-after');
       const retryMs = /^\d+$/.test(retryAfter || '') ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
       error.retryMs = Number.isFinite(retryMs) ? Math.max(0, retryMs) : 0;
       throw error;
     }
+    if (this.bridge) this.bridge.lastCommunicationAt = Date.now();
     return data;
   }
   async adoptRuntime(id) {
@@ -730,12 +780,15 @@ class SharedRunner {
     if (!p) {
       const batch = await this.api('/claim', {});
       if (!batch) return false;
+      if (this.bridge) this.bridge.lastActivityAt = Date.now();
       p = {
         phase: 'claimed',
         batch
       };
       this.state.shared.pending = p;
       this.persist();
+    } else if (this.bridge) {
+      this.bridge.lastActivityAt = Date.now();
     }
     const current = await this.api(`/batches/${p.batch.id}`);
     if (p.action?.phase === 'receipt_pending') {
@@ -1055,11 +1108,13 @@ class SharedRunner {
         messages: p.deliveries
       });
       this.state.shared.pending = null;
+      if (this.bridge) this.bridge.lastActivityAt = Date.now();
       this.persist();
     }
     return true;
   }
   async tick() {
+    this.bridge.checkInactivity?.();
     await this.register();
     await this.bridge.heartbeat(this.busy || this.bridge.busy);
     // A crash between inbox acknowledgement and release leaves only this slot.
@@ -1095,6 +1150,14 @@ class SharedRunner {
       return;
     }
     if (prior && ['running', 'uncertain'].includes(this.state.pending.phase)) throw new Error('Private execution uncertain; use external bridge retry/skip after inspecting the runtime.');
+    if (this.undecryptableMessage === this.state.pending.id) {
+      if (prior) {
+        await this.api('/release', { executionId: prior });
+        this.state.shared.privateExecution = null;
+        this.persist();
+      }
+      return;
+    }
     const id = prior || crypto.randomUUID();
     const {
       config
@@ -1103,7 +1166,10 @@ class SharedRunner {
     });
     this.state.shared.privateExecution = id;
     this.persist();
-    this.privateProfile = this.profile(config);
+    const effectiveConfig = this.state.pending?.message?.runOverrides
+      ? { ...config, ...this.state.pending.message.runOverrides }
+      : config;
+    this.privateProfile = this.profile(effectiveConfig);
     try {
       await this.bridge.completePending();
       await this.api('/release', {
@@ -1113,6 +1179,7 @@ class SharedRunner {
       this.state.shared.lastTurnKind = 'private';
       this.persist();
     } catch (e) {
+      if (e.code === 'ENCRYPTION_KEY_MISMATCH') return this.reportUndecryptable(id, e);
       if (['running', 'uncertain'].includes(this.state.pending?.phase)) await this.api('/release', {
         executionId: id,
         uncertain: true
@@ -1121,6 +1188,40 @@ class SharedRunner {
     } finally {
       this.privateProfile = null;
     }
+  }
+  // Startup check against this agent's own encrypted messages, so a wrong
+  // password shows up in the start output, not only when a message arrives.
+  async checkMessageKey() {
+    let samples;
+    try { samples = (await this.bridge.api('/encryption-samples')).samples; } catch (_) { return; }
+    if (!Array.isArray(samples) || !samples.length) return;
+    for (const sample of samples.slice(0, 6)) {
+      try { this.bridge.openMessage(sample); return; } catch (_) { /* Try the next sample. */ }
+    }
+    console.error(`This agent cannot read your messages: the decryption password saved for it does not match your account.\nFix: ${this.recoveryCommand || 'agent-cli.sh --set-password "<agent name>"'}`);
+  }
+  // Nothing ran, so the slot is released cleanly and the message stays unread.
+  // The owner gets one plain-text notice (their key is what is wrong, so an
+  // encrypted one would be unreadable) instead of a silent retry loop.
+  async reportUndecryptable(executionId, error) {
+    const messageId = this.state.pending.id;
+    this.undecryptableMessage = messageId;
+    const fix = this.recoveryCommand || 'agent-cli.sh --set-password "<agent name>"';
+    console.error(`${error.message}\nFix: ${fix}`);
+    if (this.state.shared.undecryptableNotice !== messageId) {
+      await this.bridge.api('/messages', {
+        agentName: this.state.agentName,
+        encrypted: false,
+        priority: 2,
+        clientMessageId: crypto.randomUUID(),
+        content: `⚠️ ${this.state.agentName} is running but cannot read your message. The decryption password saved on its computer does not match your account, so no task was started and your message is still waiting.\n\nOn that computer, run:\n${fix}\nEnter your account password (Google sign-in: Settings > Decryption Password). The agent restarts and answers the waiting message.`
+      }).then(() => {
+        this.state.shared.undecryptableNotice = messageId;
+      }).catch(notice => console.error(`Could not post the decryption warning: ${notice.message}`));
+    }
+    await this.api('/release', { executionId });
+    this.state.shared.privateExecution = null;
+    this.persist();
   }
 }
 function prepareManagedProfile(env) {
@@ -1191,11 +1292,28 @@ function managedStorageDirectory(env, { home = os.homedir() } = {}) {
   }
   return destination;
 }
+// USER_PASSWORD_B64 is written by newer setups because shell and dotenv
+// quoting disagree on passwords containing $, quotes, backticks or backslashes.
+function envPassword(env) {
+  if (env.USER_PASSWORD_B64) return Buffer.from(env.USER_PASSWORD_B64, 'base64').toString('utf8');
+  return env.USER_PASSWORD || '';
+}
+function envMessageKey(env) {
+  const password = envPassword(env);
+  if (!password || !env.ENCRYPTION_SALT) return null;
+  return crypto.pbkdf2Sync(password, Buffer.from(env.ENCRYPTION_SALT, 'base64'), 100000, 32, 'sha256').toString('base64');
+}
+function managedRecoveryCommand(env) {
+  const runner = env.CHATSPACE_SHARED_MANAGED_RUNNER;
+  if (!runner || !env.AGENT_NAME) return null;
+  const cli = path.resolve(path.dirname(runner), '..', '..', 'agent-cli.sh');
+  return `bash "${fs.existsSync(cli) ? cli : 'agent-cli.sh'}" --set-password "${env.AGENT_NAME}"`;
+}
 async function enrollManaged(file, env) {
     if (fs.existsSync(file)) throw new Error('State already exists; use it or choose another path');
-    if (!env.API_KEY || !env.API_BASE || !env.AGENT_NAME || !env.ENCRYPTION_SALT || !env.USER_PASSWORD) throw new Error('Load the existing managed agent environment locally before init-managed');
+    if (!env.API_KEY || !env.API_BASE || !env.AGENT_NAME || !env.ENCRYPTION_SALT || !envPassword(env)) throw new Error('Load the existing managed agent environment locally before init-managed');
     const baseUrl = endpoint(env.API_BASE.replace(/\/api\/?$/, ''));
-    const response = await fetch(baseUrl + '/api/agent/shared/enroll', {
+    const response = await fetchServer(baseUrl + '/api/agent/shared/enroll', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1206,9 +1324,13 @@ async function enrollManaged(file, env) {
       signal: AbortSignal.timeout(30000),
       redirect: 'error'
     });
-    if (!response.ok) throw new Error('Managed enrollment failed (HTTP ' + response.status + ')');
+    if (!response.ok) {
+      const error = new Error('Managed enrollment failed (HTTP ' + response.status + '). Check the account API key and server availability.');
+      error.status = response.status;
+      throw error;
+    }
     const identity = await response.json();
-    const key = crypto.pbkdf2Sync(env.USER_PASSWORD, Buffer.from(env.ENCRYPTION_SALT, 'base64'), 100000, 32, 'sha256').toString('base64');
+    const key = envMessageKey(env);
     saveState(file, {
       version: 1,
       baseUrl,
@@ -1246,32 +1368,95 @@ async function main() {
     }
     const configPath = process.env.CHATSPACE_SHARED_PROFILES;
     if (!configPath) throw new Error('Set CHATSPACE_SHARED_PROFILES to an owner-controlled JSON profile file');
+    const clearManagedRunningFlag = (reason, removeStateFile = false) => {
+      if (command !== 'run-managed') return;
+      const managedRunner = process.env.CHATSPACE_SHARED_MANAGED_RUNNER;
+      if (managedRunner) {
+        const stateDir = path.join(path.dirname(managedRunner), 'agent_state');
+        try { fs.rmSync(path.join(stateDir, '.running'), { force: true }); } catch (_) {}
+        if (reason && reason !== 'inactivity') {
+          try { fs.writeFileSync(path.join(stateDir, '.agent_terminated'), reason); } catch (_) {}
+        }
+      }
+      if (removeStateFile && file) {
+        try { fs.rmSync(file, { force: true }); } catch (_) {}
+      }
+    };
     if (command === 'run-managed') {
       prepareManagedProfile(process.env);
-      if (!fs.existsSync(file)) await enrollManaged(file, process.env);
+      if (!fs.existsSync(file)) {
+        try {
+          await retryStartup(() => enrollManaged(file, process.env));
+        } catch (enrollErr) {
+          if (enrollErr.status === 404 || enrollErr.status === 403 || enrollErr.status === 410) {
+            console.error(`Agent "${process.env.AGENT_NAME || ''}" no longer exists on the site (HTTP ${enrollErr.status}). Stopping agent automatically.`);
+            clearManagedRunningFlag('deleted', true);
+            return;
+          }
+          throw enrollErr;
+        }
+      }
     }
     const profiles = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const state = loadState(file);
-    const bridge = new Bridge(state, {
+    let state = loadState(file);
+    let bridge = new Bridge(state, {
       file,
       runtimeKey: process.env.EXTERNAL_AGENT_API_KEY || 'managed-local',
       timeoutMs: runtimeTimeout(process.env, command === 'run-managed'),
-      sharedFiles: true
+      sharedFiles: true,
+      keyCandidates: command === 'run-managed' ? [envMessageKey(process.env)] : []
     });
     const protocolVersion = Number(process.env.CHATSPACE_SHARED_PROTOCOL || '2');
-    const runner = new SharedRunner(bridge, profiles, {
+    let runner = new SharedRunner(bridge, profiles, {
       exportRoot: process.env.CHATSPACE_SHARED_EXPORT_DIR || null,
       protocolVersion,
       executionMode: protocolVersion === 2 ? (process.env.CHATSPACE_SHARED_EXECUTION_MODE || (profiles.every(profile => profile.executor === 'rootless-podman') ? 'restricted' : 'trusted')) : null,
       deviceId: process.env.CHATSPACE_SHARED_DEVICE_ID || null,
-      profileConfigPath: path.resolve(configPath)
+      profileConfigPath: path.resolve(configPath),
+      recoveryCommand: command === 'run-managed' ? managedRecoveryCommand(process.env) : null
     });
     if (command === 'adopt-runtime') {
       await runner.adoptRuntime(process.argv[3]);
       console.log('Runtime identity updated; pending work is preserved for explicit recovery.');
       return;
     }
-    await runner.initialize();
+    try {
+      await retryStartup(() => runner.initialize());
+    } catch (initErr) {
+      if (command === 'run-managed' && (initErr.status === 401 || initErr.status === 404 || initErr.status === 410 || initErr.code === 'AGENT_TERMINATED')) {
+        // Token may have been invalidated by archive/delete; try re-enrolling once in case the agent was unarchived.
+        try {
+          fs.rmSync(file, { force: true });
+          await enrollManaged(file, process.env);
+          state = loadState(file);
+          bridge = new Bridge(state, {
+            file,
+            runtimeKey: process.env.EXTERNAL_AGENT_API_KEY || 'managed-local',
+            timeoutMs: runtimeTimeout(process.env, command === 'run-managed'),
+            sharedFiles: true,
+            keyCandidates: [envMessageKey(process.env)]
+          });
+          runner = new SharedRunner(bridge, profiles, {
+            exportRoot: process.env.CHATSPACE_SHARED_EXPORT_DIR || null,
+            protocolVersion,
+            executionMode: protocolVersion === 2 ? (process.env.CHATSPACE_SHARED_EXECUTION_MODE || (profiles.every(profile => profile.executor === 'rootless-podman') ? 'restricted' : 'trusted')) : null,
+            deviceId: process.env.CHATSPACE_SHARED_DEVICE_ID || null,
+            profileConfigPath: path.resolve(configPath),
+            recoveryCommand: managedRecoveryCommand(process.env)
+          });
+          await retryStartup(() => runner.initialize());
+        } catch (reEnrollErr) {
+          if (reEnrollErr.status === 404 || reEnrollErr.status === 403 || reEnrollErr.status === 410 || reEnrollErr.status === 401) {
+            console.error(`Agent "${state.agentName}" has been deleted or archived on the site. Stopping agent automatically.`);
+            clearManagedRunningFlag('deleted', true);
+            return;
+          }
+          throw reEnrollErr;
+        }
+      } else {
+        throw initErr;
+      }
+    }
     if (['retry-private', 'skip-private'].includes(command)) {
       const execution = state.shared.privateExecution;
       if (!execution) throw new Error('No private execution to resolve');
@@ -1296,6 +1481,8 @@ async function main() {
     };
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
+    if (command === 'run-managed') await runner.checkMessageKey();
+    console.log(`Connected as ${state.agentName}. Waiting for messages... (Ctrl+C to stop)`);
     timer = setInterval(() => {
       // Idle ticks already send a heartbeat. During a provider turn keep the
       // connection live without doubling the idle polling budget.
@@ -1303,7 +1490,12 @@ async function main() {
       heartbeatInFlight = true;
       runner.register().then(() => bridge.heartbeat(runner.busy || bridge.busy)).catch(e => {
         console.error(e.message);
-        if (bridge.stopped) shutdown();
+        if (bridge.stopped) {
+          if (bridge.terminatedReason) {
+            clearManagedRunningFlag(bridge.terminatedReason, bridge.terminatedReason !== 'inactivity');
+          }
+          shutdown();
+        }
       }).finally(() => { heartbeatInFlight = false; });
     }, 10000);
     while (!stopped) {
@@ -1312,7 +1504,12 @@ async function main() {
         await runner.tick();
       } catch (e) {
         console.error(e.message);
-        if (bridge.stopped) break;
+        if (bridge.stopped) {
+          if (bridge.terminatedReason) {
+            clearManagedRunningFlag(bridge.terminatedReason, bridge.terminatedReason !== 'inactivity');
+          }
+          break;
+        }
         retryMs = Number.isFinite(e.retryMs) ? e.retryMs : 0;
       }
       await sleep(Math.max(10000, bridge.nextPollMs, retryMs), undefined, { signal: sleepController.signal })
@@ -1332,5 +1529,9 @@ module.exports = {
   runtimeTimeout,
   prepareManagedProfile,
   managedStorageDirectory,
-  readApprovedExport
+  fetchServer,
+  retryStartup,
+  readApprovedExport,
+  envPassword,
+  envMessageKey
 };

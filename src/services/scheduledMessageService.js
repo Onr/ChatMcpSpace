@@ -22,7 +22,7 @@ async function deliverDueScheduledMessages() {
   try {
     await client.query('BEGIN');
     const due = await client.query(
-      `SELECT sm.scheduled_message_id, sm.agent_id, sm.content, sm.encrypted, sm.run_overrides, a.agent_name, a.user_id AS owner_id
+      `SELECT sm.scheduled_message_id, sm.agent_id, sm.content, sm.encrypted, sm.run_overrides, sm.brief_snapshot, a.agent_name, a.user_id AS owner_id
        FROM scheduled_user_messages sm
        JOIN agents a ON a.agent_id = sm.agent_id
        WHERE sm.delivered_at IS NULL AND sm.scheduled_for <= NOW()::timestamp
@@ -36,8 +36,8 @@ async function deliverDueScheduledMessages() {
         catch (error) { if (error.status===409) continue; throw error; }
       }
       await client.query(
-        'INSERT INTO user_messages (agent_id, content, encrypted, run_overrides) VALUES ($1, $2, $3, $4::jsonb)',
-        [scheduled.agent_id, scheduled.content, scheduled.encrypted, scheduled.run_overrides ? JSON.stringify(scheduled.run_overrides) : null]
+        'INSERT INTO user_messages (agent_id, content, encrypted, run_overrides, brief_snapshot) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)',
+        [scheduled.agent_id, scheduled.content, scheduled.encrypted, scheduled.run_overrides ? JSON.stringify(scheduled.run_overrides) : null, scheduled.brief_snapshot ? JSON.stringify(scheduled.brief_snapshot) : null]
       );
       await client.query(
         'UPDATE scheduled_user_messages SET delivered_at = NOW() WHERE scheduled_message_id = $1',

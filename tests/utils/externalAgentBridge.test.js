@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Bridge, seal, open, saveState, loadState, acquireLock, endpoint, REPLY_TYPE } = require('../../scripts/external-agent-bridge');
+const { Bridge, seal, open, saveState, loadState, acquireLock, endpoint, REPLY_TYPE, INACTIVITY_SHUTDOWN_MS } = require('../../scripts/external-agent-bridge');
 const { encryptMessage, decryptMessage } = require('../../src/utils/encryptionHelper');
 
 function fixture() {
@@ -269,6 +269,31 @@ describe('External agent bridge', () => {
       throw new Error('Stream should already be cancelled');
     })() }) });
     await expect(bridge.downloadAttachment({ attachmentId: crypto.randomUUID(), encrypted: false })).rejects.toThrow('20MB');
+  });
+
+  it('stops cleanly when the agent is deleted or archived on the site', async () => {
+    const state = fixture();
+    state.pending = null;
+    const fetchImpl = jest.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ responses: [], agentDeletedOrArchived: true, agentStatus: 'deleted' }), { status: 200 })
+    );
+    const bridge = new Bridge(state, { fetchImpl });
+    await expect(bridge.api('/responses?agentName=Hermes')).rejects.toMatchObject({
+      code: 'AGENT_TERMINATED',
+      retryable: false,
+    });
+    expect(bridge.stopped).toBe(true);
+    expect(bridge.terminatedReason).toBe('deleted');
+  });
+
+  it('stops cleanly after 30 days of inactivity or lack of communication with the site', () => {
+    expect(INACTIVITY_SHUTDOWN_MS).toBe(30 * 24 * 60 * 60 * 1000);
+    const state = fixture();
+    const bridge = new Bridge(state);
+    bridge.lastActivityAt = Date.now() - INACTIVITY_SHUTDOWN_MS - 1000;
+    expect(() => bridge.checkInactivity()).toThrow(/30 days/);
+    expect(bridge.stopped).toBe(true);
+    expect(bridge.terminatedReason).toBe('inactivity');
   });
 
 });

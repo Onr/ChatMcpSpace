@@ -13,6 +13,11 @@ DROP TABLE IF EXISTS email_verification_tokens CASCADE;
 DROP TABLE IF EXISTS user_mfa CASCADE;
 DROP TABLE IF EXISTS user_responses CASCADE;
 DROP TABLE IF EXISTS question_options CASCADE;
+DROP TABLE IF EXISTS agent_brief_wakes CASCADE;
+DROP TABLE IF EXISTS agent_brief_activity CASCADE;
+DROP TABLE IF EXISTS agent_brief_suggestions CASCADE;
+DROP TABLE IF EXISTS agent_brief_revisions CASCADE;
+DROP TABLE IF EXISTS agent_briefs CASCADE;
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS user_messages CASCADE;
 DROP TABLE IF EXISTS feedback CASCADE;
@@ -85,6 +90,63 @@ CREATE TABLE agents (
   UNIQUE(user_id, agent_name)
 );
 
+CREATE TABLE agent_briefs (
+  agent_id UUID PRIMARY KEY REFERENCES agents(agent_id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  document JSONB NOT NULL DEFAULT '{}'::jsonb,
+  policy JSONB NOT NULL DEFAULT '{"enabled":false}'::jsonb,
+  state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_brief_revisions (
+  agent_id UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL CHECK (revision > 0),
+  document JSONB NOT NULL,
+  policy JSONB NOT NULL,
+  actor_type VARCHAR(20) NOT NULL CHECK (actor_type IN ('owner', 'collaborator', 'restore')),
+  changed_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (agent_id, revision)
+);
+
+CREATE TABLE agent_brief_suggestions (
+  suggestion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  base_revision INTEGER NOT NULL,
+  proposed_document JSONB NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_at TIMESTAMP
+);
+CREATE INDEX idx_agent_brief_suggestions_pending ON agent_brief_suggestions(agent_id, created_at DESC) WHERE status = 'pending';
+
+CREATE TABLE agent_brief_activity (
+  activity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  event_type VARCHAR(40) NOT NULL,
+  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_agent_brief_activity_recent ON agent_brief_activity(agent_id, created_at DESC);
+
+CREATE TABLE agent_brief_wakes (
+  run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  brief_revision INTEGER NOT NULL,
+  trigger_type VARCHAR(20) NOT NULL CHECK (trigger_type IN ('periodic', 'check_once')),
+  status VARCHAR(20) NOT NULL DEFAULT 'admitted' CHECK (status IN ('admitted', 'completed', 'unknown', 'cancelled')),
+  policy_snapshot JSONB NOT NULL,
+  outcome VARCHAR(30),
+  reason VARCHAR(500),
+  admitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  lease_expires_at TIMESTAMP NOT NULL,
+  finished_at TIMESTAMP
+);
+CREATE INDEX idx_agent_brief_wakes_recent ON agent_brief_wakes(agent_id, admitted_at DESC);
+CREATE UNIQUE INDEX idx_agent_brief_wakes_one_admitted ON agent_brief_wakes(agent_id) WHERE status = 'admitted';
+
 -- Multiple named Chief of Staff agents are allowed per user; UNIQUE(user_id, agent_name)
 -- keeps each local CoS distinguishable by name.
 
@@ -103,6 +165,7 @@ CREATE TABLE messages (
   -- A client-generated UUID makes message delivery safe to retry after an
   -- ambiguous network failure without displaying the same reply twice.
   client_message_id UUID DEFAULT NULL,
+  brief_provenance JSONB DEFAULT NULL,
   read_at TIMESTAMP DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -137,6 +200,7 @@ CREATE TABLE user_messages (
   encrypted BOOLEAN DEFAULT FALSE,
   read_at TIMESTAMP DEFAULT NULL,
   run_overrides JSONB DEFAULT NULL,
+  brief_snapshot JSONB DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -261,8 +325,10 @@ CREATE TABLE agent_api_credentials (
   expires_at TIMESTAMP,
   revoked_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  rotated_from UUID REFERENCES agent_api_credentials(credential_id) ON DELETE SET NULL
+  rotated_from UUID REFERENCES agent_api_credentials(credential_id) ON DELETE SET NULL,
+  mcp_grant_id UUID
 );
+
 
 -- Auth event audit log for agent tokens
 CREATE TABLE agent_auth_events (

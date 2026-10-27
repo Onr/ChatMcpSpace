@@ -33,6 +33,19 @@ describe('scoped agent config reads', () => {
     if (allowed) expect(next).toHaveBeenCalledTimes(1);
     else { expect(next).not.toHaveBeenCalled(); expect(res.status).toHaveBeenCalledWith(403); }
   });
+  test.each([
+    ['GET', '/brief', 'agent.responses.read'],
+    ['POST', '/brief/wake/claim', 'agent.responses.read'],
+    ['POST', '/brief/wake/11111111-1111-4111-8111-111111111111/outcome', 'agent.responses.read'],
+    ['POST', '/brief/suggestions', 'agent.messages.write']
+  ])('%s %s requires %s', async (method, path, scope) => {
+    verifyScopedCredential.mockResolvedValue({ agentName: 'Native Agent', agentId: 'agent-id', credentialId: 'credential-id', user: { userId: 'owner-id' }, scopes: [scope] });
+    query.mockResolvedValue({ rows: [] });
+    const req = { method, path, query: { agentName: 'Native Agent' }, body: { agentName: 'Native Agent' }, headers: { 'x-agent-token': 'test-only' } };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() }, next = jest.fn();
+    await requireApiKey(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('Auth Middleware', () => {

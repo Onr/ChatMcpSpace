@@ -347,9 +347,10 @@ node /absolute/path/external-agent-bridge.js send --file /absolute/path/photo.pn
 ```
 
 Repeat `--file` to attach multiple files within the site's per-message limit.
-Uploads are encrypted locally before transfer. This command sends files to the
-user; peer DMs currently have no attachment contract. Do not route around that
-restriction by exposing private file URLs. Standalone sends have no persistent
+Uploads are encrypted locally before transfer. Set CHATSPACE_TO_AGENT to a
+permitted peer name (or shared peer ID) to send files in a peer DM. Shared peers
+use GROUP_PASSWORD/GROUP_SALT for both text and file encryption; group and
+membership checks still apply to downloads. Never expose private file URLs. Standalone sends have no persistent
 outbox: if upload or delivery becomes uncertain, inspect the conversation before
 retrying. Runtime text responses do not automatically upload arbitrary local
 paths; the agent uses this explicit command with its existing authorized tools.

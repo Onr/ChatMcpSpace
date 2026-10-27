@@ -176,8 +176,11 @@ describe('generateMainCLIScript - agent runner fixes', () => {
       expect(guardIndex).toBeLessThan(dmCheckIndex);
     });
 
-    it('filters out error messages from dm check output', () => {
-      expect(cliScript).toContain('error\\|not supported\\|unknown command\\|usage:');
+    it('uses helper exit status to distinguish failures from valid message text', () => {
+      const start = cliScript.indexOf('check_for_messages() {');
+      const check = cliScript.slice(start, cliScript.indexOf('get_history() {', start));
+      expect(check).toContain('[ "$dm_exit" -eq 0 ]');
+      expect(check).not.toContain('grep -qi');
     });
   });
 
@@ -314,16 +317,22 @@ printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', tim
     });
   });
 
-  describe('Self wake and delayed tasks', () => {
-    it('includes self-wake file handling in the runner', () => {
+  describe('Policy-controlled automatic work', () => {
+    it('retains legacy self-wake files for rollback without using them in the idle loop', () => {
       expect(cliScript).toContain('SELF_WAKE_FILE="$STATE_DIR/.self_wakeup.txt"');
-      expect(cliScript).toContain('consume_self_wakeup()');
-      expect(cliScript).toContain('SELF WAKEUP:');
+      expect(cliScript.includes('wake-claim')).toBe(true);
+      expect(cliScript.includes('SELF WAKEUP:')).toBe(false);
     });
 
     it('creates the self wake guide for new agents', () => {
-      expect(cliScript).toContain('SELF_WAKE_GUIDE.md');
-      expect(cliScript).toContain('Self-Wake & Delayed Tasks');
+      expect(cliScript.includes('SELF_WAKE_GUIDE.md')).toBe(true);
+      expect(cliScript.includes('Automatic work and delayed tasks')).toBe(true);
+    });
+
+    it('creates the on-demand large file transfer skill for new agents', () => {
+      expect(cliScript).toContain('create_large_file_transfer_skill "$agent_dir"');
+      expect(cliScript).toContain('SKILL_LARGE_FILE_TRANSFER.md');
+      expect(cliScript).toContain('wormhole receive --accept-file');
     });
 
     it('seeds scheduled tasks file for new agents', () => {
@@ -331,13 +340,14 @@ printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', tim
       expect(cliScript).toContain("echo '[]' >");
     });
 
-    it('defers scheduled/self wake until first user message arrives', () => {
-      expect(cliScript).toContain('Skipping scheduled/self wake - waiting for first user message');
+    it('claims policy-controlled wake-ups after checking user messages', () => {
+      expect(cliScript.includes('wake-claim')).toBe(true);
+      expect(cliScript.includes('wake-outcome')).toBe(true);
     });
 
-    it('documents the self-wakeup trigger file example', () => {
-      expect(cliScript).toContain('agent_state/.self_wakeup.txt');
-      expect(cliScript).toContain('SELF WAKEUP: <file contents>');
+    it('documents that legacy self-wakeup files are retained but not executed', () => {
+      expect(cliScript.includes('.self_wakeup.txt')).toBe(true);
+      expect(cliScript.includes('not executed')).toBe(true);
     });
   });
 
@@ -977,6 +987,24 @@ printf '%s:%s' "$CONSECUTIVE_FAILURES" "$run_success"`], { encoding: 'utf8', tim
     });
   });
 
+  describe('30-day inactivity and deleted/archived permanent shutdown', () => {
+    it('defines 30-day (2592000s) shutdown thresholds for no connection and inactivity', () => {
+      expect(cliScript).toContain('NO_CONNECTION_SHUTDOWN_SECONDS="${NO_CONNECTION_SHUTDOWN_SECONDS:-2592000}"');
+      expect(cliScript).toContain('INACTIVITY_SHUTDOWN_SECONDS="${INACTIVITY_SHUTDOWN_SECONDS:-2592000}"');
+      expect(cliScript).toContain('check_no_connection_shutdown()');
+      expect(cliScript).toContain('check_inactivity_shutdown()');
+      expect(cliScript).toContain('handle_permanent_shutdown()');
+    });
+
+    it('records .agent_terminated in message_helper.py and heartbeat when agent is deleted or archived', () => {
+      expect(cliScript).toContain('_AGENT_TERMINATED_FILE = _script_dir / "agent_state" / ".agent_terminated"');
+      expect(cliScript).toContain('def _check_and_record_terminated(payload: dict) -> bool:');
+      expect(cliScript).toContain('TERMINATED_FLAG="$STATE_DIR/.agent_terminated"');
+      expect(cliScript).toContain('check_terminated_flag()');
+      expect(cliScript).toContain('handle_permanent_shutdown "Agent was deleted or archived on the site"');
+    });
+  });
+
   describe('Network timeout safety', () => {
     // Extract auto_sync function body from each script variant
     function extractAutoSyncBody(script) {
@@ -1200,7 +1228,7 @@ test('headless session commands use an enabled persistent service instead of sta
     fs.writeFileSync(path.join(agentDir, '.env'), ''); fs.writeFileSync(path.join(agentDir, 'agent-runner.sh'), '#!/bin/bash\n', { mode: 0o700 });
     const source = generateMainCLIScript('fixture', 'https://example.invalid');
     const start = source.indexOf('start_agent_session() {'), end = source.indexOf('show_agent_session_status() {', start);
-    const harness = `CHATSPACE_DIR="$1"\nget_agent_folder() { printf fixture; }\nagent_session_name() { printf fixture-local-agent; }\nsystemctl() { if [ "$2" = "is-enabled" ]; then return 0; fi; printf 'SERVICE:%s:%s\\n' "$2" "$3"; }\ntmux() { printf 'UNEXPECTED_TMUX'; return 1; }\n${source.slice(start, end)}\nstart_agent_session Fixture start\nstart_agent_session Fixture restart\nshutdown_agent_session Fixture`;
+    const harness = `CHATSPACE_DIR="$1"\nget_agent_folder() { printf fixture; }\nresolve_agent_dir() { printf '%s/fixture' "$CHATSPACE_DIR"; }\nagent_session_name() { printf fixture-local-agent; }\nsystemctl() { if [ "$2" = "is-enabled" ]; then return 0; fi; printf 'SERVICE:%s:%s\\n' "$2" "$3"; }\ntmux() { printf 'UNEXPECTED_TMUX'; return 1; }\n${source.slice(start, end)}\nstart_agent_session Fixture start\nstart_agent_session Fixture restart\nshutdown_agent_session Fixture`;
     const result = require('child_process').spawnSync('bash', ['-c', harness, 'fixture', dir], { encoding: 'utf8' });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('SERVICE:start:agent-fixture.service');

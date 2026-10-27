@@ -22,9 +22,8 @@
       return steps;
     }
     return [
-      { title: 'Set up your Windows agent', shell: 'PowerShell', command: `Set-ExecutionPolicy -Scope Process Bypass -Force
-& ([scriptblock]::Create((Invoke-RestMethod -Uri ${powershellQuote(url.href.replace(/\/+$/, '') + '/setup.ps1')} -ErrorAction Stop)))`, note: 'Open PowerShell in your project folder. Install and sign in to Codex, Claude, or Gemini on Windows first. Enter credentials only in the installer. Agents keep working in the background; use jetspace stop to stop them.' },
-      { title: 'Need Node.js? Install it first', shell: 'PowerShell', command: 'winget install --id OpenJS.NodeJS.LTS --exact --source winget', note: 'Requires Node.js 22 or newer. Skip this if it is already installed. Reopen PowerShell after installation, then run setup above.', optional: true }
+      { title: 'Set up your Windows agent', shell: 'PowerShell', command: `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -Scope Process Bypass -Force; & ([scriptblock]::Create((Invoke-RestMethod -Uri ${powershellQuote(url.href.replace(/\/+$/, '') + '/setup.ps1')} -ErrorAction Stop)))"`, note: 'Open PowerShell in your project folder. Setup automatically installs Node.js LTS for Jetspace if Node.js 22+ is missing or too old, then continues in the same window. It then finds your installed AI CLI (Codex, Claude Code or Gemini) — no provider choice needed — or offers to install one and sign you in. Enter credentials only in the installer. Afterwards, type jetspace in any new PowerShell or Command Prompt window. Agents run in the background while Windows is awake; use jetspace stop to stop them. To update, paste the same command again: it restarts your existing agents and does not ask for a new one.' },
+      { title: 'Installation failed? Check your setup', shell: 'PowerShell', command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\\Jetspace\\windows-cli.ps1" doctor', note: 'Use after the runtime has downloaded. Checks installed files, private permissions, and available provider CLIs without reading account credentials. If the CLI file is missing or the Node.js download failed, check your internet connection and rerun setup above.', optional: true }
     ];
   }
 
@@ -129,6 +128,28 @@
         dialog.querySelector('[data-setup-platform]').value = button.dataset.setupOsChoice;
         render();
       });
+    });
+    dialog.querySelector('[data-setup-copy-api-key]')?.addEventListener('click', async event => {
+      const key = event.currentTarget.dataset.apiKey;
+      const status = dialog.querySelector('[data-setup-status]');
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(key);
+      } catch (_) {
+        // Fallback for browsers that block the async clipboard; the key never becomes visible.
+        const hidden = document.createElement('textarea');
+        hidden.value = key;
+        hidden.style.cssText = 'position:fixed;opacity:0';
+        dialog.append(hidden);
+        hidden.select();
+        const copied = document.execCommand?.('copy');
+        hidden.remove();
+        if (!copied) {
+          status.textContent = 'Could not copy the API key. Copy it from Settings > API key.';
+          return;
+        }
+      }
+      status.textContent = 'API key copied. Paste it when setup asks for it.';
     });
     dialog.querySelector('[data-setup-close]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => previousFocus?.focus());

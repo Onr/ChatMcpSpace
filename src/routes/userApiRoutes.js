@@ -1,3 +1,4 @@
+const { directMessageDelivery } = require('../utils/directMessageDelivery');
 /**
  * User API Routes
  * AJAX endpoints for frontend polling and user interactions
@@ -79,6 +80,8 @@ const { readPidFromFile, terminateProcessWithEscalation } = require('../utils/ag
 const { loadAgentRuntimeState } = require('../services/agentRuntimeConfigService');
 const { validateRunOverrides } = require('../utils/runOverrides');
 const chatThreadService = require('../shared/chatThreadService');
+const { getBrief } = require('../services/agentBriefService');
+const { recordDirectUserInteraction } = require('../services/agentProactiveService');
 
 async function resolveRunOverrides(agentId, agentName, input) {
   if (input === undefined || input === null) return { valid: true, value: null };
@@ -148,6 +151,49 @@ function findAgentLocalDir(agentFolder) {
     if (fs.existsSync(p)) return p;
   }
   return null;
+}
+
+/**
+ * Mark a local agent directory as permanently terminated (deleted or archived),
+ * remove its .running flag so the tmux supervisor exits, and kill any running PID.
+ */
+function terminateLocalAgentState(agentName, status = 'deleted') {
+  try {
+    if (!agentName) return;
+    const agentFolder = sanitizeFolderName(agentName);
+    const agentDir = findAgentLocalDir(agentFolder);
+    if (!agentDir) return;
+    const stateDir = path.join(agentDir, 'agent_state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, '.agent_terminated'), status);
+    fs.writeFileSync(path.join(stateDir, '.stop_requested'), new Date().toISOString());
+    fs.rmSync(path.join(stateDir, '.running'), { force: true });
+
+    const pidPath = path.join(stateDir, '.agent_pid');
+    const pid = readPidFromFile(pidPath);
+    if (pid) {
+      terminateProcessWithEscalation(pid);
+    }
+  } catch (_e) {
+    // Best-effort local filesystem cleanup
+  }
+}
+
+/**
+ * Clear local termination/stop flags when an archived agent is restored.
+ */
+function clearLocalAgentTerminationState(agentName) {
+  try {
+    if (!agentName) return;
+    const agentFolder = sanitizeFolderName(agentName);
+    const agentDir = findAgentLocalDir(agentFolder);
+    if (!agentDir) return;
+    const stateDir = path.join(agentDir, 'agent_state');
+    fs.rmSync(path.join(stateDir, '.agent_terminated'), { force: true });
+    fs.rmSync(path.join(stateDir, '.stop_requested'), { force: true });
+  } catch (_e) {
+    // Best-effort local filesystem cleanup
+  }
 }
 
 function getPrimaryLocalIpAddress() {
@@ -502,8 +548,23 @@ router.use(attachUserFromSession);
 
 // Apply rate limiting to all user API routes (generous for dashboard UI)
 router.use(userPollingRateLimiter);
+router.use('/agents', require('./agentBriefUserRoutes'));
 router.use('/chat-threads', require('../shared/chatThreadRoutes'));
 router.use('/shared', require('../shared/routes').users);
+
+// Bounded, read-only ciphertext samples for safely migrating a legacy browser
+// key. The browser proves the key locally; no password or derived key is sent.
+router.get('/encryption-samples', async (req, res) => {
+  try {
+    const user = await query(`SELECT um.content FROM user_messages um JOIN agents a ON a.agent_id=um.agent_id
+      WHERE a.user_id=$1 AND um.encrypted=TRUE AND um.content IS NOT NULL
+      ORDER BY um.created_at DESC LIMIT 3`, [req.user.userId]);
+    const agent = await query(`SELECT m.content FROM messages m JOIN agents a ON a.agent_id=m.agent_id
+      WHERE a.user_id=$1 AND m.encrypted=TRUE AND m.content IS NOT NULL
+      ORDER BY m.created_at DESC LIMIT 3`, [req.user.userId]);
+    res.set('Cache-Control', 'no-store').json({ samples: [...user.rows, ...agent.rows].map(row => row.content) });
+  } catch (error) { return handleDatabaseError(res, error, 'loading encryption migration samples'); }
+});
 
 // ─── Chief of Staff install ────────────────────────────────────────────────
 const chiefOfStaffService = require('../services/chiefOfStaffService');
@@ -839,6 +900,33 @@ router.get('/agents', async (req, res) => {
     );
 
     const result = await agentsQuery([userId]);
+    const briefRows = result.rows.length ? await query(
+      `SELECT agent_id, revision, document, policy, state FROM agent_briefs WHERE agent_id IN (${result.rows.map((_, i) => `$${i + 1}`).join(',')})`,
+      result.rows.map(row => row.agent_id)
+    ) : { rows: [] };
+    const briefByAgent = new Map(briefRows.rows.map(row => [row.agent_id, row]));
+    const suggestionRows = result.rows.length ? await query(
+      `SELECT agent_id, COUNT(*)::int AS count FROM agent_brief_suggestions WHERE status='pending' AND agent_id IN (${result.rows.map((_, i) => `$${i + 1}`).join(',')}) GROUP BY agent_id`,
+      result.rows.map(row => row.agent_id)
+    ) : { rows: [] };
+    const suggestionsByAgent = new Map(suggestionRows.rows.map(row => [row.agent_id, Number(row.count)]));
+
+    let mcpAgentIds = new Set();
+    try {
+      const mcpRows = await query(
+        `SELECT DISTINCT agent_id FROM (
+           SELECT agent_id FROM mcp_oauth_tokens WHERE user_id = $1 AND agent_id IS NOT NULL AND revoked_at IS NULL
+           UNION
+           SELECT agent_id FROM mcp_hosted_connections WHERE user_id = $1 AND agent_id IS NOT NULL
+           UNION
+           SELECT agent_id FROM mcp_oauth_codes WHERE user_id = $1 AND agent_id IS NOT NULL
+         ) mcp_agents`,
+        [userId]
+      );
+      mcpAgentIds = new Set(mcpRows.rows.map((r) => r.agent_id));
+    } catch (_mcpErr) {
+      // Non-fatal if MCP tables are not present in minimal test schemas
+    }
 
     // Format agent data with pre-generated TTS audio URLs for new agent notifications
     const agents = await Promise.all(result.rows.map(async (row) => {
@@ -858,13 +946,16 @@ router.get('/agents', async (req, res) => {
       const reportedCliVersion = row.reported_cli_version || null;
       const reportedCliVersionAt = row.reported_cli_version_at;
       const needsCliUpdate = reportedCliVersion ? isCliVersionOutdated(reportedCliVersion, AGENT_CLI_VERSION) : false;
+      const brief = briefByAgent.get(row.agent_id);
+      const activeGoal = brief?.document?.goals?.find(goal => goal.id === brief.document.activeGoalId) || null;
 
       return {
         agentId: row.agent_id,
         name: row.agent_name,
+        briefSummary: { revision: brief?.revision || 0, displayName: brief?.document?.displayName || '', avatar: brief?.document?.avatar || '', role: brief?.document?.role || '', goal: activeGoal?.title || '', goalStatus: activeGoal?.status || null, proactiveEnabled: brief?.policy?.enabled === true && brief?.policy?.paused !== true, canWake: brief?.state?.supportsProactive === true, status: brief?.state?.status || 'off', nextWakeAt: brief?.state?.nextWakeAt || null, usedRuns: brief?.state?.usedRuns || 0, suggestionCount: suggestionsByAgent.get(row.agent_id) || 0 },
         agentType: row.agent_type || 'standard',
         device: require('../utils/agentDevice').normalizeDevice(row.runtime_config?.device),
-        externalProvider: row.external_provider || null,
+        externalProvider: row.external_provider || (mcpAgentIds.has(row.agent_id) ? 'mcp' : null),
         position: row.position,
         isWorking,
         lastWorkingHeartbeatTime: lastWorkingHeartbeatTime ? lastWorkingHeartbeatTime.toISOString() : null,
@@ -1406,6 +1497,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
           m.urgent,
           m.allow_free_response,
           m.free_response_hint,
+          m.brief_provenance,
           ${messageHiddenFromAgentSelect},
           ${messageRunCommandSelect},
           m.read_at,
@@ -1427,6 +1519,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
           m.urgent,
           m.allow_free_response,
           m.free_response_hint,
+          m.brief_provenance,
           ${messageHiddenFromAgentSelect},
           ${messageRunCommandSelect},
           m.read_at,
@@ -1534,6 +1627,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
         freeResponseHint: row.free_response_hint,
         hiddenFromAgent: row.hidden_from_agent || false,
         runCommand: row.run_command || null,
+        briefProvenance: row.brief_provenance || null,
         timestamp: row.created_at.toISOString(),
         cursor: row.created_at_micro,
         attachments: agentAttachmentsMap[row.message_id] || []
@@ -1594,7 +1688,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
       userMessageParams.push(cursorValue !== null ? cursorValue : sinceValue);
     }
 
-    const buildUserMessagesQueryFn = (hiddenSelectSql) => createArchiveAwareQuery(
+    const buildUserMessagesQueryFn = (hiddenSelectSql, runOverridesSelectSql = 'um.run_overrides') => createArchiveAwareQuery(
       // Primary query with archive filtering
       () => `
         SELECT
@@ -1603,7 +1697,9 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
           um.encrypted,
           um.created_at,
           um.read_at,
+          um.brief_snapshot,
           ${hiddenSelectSql},
+          ${runOverridesSelectSql},
           a.is_working,
           a.last_working_heartbeat_at,
           (EXTRACT(EPOCH FROM um.created_at) * 1000000)::BIGINT as created_at_micro
@@ -1621,7 +1717,9 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
           um.encrypted,
           um.created_at,
           um.read_at,
+          um.brief_snapshot,
           ${hiddenSelectSql},
+          ${runOverridesSelectSql},
           a.is_working,
           a.last_working_heartbeat_at,
           (EXTRACT(EPOCH FROM um.created_at) * 1000000)::BIGINT as created_at_micro
@@ -1635,14 +1733,19 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
 
     let userMessagesResult;
     try {
-      userMessagesResult = await buildUserMessagesQueryFn(userMessageHiddenFromAgentSelect)(userMessageParams);
+      userMessagesResult = await buildUserMessagesQueryFn(userMessageHiddenFromAgentSelect, 'um.run_overrides')(userMessageParams);
     } catch (userMessagesError) {
       if (userMessagesError.code !== '42703') {
         throw userMessagesError;
       }
 
-      // Backward compatibility: older schemas may not have user_messages.hidden_from_agent.
-      userMessagesResult = await buildUserMessagesQueryFn('FALSE AS hidden_from_agent')(userMessageParams);
+      // Backward compatibility: older schemas may not have user_messages.hidden_from_agent or run_overrides.
+      try {
+        userMessagesResult = await buildUserMessagesQueryFn('FALSE AS hidden_from_agent', 'um.run_overrides')(userMessageParams);
+      } catch (fallbackErr) {
+        if (fallbackErr.code !== '42703') throw fallbackErr;
+        userMessagesResult = await buildUserMessagesQueryFn('FALSE AS hidden_from_agent', 'NULL AS run_overrides')(userMessageParams);
+      }
     }
 
     // Fetch attachments for user messages (avoid N+1 queries)
@@ -1719,6 +1822,8 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
           cursor: row.created_at_micro,
           readAt: readAtIso,
           hiddenFromAgent: row.hidden_from_agent || false,
+          runOverrides: row.run_overrides || null,
+          briefRevision: row.brief_snapshot?.revision || null,
           deliveryState: delivery.deliveryState,
           deliveryFailed: delivery.deliveryFailed,
           failedReason: delivery.failedReason,
@@ -1737,6 +1842,8 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
         cursor: row.created_at_micro,
         readAt: readAtIso,
         hiddenFromAgent: row.hidden_from_agent || false,
+        runOverrides: row.run_overrides || null,
+        briefRevision: row.brief_snapshot?.revision || null,
         deliveryState: delivery.deliveryState,
         deliveryFailed: delivery.deliveryFailed,
         failedReason: delivery.failedReason,
@@ -1777,6 +1884,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
       }
     }
 
+    const peerAttachments = await require('../services/peerAttachmentService').metadataMap(interAgentMessagesResult.rows.map(row => row.agent_message_id));
     // Build inter-agent messages array
     const interAgentMessages = interAgentMessagesResult.rows.map(row => {
       const isSender = row.sender_agent_id === agentId;
@@ -1793,7 +1901,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
         timestamp: row.created_at.toISOString(),
         cursor: row.created_at_micro,
         hiddenFromAgent: false,
-        attachments: []
+        attachments: peerAttachments.get(row.agent_message_id) || []
       };
     });
 
@@ -2143,11 +2251,13 @@ router.post('/messages', async (req, res) => {
     // Insert user message
     // Content can be null if only attachments are provided
     const finalContent = hasContent ? content.trim() : null;
+    const brief = await getBrief(agentId, client.query.bind(client));
+    const briefSnapshot = brief.revision ? JSON.stringify({ revision: brief.revision, document: brief.document, policy: brief.policy }) : null;
     const insertResult = await client.query(
-      `INSERT INTO user_messages (agent_id, content, encrypted, run_overrides)
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO user_messages (agent_id, content, encrypted, run_overrides, brief_snapshot)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
        RETURNING user_message_id, created_at`,
-      [agentId, finalContent, isEncrypted, validatedOverrides]
+      [agentId, finalContent, isEncrypted, validatedOverrides, briefSnapshot]
     );
 
     const userMessageId = insertResult.rows[0].user_message_id;
@@ -2165,6 +2275,7 @@ router.post('/messages', async (req, res) => {
 
     // Commit the transaction
     await client.query('COMMIT');
+    await recordDirectUserInteraction(agentId).catch(error => console.error('Unable to record direct agent interaction:', error.message));
 
     // Write a signal file to wake up the agent's polling loop early
     try {
@@ -2178,7 +2289,8 @@ router.post('/messages', async (req, res) => {
     res.status(201).json({
       messageId: userMessageId,
       timestamp: insertResult.rows[0].created_at.toISOString(),
-      attachmentCount: validatedAttachmentIds.length
+      attachmentCount: validatedAttachmentIds.length,
+      runOverrides: overridesCheck.value || null
     });
 
   } catch (error) {
@@ -2237,11 +2349,13 @@ router.post('/messages/schedule', async (req, res) => {
       await chatThreadService.assertPrivateThreadWritable(client,agentId,userId);
     }
 
+    const scheduledBrief = await getBrief(agentId, client.query.bind(client));
+    const scheduledSnapshot = scheduledBrief.revision ? JSON.stringify({ revision: scheduledBrief.revision, document: scheduledBrief.document, policy: scheduledBrief.policy }) : null;
     const result = await client.query(
-      `INSERT INTO scheduled_user_messages (user_id, agent_id, content, encrypted, scheduled_for, run_overrides)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      `INSERT INTO scheduled_user_messages (user_id, agent_id, content, encrypted, scheduled_for, run_overrides, brief_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
        RETURNING scheduled_message_id, scheduled_for`,
-      [userId, agentId, content.trim(), encrypted === true, when, overridesCheck.value ? JSON.stringify(overridesCheck.value) : null]
+      [userId, agentId, content.trim(), encrypted === true, when, overridesCheck.value ? JSON.stringify(overridesCheck.value) : null, scheduledSnapshot]
     );
     if (privateFenceTransaction) { await client.query('COMMIT'); privateFenceTransaction = false; }
     return res.status(201).json({
@@ -2547,11 +2661,13 @@ router.post('/responses', async (req, res) => {
 
     // Also create a user_message so the response appears in the normal message flow
     // and the agent receives it via the standard message polling
+    const responseBrief = await getBrief(agentId, client.query.bind(client));
+    const responseSnapshot = responseBrief.revision ? JSON.stringify({ revision: responseBrief.revision, document: responseBrief.document, policy: responseBrief.policy }) : null;
     const userMessageResult = await client.query(
-      `INSERT INTO user_messages (agent_id, content)
-       VALUES ($1, $2)
+      `INSERT INTO user_messages (agent_id, content, brief_snapshot)
+       VALUES ($1, $2, $3::jsonb)
        RETURNING user_message_id, created_at`,
-      [agentId, messageContent]
+      [agentId, messageContent, responseSnapshot]
     );
 
     const userMessageId = userMessageResult.rows[0].user_message_id;
@@ -2569,6 +2685,7 @@ router.post('/responses', async (req, res) => {
 
     // Commit the transaction
     await client.query('COMMIT');
+    await recordDirectUserInteraction(agentId).catch(error => console.error('Unable to record direct agent interaction:', error.message));
 
     res.status(201).json({
       responseId: responseId,
@@ -2635,6 +2752,8 @@ router.delete('/agents/:agentId', async (req, res) => {
       'DELETE FROM agents WHERE agent_id = $1',
       [agentId]
     );
+
+    terminateLocalAgentState(agentName, 'deleted');
 
     res.status(200).json({
       success: true,
@@ -3162,6 +3281,8 @@ router.post('/agents/:agentId/archive', async (req, res) => {
     // Archive the agent using archiveService
     const result = await archiveService.archiveAgent(userId, agentId, reason);
 
+    terminateLocalAgentState(result.agentName, 'archived');
+
     res.status(200).json({
       success: true,
       archivedAgentId: result.archivedAgentId,
@@ -3225,6 +3346,8 @@ router.delete('/agents/:agentId/archive', async (req, res) => {
 
     // Unarchive the agent
     const result = await archiveService.unarchiveAgent(userId, archivedAgentId);
+
+    clearLocalAgentTerminationState(result.agentName);
 
     res.status(200).json({
       success: true,
@@ -3593,7 +3716,9 @@ router.get('/agent-messages', async (req, res) => {
         am.content,
         am.encrypted,
         am.priority,
-        am.created_at
+        am.created_at,
+        am.read_at,
+        recipient.last_seen_at AS recipient_last_seen_at
       FROM agent_messages am
       JOIN agents sender ON am.sender_agent_id = sender.agent_id
       JOIN agents recipient ON am.recipient_agent_id = recipient.agent_id
@@ -3630,12 +3755,14 @@ router.get('/agent-messages', async (req, res) => {
           agent2Id: ids[1],
           agent2Name: ids[1] === row.sender_agent_id ? row.sender_name : row.recipient_name,
           messageCount: 0,
+          pendingCount: 0,
           lastMessage: null
         });
       }
 
       const conn = connectionMap.get(key);
       conn.messageCount++;
+      if (!row.read_at) conn.pendingCount++;
       if (!conn.lastMessage || new Date(row.created_at) > new Date(conn.lastMessage)) {
         conn.lastMessage = row.created_at.toISOString();
         conn.lastSenderId = row.sender_agent_id;
@@ -3652,7 +3779,8 @@ router.get('/agent-messages', async (req, res) => {
         content: row.content,
         encrypted: row.encrypted === true,
         priority: row.priority,
-        timestamp: row.created_at.toISOString()
+        timestamp: row.created_at.toISOString(),
+        delivery: directMessageDelivery(row.recipient_last_seen_at, row.read_at)
       })),
       connections: Array.from(connectionMap.values())
     });

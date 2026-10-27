@@ -13,9 +13,14 @@ async function makeContext({ realRateLimits = false } = {}) {
   const database = createTestDatabase();
   database.db.public.registerFunction({ name: 'current_schema', returns: 'text', implementation: () => 'public' });
   await applyRuntimeUserColumns(database.query);
+  await database.query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS can_spawn BOOLEAN DEFAULT FALSE");
+  await database.query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS inter_agent_mode VARCHAR(50) DEFAULT 'disabled'");
   const { userId } = await seedUser(database.query);
   await database.query("UPDATE users SET email_verified = TRUE WHERE user_id = $1", [userId]);
   await database.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/059_add_mcp_oauth.sql'), 'utf8'));
+  await database.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/061_add_mcp_message_grants.sql'), 'utf8'));
+  await database.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/018_add_agent_messages.sql'), 'utf8'));
+  await database.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/062_add_hosted_mcp.sql'), 'utf8'));
   jest.doMock('../../src/db/connection', () => ({
     query: (text, params) => database.query(text, params),
     getClient: async () => database.pool.connect(),
@@ -80,9 +85,9 @@ describe('Gemini MCP OAuth and Streamable HTTP routes', () => {
       const browser = request.agent(context.app);
       await browser.get(`/test-account/${context.userId}`).expect(204);
       const page = await browser.get('/oauth/authorize').query({
-        client_id: client.client_id, redirect_uri: callback, response_type: 'code',
-        code_challenge: pkceChallenge('V'.repeat(43)), code_challenge_method: 'S256',
-        resource: `${BASE_URL}/mcp`, state: 'S'.repeat(1078)
+      client_id: client.client_id, redirect_uri: callback, response_type: 'code',
+      code_challenge: pkceChallenge('V'.repeat(43)), code_challenge_method: 'S256',
+      resource: `${BASE_URL}/mcp`, scope: 'agents.read', state: 'S'.repeat(1078)
       }).expect(200);
       const form = {
         _csrf: page.text.match(/name="_csrf" value="([^"]+)"/)[1],
@@ -181,7 +186,7 @@ describe('Gemini MCP OAuth and Streamable HTTP routes', () => {
       const resource = await request(context.app).get('/.well-known/oauth-protected-resource').expect(200);
       expect(resource.body).toMatchObject({
         resource: `${BASE_URL}/mcp`, authorization_servers: [BASE_URL],
-        bearer_methods_supported: ['header'], scopes_supported: ['agents.read']
+        bearer_methods_supported: ['header'], scopes_supported: ['agents.read', 'messages.read', 'messages.write', 'peers.read', 'peers.write', 'attachments.read', 'attachments.write']
       });
       const endpoint = await request(context.app).get('/.well-known/oauth-protected-resource/mcp').expect(200);
       expect(endpoint.body.resource).toBe(`${BASE_URL}/mcp`);
@@ -312,6 +317,64 @@ describe('Gemini MCP OAuth and Streamable HTTP routes', () => {
         grant_type: 'authorization_code', client_id: clientId, code,
         redirect_uri: callback, code_verifier: verifier, resource: `${BASE_URL}/mcp`
       }).expect(400).expect(({ body }) => expect(body.error).toBe('invalid_grant'));
+    } finally { await context.cleanup(); }
+  });
+
+  it('binds fresh message consent to one agent across code exchange and refresh, then revokes its browser credential', async () => {
+    const context = await makeContext();
+    try {
+      const callback = 'https://oauth-redirect.googleusercontent.com/r/mcp-message-binding';
+      const { body: client } = await request(context.app).post('/oauth/register').send({ client_name: 'Luna', redirect_uris: [callback] }).expect(201);
+      const browser = request.agent(context.app);
+      await browser.get(`/test-account/${context.userId}`).expect(204);
+      const verifier = 'M'.repeat(43);
+      const authorize = `/oauth/authorize?${new URLSearchParams({
+        response_type: 'code', client_id: client.client_id, redirect_uri: callback,
+        code_challenge: pkceChallenge(verifier), code_challenge_method: 'S256',
+        resource: `${BASE_URL}/mcp`, scope: 'agents.read messages.read messages.write peers.read peers.write', state: 'bound-state'
+      })}`;
+      const page = await browser.get(authorize).expect(200);
+      expect(page.text).toContain('not end-to-end encrypted');
+      expect(page.text).toContain('Create a dedicated Luna MCP agent');
+      const consent = await browser.post('/oauth/authorize/consent').type('form').send({
+        _csrf: page.text.match(/name="_csrf" value="([^"]+)"/)[1],
+        authorize_id: page.text.match(/name="authorize_id" value="([^"]+)"/)[1],
+        decision: 'allow', allow_peers: 'yes'
+      }).expect(303);
+      const code = new URL(consent.headers.location).searchParams.get('code');
+      const storedGrant = (await context.database.query('SELECT grant_id, agent_id, scope FROM mcp_oauth_codes WHERE code_hash=$1', [sha256(code)] )).rows[0];
+      expect(storedGrant.agent_id).toBeTruthy();
+      expect(storedGrant.scope).toBe('agents.read messages.read messages.write peers.read peers.write');
+      const tokens = await request(context.app).post('/oauth/token').type('form').send({
+        grant_type: 'authorization_code', client_id: client.client_id, code, redirect_uri: callback,
+        code_verifier: verifier, resource: `${BASE_URL}/mcp`
+      }).expect(200);
+      const tokenRow = (await context.database.query('SELECT grant_id, agent_id FROM mcp_oauth_tokens WHERE access_token_hash=$1', [sha256(tokens.body.access_token)])).rows[0];
+      expect(tokenRow).toEqual({ grant_id: storedGrant.grant_id, agent_id: storedGrant.agent_id });
+      const listedTools = await request(context.app).post('/mcp').set('Authorization', `Bearer ${tokens.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(200);
+      expect(listedTools.body.result.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['read_inbox', 'read_thread', 'send_message', 'send_peer_message']));
+
+      const connectionPage = await browser.get(`/mcp/connection?grant_id=${storedGrant.grant_id}`).expect(200);
+      expect(connectionPage.text).toContain('Return to your AI app');
+      const csrf = JSON.parse(connectionPage.text.match(/<script id="mcp-config" type="application\/json">([^<]+)<\/script>/)[1]).csrf;
+      const enrollment = await browser.post('/mcp/gateway/enroll').set('Origin', BASE_URL).set('X-CSRF-Token', csrf)
+        .send({ grantId: storedGrant.grant_id }).expect(200);
+      const credential = (await context.database.query('SELECT mcp_grant_id, scopes_json FROM agent_api_credentials WHERE token_hash=$1', [sha256(enrollment.body.agentToken)])).rows[0];
+      expect(credential.mcp_grant_id).toBe(storedGrant.grant_id);
+      expect(credential.scopes_json).toEqual(expect.arrayContaining(['agent.history.read', 'agent.messages.write', 'agent.dm.read', 'agent.dm.write']));
+
+      const refreshed = await request(context.app).post('/oauth/token').type('form').send({
+        grant_type: 'refresh_token', client_id: client.client_id, refresh_token: tokens.body.refresh_token, resource: `${BASE_URL}/mcp`
+      }).expect(200);
+      const refreshRow = (await context.database.query('SELECT grant_id, agent_id, scope FROM mcp_oauth_tokens WHERE access_token_hash=$1', [sha256(refreshed.body.access_token)])).rows[0];
+      expect(refreshRow).toEqual({ ...tokenRow, scope: storedGrant.scope });
+
+      await browser.post('/oauth/revoke').type('form').send({ client_id: client.client_id, token: refreshed.body.refresh_token, token_type_hint: 'refresh_token' }).expect(200);
+      const revoked = (await context.database.query('SELECT revoked_at FROM agent_api_credentials WHERE token_hash=$1', [sha256(enrollment.body.agentToken)])).rows[0];
+      expect(revoked.revoked_at).toBeTruthy();
+      await request(context.app).post('/mcp').set('Authorization', `Bearer ${refreshed.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'send_peer_message', arguments: {} } }).expect(401);
     } finally { await context.cleanup(); }
   });
 

@@ -138,6 +138,11 @@
         </a>
       </div>
 
+      <p class="text-sm text-slate-300">
+        Already have an agent? <a href="/for-agents" class="text-emerald-400 underline">Send it here to guide your setup</a>.
+        <a href="/agent-setup.md" class="text-slate-400 underline">Instructions for visiting agents</a>
+      </p>
+
     </div>
   </section>
 
@@ -273,11 +278,13 @@
   <section id="auth-section" class="<%= mfaChallengeSafe ? 'hidden' : '' %> py-8 px-6 border-t border-white/5 bg-slate-900/60 backdrop-blur-md relative z-20">
     <div class="max-w-sm mx-auto">
       <div class="text-center mb-8">
-        <h2 id="authHeading" class="text-2xl font-medium text-white"><%= mfaChallengeSafe ? 'Check Your Authenticator' : '' %></h2>
+        <h2 id="authHeading" class="text-2xl font-medium text-white"><%= mfaChallengeSafe ? 'Check Your Authenticator' : 'Sign in to your workspace' %></h2>
       </div>
 
+      <p id="authClientError" role="alert" tabindex="-1" class="hidden bg-red-500/10 border border-red-500/20 text-red-300 px-4 py-3 rounded-lg mb-6 text-sm"></p>
+
       <% if (!mfaChallengeSafe && typeof error !=='undefined' && error) { %>
-        <div class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm text-center">
+        <div role="alert" class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg mb-6 text-sm text-center">
           <%= error %>
         </div>
         <% } %>
@@ -315,11 +322,13 @@
             </div>
             <% } %>
 
-            <input id="loginEmail" name="email" type="email" required
+            <label for="loginEmail" class="block text-sm text-slate-300">Email address</label>
+            <input id="loginEmail" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
               placeholder="Email address" value="<%= typeof email !== 'undefined' ? email : '' %>">
 
-            <input id="loginPassword" name="password" type="password" required
+            <label for="loginPassword" class="block text-sm text-slate-300">Password</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" required
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
               placeholder="Password">
 
@@ -340,15 +349,19 @@
           <form id="registerForm" class="space-y-4 hidden" action="/register" method="POST">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
 
-            <input id="registerEmail" name="email" type="email" required
+            <label for="registerEmail" class="block text-sm text-slate-300">Email address</label>
+            <input id="registerEmail" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
               placeholder="Email address">
 
-            <input id="registerPassword" name="password" type="password" required minlength="8"
+            <label for="registerPassword" class="block text-sm text-slate-300">Password</label>
+            <input id="registerPassword" name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" pattern="(?=.*[a-zA-Z])(?=.*[0-9]).{12,128}" aria-describedby="registerPasswordHint" title="12–128 characters, including a letter and a number"
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
-              placeholder="Password (min 8 chars)">
+              placeholder="Create a password">
+            <p id="registerPasswordHint" class="text-xs text-slate-400">12–128 characters, including a letter and a number.</p>
 
-            <input id="confirmPassword" name="confirmPassword" type="password" required minlength="8"
+            <label for="confirmPassword" class="block text-sm text-slate-300">Confirm password</label>
+            <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128"
               class="w-full px-4 py-3.5 rounded-lg bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-slate-400 transition-colors text-sm backdrop-blur-sm"
               placeholder="Confirm password">
 
@@ -836,6 +849,10 @@
     window.history.scrollRestoration = 'manual';
   }
 
+  let landingInteractionStarted = false;
+  document.addEventListener('pointerdown', () => { landingInteractionStarted = true; }, { once: true, passive: true });
+  document.addEventListener('keydown', () => { landingInteractionStarted = true; }, { once: true });
+
   function enforceLandingTopPosition() {
     // The MFA code is displayed in a fixed dialog. Do not scroll or blur it:
     // mobile browsers otherwise move the user away from the prompt and dismiss
@@ -844,13 +861,13 @@
       return;
     }
 
-    if (window.location.hash) {
+    if (landingInteractionStarted || window.location.hash) {
       return;
     }
 
     const activeElement = document.activeElement;
     if (activeElement && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(activeElement.tagName)) {
-      activeElement.blur();
+      return;
     }
 
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -860,6 +877,7 @@
 
   // Define functions globally
   window.showLoginForm = function () {
+    landingInteractionStarted = true;
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
     const authHeading = document.getElementById('authHeading');
@@ -868,10 +886,12 @@
     }
     loginForm.classList.remove('hidden');
     registerForm.classList.add('hidden');
-    authHeading.textContent = '';
+    authHeading.textContent = 'Sign in to your workspace';
+    document.getElementById('loginEmail')?.focus({ preventScroll: true });
   }
 
   window.showRegisterForm = function () {
+    landingInteractionStarted = true;
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
     const authHeading = document.getElementById('authHeading');
@@ -881,6 +901,7 @@
     registerForm.classList.remove('hidden');
     loginForm.classList.add('hidden');
     authHeading.textContent = 'Create an Account';
+    document.getElementById('registerEmail')?.focus({ preventScroll: true });
   }
 
   window.scrollToAuth = function (type) {
@@ -1048,6 +1069,7 @@
 
     // Handle form submission with rate limit handling
     async function handleAuthFormSubmit(form, button, originalText, isRegister = false) {
+      document.getElementById('authClientError')?.classList.add('hidden');
       const formData = new FormData(form);
       const data = new URLSearchParams(formData);
 
@@ -1066,6 +1088,7 @@
         if (response.status === 429) {
           const result = await response.json();
           const retryAfter = result.error?.retryAfter || 30;
+          showAuthError('Too many attempts. Please wait before trying again.');
           startButtonCountdown(button, retryAfter, originalText);
           return false;
         }
@@ -1119,15 +1142,26 @@
         }
 
         // For any other response, reset the button
+        showAuthError('We could not complete your request. Please try again.');
         button.textContent = originalText;
         button.disabled = false;
         return false;
       } catch (error) {
         console.error('Form submission error:', error);
+        showAuthError('Could not reach the server. Check your connection and try again.');
         button.textContent = originalText;
         button.disabled = false;
         return false;
       }
+    }
+
+    function showAuthError(message) {
+      const notice = document.getElementById('authClientError');
+      if (!notice) return;
+      notice.textContent = message;
+      notice.classList.remove('hidden');
+      notice.focus({ preventScroll: true });
+      notice.scrollIntoView({ block: 'center', behavior: 'instant' });
     }
 
     // Login form validation
@@ -1142,11 +1176,11 @@
         const originalText = button.textContent;
 
         if (!email.includes('@')) {
-          if (typeof window.showError === 'function') { window.showError('Valid email required'); } else { console.error('Error: Valid email required'); }
+          showAuthError('Enter a valid email address.');
           return;
         }
         if (!password) {
-          if (typeof window.showError === 'function') { window.showError('Password required'); } else { console.error('Error: Password required'); }
+          showAuthError('Enter your password.');
           return;
         }
 
@@ -1170,12 +1204,12 @@
         const button = document.getElementById('registerTab');
         const originalText = button.textContent;
 
-        if (password.length < 8) {
-          if (typeof window.showError === 'function') { window.showError('Password must be 8+ characters'); } else { console.error('Error: Password must be 8+ characters'); }
+        if (password.length < 12 || password.length > 128 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+          showAuthError('Use 12–128 characters, including a letter and a number.');
           return;
         }
         if (password !== confirm) {
-          if (typeof window.showError === 'function') { window.showError('Passwords must match'); } else { console.error('Error: Passwords must match'); }
+          showAuthError('Passwords must match. Re-enter your confirmation.');
           return;
         }
 

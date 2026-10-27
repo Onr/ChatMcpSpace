@@ -1,0 +1,54 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0b1220; color: #e2e8f0; line-height: 1.6; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; padding: 40px 20px; }
+main { max-width: 760px; margin: auto; padding: 36px; background: #151f30; border: 1px solid #2c3b50; border-radius: 20px; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.2rem); line-height: 1.2; margin: 8px 0 16px; letter-spacing: -.03em; color: #f8fafc; }
+h2 { font-size: 1.05rem; margin: 0 0 8px; color: #f8fafc; }
+p { margin: 0 0 16px; }
+.eyebrow { color: #6ee7b7; text-transform: uppercase; font-size: .75rem; font-weight: 700; letter-spacing: .12em; margin: 0; }
+.intro { color: #cbd5e1; }
+.agent { font-size: .875rem; color: #b6c4d6; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent strong { color: #f8fafc; overflow-wrap: anywhere; }
+.agent > span { border: 1px solid #36516a; padding: 2px 10px; border-radius: 99px; font-size: .75rem; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; list-style: none; padding: 24px 0; margin: 8px 0; border-block: 1px solid #2c3b50; }
+.steps li { display: flex; align-items: flex-start; gap: 8px; font-size: .8rem; }
+.step-number { flex: 0 0 26px; width: 26px; height: 26px; text-align: center; background: #293a50; border-radius: 50%; font-weight: 700; }
+.steps small { display: block; color: #a4b4c8; }
+.steps [data-done="true"] .step-number { background: #12634e; color: #d1fae5; }
+.status { margin: 24px 0; padding: 18px 20px; border: 1px solid #47637f; border-left: 4px solid #7dd3fc; background: #1b2d42; border-radius: 10px; }
+.status p { margin: 0; }
+.status[data-state="Connected"] { border-color: #34d399; background: #123d33; }
+.status[data-state="Connection needs attention"], .status[data-state="Offline"] { border-color: #fbbf24; background: #3b2c1c; }
+.status[data-state="Locked"], .status[data-state="Waiting for AI app"] { border-color: #a5b4fc; }
+.action-panel { margin: 24px 0; }
+.action-panel > p, details { color: #b6c4d6; font-size: .9rem; }
+label { display: block; font-size: .875rem; font-weight: 600; margin-bottom: 8px; }
+input, select { display: block; width: 100%; padding: 12px 14px; margin: 8px 0 14px; background: #0b1424; color: #f8fafc; border: 1px solid #53667f; border-radius: 8px; font: inherit; }
+input[aria-invalid="true"] { border-color: #fbbf24; }
+button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 10px 16px; border: 1px solid #53667f; border-radius: 8px; background: #233249; color: #e2e8f0; font: inherit; font-size: .875rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+.primary { background: #6ee7b7; color: #082f26; border-color: #6ee7b7; }
+button:hover, .button:hover { filter: brightness(1.1); }
+button:disabled { opacity: .6; cursor: default; }
+a { color: #6ee7b7; text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid #7dd3fc; outline-offset: 4px; }
+.recovery { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
+.success-note, #returnFeedback { margin: 16px 0 0; }
+.success-note { color: #a7f3d0 !important; }
+#returnFeedback:empty { display: none; }
+details { padding: 18px 0; border-top: 1px solid #2c3b50; }
+summary { cursor: pointer; color: #cbd5e1; }
+details p { margin: 12px 0 0; }
+footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid #2c3b50; padding-top: 20px; }
+nav { display: flex; flex-wrap: wrap; gap: 16px; font-size: .8rem; }
+.danger { color: #fda4af; background: transparent; border-color: #684052; font-size: .8rem; }
+#sharedPeerSetup { border-top: 1px solid #2c3b50; margin-top: 24px; padding-top: 24px; }
+@media (max-width: 560px) {
+  body { padding: 16px 12px; }
+  main { padding: 24px 18px; border-radius: 14px; }
+  .steps { grid-template-columns: 1fr; padding: 20px 0; gap: 12px; }
+  .steps li { align-items: center; }
+  button, .button { width: 100%; }
+  .recovery { flex-direction: column; }
+  .status { padding: 16px; }
+}

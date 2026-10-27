@@ -150,6 +150,15 @@
 
             renderConnections();
             renderChatsList();
+            // Refresh receipts without replacing the user's reading position.
+            if (activeConversation) {
+                const byId = new Map(currentMessages.map(msg => [msg.messageId, msg]));
+                document.querySelectorAll('[data-direct-message-id]').forEach(bubble => {
+                    const msg = byId.get(bubble.dataset.directMessageId);
+                    const receipt = bubble.querySelector('.agent-dm-receipt');
+                    if (msg && receipt) receipt.textContent = deliveryLabel(msg);
+                });
+            }
 
         } catch (error) {
             console.warn('[AgentConnections] Error fetching connections:', error);
@@ -296,7 +305,7 @@
                     ${escapeHtml(conn.agent1Name)}<span class="agent-chat-separator">↔</span>${escapeHtml(conn.agent2Name)}
                 </div>
                 <div class="agent-chat-meta">
-                    <span class="agent-chat-count">${conn.messageCount} message${conn.messageCount !== 1 ? 's' : ''}</span>
+                    <span class="agent-chat-count">${conn.messageCount} message${conn.messageCount !== 1 ? 's' : ''}${conn.pendingCount ? ` · ${conn.pendingCount} pending` : ''}</span>
                     <span class="agent-chat-time">${timeAgo}</span>
                 </div>
             </div>
@@ -467,6 +476,7 @@
 
         const bubble = document.createElement('div');
         bubble.className = `message-bubble p-3 mb-3 ${isFromAgent1 ? '' : 'message-bubble--user'}`;
+        bubble.dataset.directMessageId = msg.messageId;
 
         const priorityClass = msg.priority === 2 ? 'priority-high' :
             msg.priority === 1 ? 'priority-normal' : 'priority-low';
@@ -492,6 +502,7 @@
             contentHtml = escapeHtml(msg.content || '[Encrypted message]');
         }
 
+        const receipt = deliveryLabel(msg);
         bubble.innerHTML = `
             <div class="message-header">
                 <p class="message-title text-xs font-semibold text-cyan-300">${escapeHtml(senderName)}</p>
@@ -500,10 +511,17 @@
             <div class="message-content text-sm text-slate-200">
                 ${contentHtml}
             </div>
+            <div class="agent-dm-receipt message-footer text-xs text-slate-400" role="status">${receipt}</div>
             ${msg.wasEncrypted ? '<div class="message-footer" style="margin-top:0.4rem"><span class="encrypted-badge" title="This message was sent encrypted">🔒 Encrypted</span></div>' : ''}
         `;
 
         return bubble;
+    }
+
+    function deliveryLabel(msg) {
+        if (msg.delivery?.state === 'received') return 'Received by agent';
+        if (msg.delivery?.state !== 'pending') return '';
+        return msg.delivery.recipientOnline === false ? 'Queued · recipient offline' : 'Waiting for agent receipt';
     }
 
     /**

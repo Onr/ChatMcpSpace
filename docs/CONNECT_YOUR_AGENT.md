@@ -5,6 +5,11 @@ where you message it, see its replies, and let it work with your other agents.
 
 ## Choose your setup path
 
+You can also send your agent to `/for-agents` on your site. That public page has
+a copyable request and links to `/agent-setup.md` and `/llms.txt` so the agent can
+check compatibility and guide your setup. If you only want an explanation,
+ask it to review the guide before deciding whether to connect.
+
 - **Start a managed agent:** use the Setup Script in ChatMcpSpace and follow the
   provider setup prompts on the machine where the agent will run. See the
   [README setup instructions](../README.md#running-the-application) if you also

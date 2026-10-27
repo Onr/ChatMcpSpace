@@ -35,10 +35,15 @@ const {
 // ─── Configurable limits ────────────────────────────────────────────────────
 const SPAWN_LIMITS = {
   MAX_DEPTH: 3,            // 0=root → 3=great-grandchild
-  MAX_CHILDREN: 10,        // per agent
+  MAX_CHILDREN: 10,        // active children per agent
   GLOBAL_AGENT_CAP: 100,   // per user, total active agents
   SPAWN_COOLDOWN_MS: 60000 // 1 minute between spawns per agent
 };
+
+// Match discovery/dashboard online status. New rows default last_seen_at to
+// their creation time, reserving a slot for five minutes while the runner starts.
+// Idle connected runners count; stale/offline and NULL check-ins do not.
+const ACTIVE_AGENT_SQL = "last_seen_at > (NOW()::timestamp - INTERVAL '5 minutes')";
 
 // Safe-by-default permission ceiling for agents that inherit no explicit
 // permissions. Agents stay fully autonomous inside a workspace-scoped sandbox;
@@ -256,7 +261,7 @@ function getChatspaceRoot() {
  * Validate that an agent is allowed to spawn a child.
  * Returns { valid, error } — error is a human-readable string.
  */
-async function validateSpawnRequest(userId, parentAgentId, childAgentName) {
+async function validateSpawnRequest(userId, parentAgentId, childAgentName, dbQuery = query) {
   if (!isValidSpawnAgentName(childAgentName)) {
     return {
       valid: false,
@@ -265,7 +270,7 @@ async function validateSpawnRequest(userId, parentAgentId, childAgentName) {
   }
 
   // 1. Fetch parent agent
-  const parentResult = await query(
+  const parentResult = await dbQuery(
     `SELECT agent_id, agent_name, can_spawn, spawn_depth, user_id
      FROM agents
      WHERE agent_id = $1 AND user_id = $2`,
@@ -293,37 +298,37 @@ async function validateSpawnRequest(userId, parentAgentId, childAgentName) {
   }
 
   // 4. Fan-out limit (active children of this parent)
-  const childCountResult = await query(
+  const childCountResult = await dbQuery(
     `SELECT COUNT(*)::int AS count
      FROM agents
-     WHERE parent_agent_id = $1`,
-    [parentAgentId]
+     WHERE parent_agent_id = $1 AND user_id = $2 AND ${ACTIVE_AGENT_SQL}`,
+    [parentAgentId, userId]
   );
   const childCount = childCountResult.rows[0].count;
   if (childCount >= SPAWN_LIMITS.MAX_CHILDREN) {
     return {
       valid: false,
-      error: `Parent already has ${childCount} children (max ${SPAWN_LIMITS.MAX_CHILDREN}).`
+      error: `Parent already has ${childCount} active children (max ${SPAWN_LIMITS.MAX_CHILDREN}). Offline children do not count; slots free after 5 minutes without a check-in.`
     };
   }
 
   // 5. Global cap per user
-  const globalCountResult = await query(
+  const globalCountResult = await dbQuery(
     `SELECT COUNT(*)::int AS count
      FROM agents
-     WHERE user_id = $1`,
+     WHERE user_id = $1 AND ${ACTIVE_AGENT_SQL}`,
     [userId]
   );
   const totalAgents = globalCountResult.rows[0].count;
   if (totalAgents >= SPAWN_LIMITS.GLOBAL_AGENT_CAP) {
     return {
       valid: false,
-      error: `Global agent cap reached (${SPAWN_LIMITS.GLOBAL_AGENT_CAP} active agents).`
+      error: `Global agent cap reached (${SPAWN_LIMITS.GLOBAL_AGENT_CAP} active agents). Offline agents do not count; slots free after 5 minutes without a check-in.`
     };
   }
 
   // 6. Unique child name per user (checked before cooldown for better errors)
-  const nameCheckResult = await query(
+  const nameCheckResult = await dbQuery(
     `SELECT 1 FROM agents WHERE user_id = $1 AND agent_name = $2`,
     [userId, childAgentName.trim()]
   );
@@ -381,13 +386,23 @@ async function spawnAgent({
     throw new SpawnError(validation.error, 'SPAWN_VALIDATION_FAILED');
   }
 
-  const childDepth = (validation.parentDepth == null ? 0 : validation.parentDepth) + 1;
+  // Resolve filesystem-backed configuration before taking the account lock.
+  const parentConfig = await readParentConfig(parentAgentId);
   const client = await getClient();
 
   try {
     await client.query('BEGIN');
 
-    const parentConfig = await readParentConfig(parentAgentId);
+    // Serialize spawns for the same owner so concurrent parents cannot both
+    // claim the last active slot. Recheck using this transaction's connection.
+    await client.query('SELECT user_id FROM users WHERE user_id = $1 FOR NO KEY UPDATE', [userId]);
+    const lockedValidation = await validateSpawnRequest(
+      userId, parentAgentId, childAgentName, (sql, params) => client.query(sql, params)
+    );
+    if (!lockedValidation.valid) {
+      throw new SpawnError(lockedValidation.error, 'SPAWN_VALIDATION_FAILED');
+    }
+    const childDepth = (lockedValidation.parentDepth == null ? 0 : lockedValidation.parentDepth) + 1;
     const resolvedProjectPath = typeof projectPath === 'string' && projectPath.trim()
       ? projectPath.trim()
       : null;
@@ -626,8 +641,13 @@ async function readParentConfig(parentAgentId) {
   try {
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
+      // Newer CLIs also write USER_PASSWORD_B64, the exact password even when
+      // it contains characters that the quoted USER_PASSWORD line escapes.
+      const b64Match = envContent.match(/^USER_PASSWORD_B64="([A-Za-z0-9+/=]+)"/m);
       const pwdMatch = envContent.match(/USER_PASSWORD="([^"\n]*)"/);
-      if (pwdMatch && pwdMatch[1]) {
+      if (b64Match) {
+        config.userPassword = Buffer.from(b64Match[1], 'base64').toString('utf8');
+      } else if (pwdMatch && pwdMatch[1]) {
         config.userPassword = pwdMatch[1];
       } else {
         logWarn('agent.spawn.read_parent_env', { warning: 'USER_PASSWORD is empty or missing in parent .env' });
@@ -935,7 +955,8 @@ uv run message_helper.py dm check --from "AgentName" # From specific agent
     const envContent = [
       '# Agent Messaging Environment Configuration',
       '# KEEP THIS FILE SECURE - DO NOT SHARE WITH AGENT',
-      `USER_PASSWORD="${childPassword}"`,
+      `USER_PASSWORD="${String(childPassword).replace(/[\\"$`]/g, '\\$&')}"`,
+      `USER_PASSWORD_B64="${Buffer.from(String(childPassword), 'utf8').toString('base64')}"`,
       `ENCRYPTION_SALT="${userCredentials.encryptionSalt || ''}"`,
       `API_KEY="${userCredentials.apiKey}"`,
       `API_BASE="${userCredentials.apiBase || 'http://localhost:3000/api'}"`,
@@ -1131,11 +1152,13 @@ async function selfTerminate({ userId, agentId, reason, archiveMessages = true }
       }
     }
 
-    // 3. Write stop flag to filesystem
+    // 3. Write stop and termination flags to filesystem and clear .running
     try {
       const folderName = sanitizeFolderName(agent.agent_name);
-      const stopPath = path.join(getChatspaceRoot(), folderName, 'agent_state', '.stop_requested');
-      fs.writeFileSync(stopPath, new Date().toISOString());
+      const stateDir = path.join(getChatspaceRoot(), folderName, 'agent_state');
+      fs.writeFileSync(path.join(stateDir, '.stop_requested'), new Date().toISOString());
+      fs.writeFileSync(path.join(stateDir, '.agent_terminated'), archiveMessages ? 'archived' : 'deleted');
+      fs.rmSync(path.join(stateDir, '.running'), { force: true });
     } catch (e) {
       logWarn('agent.self_terminate.stop_flag', { error: e.message });
     }

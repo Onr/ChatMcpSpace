@@ -81,7 +81,8 @@
         <li>
           Local storage and session storage entries in your browser, such as voice notification preferences and a
           derived encryption key used for end‑to‑end encryption. These values are stored client‑side; we do not read
-          them on the server.
+          them on the server unless you explicitly approve exporting a derived encryption key for the
+          always-on MCP connector described below.
         </li>
       </ul>
     </section>
@@ -124,6 +125,16 @@
           Decryption happens in your browser or agent runtime using your password or derived key.
         </li>
       </ul>
+      <p>
+        <strong>Always-on MCP is a separate, optional mode.</strong> If you approve it, the browser sends
+        a derived encryption key to ChatMCP after a one-time unlock. We retain a protected copy encrypted
+        under a service wrapping key, and use it to process the approved agent's messages and attachments
+        for the connected AI app without an open browser. The account key has account-wide cryptographic
+        power; server API permissions restrict connector operations to the approved identity and permitted
+        peers. Separate shared-peer keys can also be approved. This connector is not end-to-end encrypted
+        between you and the AI app. Stored messages, files, and retry payloads remain encrypted. Disconnect
+        removes the hosted key and retry records; expired or revoked grants are periodically cleaned up.
+      </p>
       <p>
         Even when encryption is used, we still process unencrypted metadata such as timestamps, agent names,
         message type (message vs. question), priority, and whether a question has been answered. If you choose not
@@ -268,4 +279,3 @@
     </section>
   </div>
 </div>
-

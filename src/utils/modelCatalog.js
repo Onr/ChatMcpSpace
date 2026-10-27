@@ -4,6 +4,7 @@ const path = require('path');
 const STATIC_PROVIDER_MODELS = {
   codex: [
     { value: 'default', label: 'Default' },
+    { value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
     { value: 'gpt-6-astra', label: 'GPT-6 Astra' },
     { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
     { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
@@ -26,6 +27,7 @@ const STATIC_PROVIDER_MODELS = {
   ],
   openai: [
     { value: 'default', label: 'Default' },
+    { value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
     { value: 'gpt-6-astra', label: 'GPT-6 Astra' },
     { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
     { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
@@ -157,6 +159,7 @@ const STATIC_PROVIDER_MODELS = {
     { value: 'anthropic/claude-fable-5.1', label: 'Claude Fable 5.1' },
     { value: 'google/gemini-4-argon', label: 'Gemini 4 Argon' },
     { value: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { value: 'openai/gpt-6.1-terra', label: 'GPT-6.1 Terra' },
     { value: 'openai/gpt-6.1-sol', label: 'GPT-6.1 Sol' },
     { value: 'openai/gpt-6-astra', label: 'GPT-6 Astra' },
     { value: 'x-ai/grok-4.7', label: 'Grok 4.7' },

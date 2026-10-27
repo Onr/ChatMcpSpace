@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
 const { assetUrl } = require('../../src/utils/assetUrl');
-const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, ...data });
+const DeviceBadge = require('../../public/js/device-badge');
+const renderTemplate = (file, data = {}) => ejs.renderFile(file, { assetUrl, DeviceBadge, ...data });
 const { JSDOM } = require('jsdom');
 
 const project = path.join(__dirname, '../..');
@@ -80,6 +81,12 @@ for (const width of [390, 688, 1280]) {
   test(`shared conversations stay readable and open after dashboard refresh at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await mount(page);
+    expect(await page.locator('#agentListPanel').evaluate(panel => {
+      const owned = panel.querySelector('#agentListScroll');
+      const shared = panel.querySelector('#sharedConversationSection');
+      return Boolean(owned.compareDocumentPosition(shared) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+        owned.getBoundingClientRect().bottom <= shared.getBoundingClientRect().top;
+    })).toBe(true);
     const button = page.locator('[data-shared-conversation-id="shared-one"]');
     await expect(button).toBeVisible();
     const leave = page.getByRole('button', { name: 'Leave AgentsMCPspace', exact: true });
@@ -107,19 +114,29 @@ for (const width of [390, 688, 1280]) {
   });
 }
 
-test('many shared chats scroll while regular chats remain available', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 900 });
+for (const width of [390, 1280]) {
+test(`many shared chats scroll after your agents at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
   await mount(page);
+  await page.locator('#agentListPanel').evaluate(panel => panel.classList.add('mobile-expanded'));
   await page.unroute('**/api/user/chat-threads');
   await page.route('**/api/user/chat-threads', route => route.fulfill({ json: Array.from({ length: 12 }, (_, i) => ({ ...contexts[0], conversationId: `room-${i}`, agentName: `Shared agent ${i + 1}` })) }));
   await page.evaluate(() => window.InPlaceChat.refreshList());
-  const metrics = await page.locator('#sharedConversationSection').evaluate(section => ({
-    height: section.clientHeight, scrollHeight: section.scrollHeight,
-    regularHeight: document.getElementById('agentListScroll').clientHeight
+  // Both screen sizes use one scroll surface, with your own agents first.
+  const metrics = await page.locator('#agentListPanel').evaluate(panel => ({
+    height: panel.clientHeight, scrollHeight: panel.scrollHeight,
+    overflow: getComputedStyle(panel).overflowY
   }));
   expect(metrics.scrollHeight).toBeGreaterThan(metrics.height);
-  expect(metrics.height).toBeLessThanOrEqual(240);
-  expect(metrics.regularHeight).toBeGreaterThan(80);
-  await page.getByRole('button', { name: 'Open Shared agent 12 shared conversation', exact: true }).scrollIntoViewIfNeeded();
-  await expect(page.getByRole('button', { name: 'Open Shared agent 12 shared conversation', exact: true })).toBeInViewport();
+  expect(metrics.overflow).toBe('auto');
+  await expect(page.locator('.agent-list-item[data-agent-id="own-0"]')).toBeInViewport();
+  for (const row of [page.getByRole('button', { name: 'Open Shared agent 12 shared conversation', exact: true }), page.locator('.agent-list-item[data-agent-id="own-1"]')]) {
+    await row.scrollIntoViewIfNeeded();
+    await expect(row).toBeInViewport();
+    expect(await row.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+    })).toBe(true);
+  }
 });
+}

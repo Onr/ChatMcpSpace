@@ -56,17 +56,30 @@ if (typeof fallbackCleanupInterval.unref === 'function') {
   fallbackCleanupInterval.unref();
 }
 
+// Keep increment and expiry in one Redis operation. A process exit or failed
+// connection between INCR and PEXPIRE must not leave a permanent rate limit.
+// Repair counters left without an expiry by older versions, while preserving
+// the fixed window of healthy counters.
+const INCREMENT_WITH_EXPIRY_SCRIPT = `
+  local count = redis.call('INCR', KEYS[1])
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl == -1 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+    ttl = tonumber(ARGV[1])
+  end
+  return {count, ttl}
+`;
+
 async function incrementWithRedis(key, windowMs) {
   if (!rateLimitRedisClient || !rateLimitRedisClient.isReady) {
     return null;
   }
 
   try {
-    const count = await rateLimitRedisClient.incr(key);
-    if (count === 1) {
-      await rateLimitRedisClient.pExpire(key, windowMs);
-    }
-    const ttl = await rateLimitRedisClient.pTTL(key);
+    const [count, ttl] = await rateLimitRedisClient.eval(INCREMENT_WITH_EXPIRY_SCRIPT, {
+      keys: [key],
+      arguments: [String(windowMs)]
+    });
     return { count, ttl };
   } catch (error) {
     console.error('[RateLimit] Redis error:', error.message);

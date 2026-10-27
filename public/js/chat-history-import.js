@@ -224,6 +224,7 @@
     preview = null;
     previewNode.hidden = true;
     if (retryButton) retryButton.hidden = true;
+    document.getElementById('shareRuntimeRecovery')?.remove();
     try {
       const agentId = captured.agentId;
       const context = await request('/resolve', { agentId });
@@ -252,7 +253,19 @@
           ? 'This conversation contains files that cannot be converted. No history has been moved.'
           : 'Pending private scheduled messages must be delivered or canceled before sharing. No history has been moved.';
       } else if (preview.runtimeReady === false && context.state !== 'preparing') {
-        status.textContent = 'This agent\'s shared runner is offline or not connected yet, so it could not answer people you invite. Connect the shared runner on the machine where this agent runs, then press Try again. No history has been moved.';
+        status.textContent = 'Start or update this agent on its computer to enable sharing. Your history is still private; invitations will be sent after sharing is ready.';
+        const help = document.createElement('details');
+        help.id = 'shareRuntimeRecovery';
+        help.className = 'rounded-xl border border-slate-700 p-3 text-sm text-slate-300';
+        help.open = true;
+        const summary = document.createElement('summary');
+        summary.textContent = 'Connect this agent';
+        const instructions = document.createElement('p');
+        instructions.textContent = 'On the computer where this agent is installed, update its scripts using the existing agent CLI, then restart it. Current Linux/macOS and WSL agents connect sharing automatically; you do not need a second runner. Keep its original project folder. Native Windows agents currently support private chats only; use WSL for sharing.';
+        const retry = document.createElement('p');
+        retry.textContent = 'Once the agent is running, press Try again here. If startup fails, keep its error text for troubleshooting.';
+        help.append(summary, instructions, retry);
+        status.after(help);
         if (retryButton) retryButton.hidden = false;
       } else {
         status.textContent = context.state === 'preparing'

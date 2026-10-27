@@ -91,6 +91,7 @@ async function archiveAgent(userId, agentId, reason = null) {
 
     return {
       archivedAgentId,
+      agentName: agent.agent_name,
       messageCount,
       archivedAt: archiveResult.rows[0].archived_at
     };
@@ -174,7 +175,8 @@ async function unarchiveAgent(userId, archivedAgentId) {
 
     return {
       success: true,
-      agentId: restoredAgentId
+      agentId: restoredAgentId,
+      agentName: archived.agent_name
     };
 
   } catch (error) {
@@ -625,6 +627,34 @@ async function isMessageArchived(messageId, messageType) {
   }
 }
 
+/**
+ * Check if an agent is archived by user ID and agent name
+ * Gracefully handles missing archive tables (during migration)
+ *
+ * @param {string} userId - User ID who owns the agent
+ * @param {string} agentName - Agent name to check
+ * @returns {Promise<boolean>} true if archived, false if not or tables don't exist yet
+ */
+async function isAgentArchivedByName(userId, agentName) {
+  try {
+    const result = await query(
+      'SELECT archived_agent_id FROM archived_agents WHERE user_id = $1 AND agent_name = $2',
+      [userId, agentName]
+    );
+
+    return result.rows.length > 0;
+
+  } catch (error) {
+    if (error.code === '42P01') {
+      console.warn('Archive tables not yet initialized, assuming agent is not archived');
+      return false;
+    }
+
+    console.error('Error checking if agent is archived by name:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   archiveAgent,
   unarchiveAgent,
@@ -634,5 +664,6 @@ module.exports = {
   getArchivedAgentDetails,
   getArchivedMessages,
   isAgentArchived,
+  isAgentArchivedByName,
   isMessageArchived
 };

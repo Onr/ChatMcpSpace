@@ -1,0 +1,33 @@
+name: Native Windows installer
+on:
+  push:
+    paths:
+      - 'scripts/*windows*'
+      - 'scripts/external-agent-bridge.js'
+      - 'src/utils/windowsSetup.js'
+      - 'tests/scripts/windowsInstaller.test.ps1'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'scripts/*windows*'
+      - 'scripts/external-agent-bridge.js'
+      - 'src/utils/windowsSetup.js'
+      - 'tests/scripts/windowsInstaller.test.ps1'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Installer regression tests with real Windows ACLs
+        shell: ${{ matrix.shell }}
+        run: ./tests/scripts/windowsInstaller.test.ps1
