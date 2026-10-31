@@ -44,9 +44,6 @@ async function main() {
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/schema.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/037_add_scheduled_user_messages.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/042_add_shared_conversations.sql'), 'utf8'));
-    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
-    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
-    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
     for (const migration of [
       '043_add_agent_devices_and_share_grants.sql', '044_add_shared_task_context.sql',
       '045_add_guest_principals_and_membership.sql', '046_add_message_run_overrides.sql',
@@ -60,6 +57,9 @@ async function main() {
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/056_add_conversation_invitations.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/057_add_shared_message_recipients.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/058_add_shared_agent_read_receipts.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
     const dbPath = require.resolve('../../src/db/connection');
     require.cache[dbPath] = {
       id: dbPath,
@@ -135,6 +135,7 @@ async function main() {
           encryptionSalt: '', isGoogleAuth: false, groups: [], csrfToken: res.locals.csrfToken, cspNonce: 'fixture',
           user: { userId: dashboardUser.userId, email: dashboardUser.email },
           featureInPlaceAgentSharing: req.query.legacy !== '1',
+          DeviceBadge: require('../../public/js/device-badge'),
           safeJsonForScript: require('../../src/utils/safeJsonHelper').safeJsonForScript
         });
         res.send(await renderTemplate(path.join(__dirname, '../../views/layout.ejs'), {
@@ -652,6 +653,10 @@ async function main() {
     conversionPage.on('pageerror', error => pageErrors.push(error.message));
     await conversionPage.route('https://**/*', route => new URL(route.request().url()).hostname === 'cdn.tailwindcss.com'
       ? route.continue() : route.abort());
+    await conversionPage.addInitScript(({ agentId, userId }) => {
+      localStorage.setItem(`dashboard_last_agent_id:${userId}`, JSON.stringify({ agentId }));
+      localStorage.setItem('dashboard_last_agent_id', agentId);
+    }, { agentId, userId: alice.userId });
     await conversionPage.goto(baseUrl + '/fixture/dashboard');
     await conversionPage.waitForFunction(id => window.DashboardHelpers?.getSelectedAgentIdentity?.()?.agentId === id, agentId, { timeout: 20000 });
     await conversionPage.waitForFunction(() => window.dashboardReady === true);
@@ -731,8 +736,17 @@ async function main() {
     await b.goto(baseUrl + '/fixture/dashboard');
     const incoming = b.locator('#incomingSharingInvitations');
     await incoming.getByRole('button', { name: 'Join', exact: true }).waitFor({ timeout: 20000 });
-    await incoming.getByRole('button', { name: 'Join', exact: true }).click();
-    await b.waitForFunction(id => window.DashboardHelpers?.getSelectedChatContext?.()?.conversationId === id, convertedConversationId, { timeout: 30000 });
+    await incoming.getByRole('button', { name: 'Join', exact: true }).evaluate(btn => btn.click());
+    try {
+      await b.waitForFunction(id => window.DashboardHelpers?.getSelectedChatContext?.()?.conversationId === id, convertedConversationId, { timeout: 30000 });
+    } catch (e) {
+      const fb = await b.locator('#incomingSharingInvitations [role="status"]').allTextContents();
+      const curr = await b.evaluate(() => ({
+        selected: window.DashboardHelpers?.getSelectedChatContext?.()
+      }));
+      console.error('JOIN DIAGNOSTICS:', { fb, curr });
+      throw e;
+    }
     await b.getByText('Populated private history to convert', { exact: true }).waitFor({ timeout: 30000 }).catch(async error => {
       const state = await query(`SELECT m.status,c.key_version,c.membership_version,c.rotation_required,
         (SELECT COUNT(*)::int FROM shared_key_envelopes e WHERE e.conversation_id=c.id) AS envelopes
@@ -986,8 +1000,15 @@ async function main() {
     await guestPage.getByRole('button', { name: 'Join chat', exact: true }).click();
     await guestPage.locator('#guestWorkspace').waitFor({ state: 'visible', timeout: 30000 });
     await guestPage.locator(`#guestRooms button[data-chat-room="${convertedConversationId}"]`).waitFor({ state: 'visible', timeout: 20000 });
-    await guestPage.getByText(/Waiting for .* to unlock encrypted access/).waitFor({ timeout: 15000 });
+    await guestPage.locator('#guestConversationStatus').filter({ hasText: /Waiting for .* to (unlock encrypted access|approve you)/ }).waitFor({ timeout: 15000 });
     assert.equal(await guestPage.locator('#guestComposer').isVisible(), false, 'Guests must wait for encrypted admission while the owner is absent');
+    // Link guests now wait for owner approval (065). Approve through the real
+    // route; the locked owner dashboard must then ask for a local unlock.
+    const waitingGuestId = (await query("SELECT guest_id FROM shared_guest_members WHERE conversation_id=$1 AND status='pending' AND approved_at IS NULL", [convertedConversationId])).rows[0]?.guest_id;
+    assert.ok(waitingGuestId, 'the link guest must wait for owner approval');
+    const approvalToken = (await (await ac.request.get(baseUrl + '/csrf-token')).json()).csrfToken;
+    const approval = await ac.request.post(`${baseUrl}/api/user/shared/${convertedConversationId}/guests/${waitingGuestId}/approve`, { headers: { 'x-csrf-token': approvalToken } });
+    assert.equal(approval.status(), 200, await approval.text());
     conversionPage = await ac.newPage();
     conversionPage.on('pageerror', error => pageErrors.push(error.message));
     await conversionPage.route('https://**/*', route => new URL(route.request().url()).hostname === 'cdn.tailwindcss.com' ? route.continue() : route.abort());
@@ -1039,6 +1060,15 @@ async function main() {
     await secondGuestPage.goto(guestLink);
     await secondGuestPage.locator('#guestDisplayName').fill('Other in-place guest');
     await secondGuestPage.getByRole('button', { name: 'Join chat', exact: true }).click();
+    let secondWaitingGuestId;
+    for (let attempt = 0; attempt < 150 && !secondWaitingGuestId; attempt += 1) {
+      secondWaitingGuestId = (await query("SELECT guest_id FROM shared_guest_members WHERE conversation_id=$1 AND status='pending' AND approved_at IS NULL", [convertedConversationId])).rows[0]?.guest_id;
+      if (!secondWaitingGuestId) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.ok(secondWaitingGuestId, 'the second link guest must wait for owner approval');
+    const secondApprovalToken = (await (await ac.request.get(baseUrl + '/csrf-token')).json()).csrfToken;
+    const secondApproval = await ac.request.post(`${baseUrl}/api/user/shared/${convertedConversationId}/guests/${secondWaitingGuestId}/approve`, { headers: { 'x-csrf-token': secondApprovalToken } });
+    assert.equal(secondApproval.status(), 200, await secondApproval.text());
     await secondGuestPage.locator('#guestComposer').waitFor({ state: 'visible', timeout: 30000 });
     const guests = (await query("SELECT guest_id,display_name FROM guest_principals WHERE share_id=$1", [guestShareId])).rows;
     const selectedGuest = guests.find(person => person.display_name === 'In-place guest');
