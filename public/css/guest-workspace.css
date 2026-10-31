@@ -123,3 +123,9 @@ body.guest-chat-page { margin: 0; color: #e2e8f0; background: radial-gradient(el
 .guest-message .message-read-indicator { margin-left: 6px; font-size: 12px; }
 .guest-message .message-read-indicator--delivered { color: #94a3b8; }
 .guest-message .message-read-indicator--read { color: #38bdf8; }
+
+/* Signed-in visitors can ask with their account instead of as a guest. */
+.guest-account-request { margin-top: 8px; padding-top: 16px; border-top: 1px solid #33415570; font-size: 12px; line-height: 1.7; }
+.guest-account-request button { width: 100%; min-height: 44px; margin: 10px 0 6px; }
+.guest-account-request strong { color: #e2e8f0; overflow-wrap: anywhere; }
+.chat-unlock-card textarea { resize: vertical; min-height: 64px; }

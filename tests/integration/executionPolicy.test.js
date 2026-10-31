@@ -82,6 +82,7 @@ async function setup() {
     };
   }
   for (const migration of migrations) await fixture.query(migrationForFixture(migration, Boolean(process.env.SHARED_TEST_DATABASE_URL)));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
   jest.doMock('../../src/db/connection', () => ({
     query: fixture.query,
     getClient: () => fixture.pool.connect()
@@ -539,12 +540,13 @@ test('one operation cannot change its command and an approved action cannot exec
   await expect(tasks.complete(runtime, batch.id, action.actionId, { ...result, receipt: { exitCode: 1 } })).rejects.toMatchObject({ status: 409 });
 });
 
-test.each(['grant', 'device', 'membership', 'audience', 'expiry', 'replacement'])('changed %s authority fences an already approved action', async change => {
+test.each(['grant', 'device', 'membership', 'audience', 'sharing', 'expiry', 'replacement'])('changed %s authority fences an already approved action', async change => {
   const { tasks, batch, runtime, action } = await approvalTask();
   await tasks.decide(alice.userId, batch.id, action.actionId, { decision: 'approve', digest: action.digest });
   if (change === 'grant') await authorization.updateGrant(alice.userId, grant.grant_id, { resources: [] });
   if (change === 'device') await authorization.updateDevice(alice.userId, device.device_id, { rotateCredential: true });
   if (change === 'membership') await fixture.query("UPDATE shared_members SET status='removed' WHERE conversation_id=$1 AND user_id=$2", [room, bob.userId]);
+  if (change === 'sharing') await service.sharingSettings(alice.userId, room, false);
   if (change === 'audience') await fixture.query('UPDATE shared_conversations SET membership_version=membership_version+1 WHERE id=$1', [room]);
   if (change === 'expiry') await fixture.query("UPDATE agent_share_grants SET expires_at=NOW()-INTERVAL '1 second' WHERE grant_id=$1", [grant.grant_id]);
   if (change === 'replacement') {

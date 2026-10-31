@@ -7,6 +7,8 @@ const authorization = require('./authorization');
 const guest = require('./guestService');
 const tasks = require('./taskAuthority');
 const db = require('../db/connection');
+const bcrypt = require('bcrypt');
+const { guestUnlockRateLimiter } = require('../middleware/guestRateLimit');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -94,6 +96,22 @@ users.delete('/guest-shares/:share', guestEnabled, wrap(r => guest.updateOwnerSh
 users.put('/guest-shares/:share/agents', guestEnabled, wrap(r => guest.replaceShareAgents(r.user.userId, r.params.share, r.body)));
 users.delete('/guest-shares/:share/guests/:guest', guestEnabled, wrap(r => guest.removeGuest(r.user.userId, r.params.share, r.params.guest)));
 users.post('/guest-shares/:share/keys', guestEnabled, wrap(r => guest.provisionGuestKeys(r.user.userId, r.params.share, r.body)));
+// A signed-in visitor asks for access through a guest link (see views/guest-shared.ejs).
+users.post('/link-requests', guestEnabled, guestUnlockRateLimiter, wrap(async r => {
+  const secret = r.body?.linkSecret;
+  const unavailable = () => new s.SharedError(404, 'This link has expired or the access code is wrong');
+  if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(secret)) throw unavailable();
+  const share = await guest.findShareByLinkSecret(secret);
+  if (!share) throw unavailable();
+  if (share.password_hash) {
+    const password = r.body?.password;
+    if (typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > 72 || !await bcrypt.compare(password, share.password_hash)) throw unavailable();
+  }
+  return guest.requestAccountAccess(r.user.userId, share, r.body?.note);
+}));
+users.post('/:room/access-requests/:request/approve', guestEnabled, wrap(r => s.decideAccountRequest(r.user.userId, r.params.room, r.params.request, true)));
+users.delete('/:room/access-requests/:request', guestEnabled, wrap(r => s.decideAccountRequest(r.user.userId, r.params.room, r.params.request, false)));
+users.post('/:room/guests/:guest/approve', guestEnabled, wrap(r => s.approveGuest(r.user.userId, r.params.room, r.params.guest)));
 users.post('/:room/members/:user/recover', wrap(r => s.approveRecovery(r.user.userId, r.params.room, r.params.user)));
 users.get('/', wrap(r => s.list(r.user.userId)));
 users.post('/', wrap(r => s.create(r.user.userId, r.body)));
@@ -108,6 +126,11 @@ users.put('/:room/agent-messaging', wrap(r => {
   return require('./a2aAccess').settings(r.user.userId, r.params.room, r.body.enabled);
 }));
 users.get('/:room', wrap(r => s.get(r.user.userId, r.params.room)));
+users.get('/:room/sharing', wrap(r => s.sharingSettings(r.user.userId, r.params.room)));
+users.put('/:room/sharing', wrap(r => {
+  s.check(typeof r.body?.enabled === 'boolean', 400, 'enabled must be a boolean');
+  return s.sharingSettings(r.user.userId, r.params.room, r.body.enabled);
+}));
 users.post('/:room/keys', wrap(r => s.provision(r.user.userId, r.params.room, r.body)));
 users.get('/:room/messages', wrap(r => s.history(r.user.userId, r.params.room, r.query.after || 0,
   r.query.since || null, r.query.before || null, r.query.limit || 200)));

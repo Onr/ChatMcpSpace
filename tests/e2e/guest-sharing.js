@@ -36,7 +36,10 @@ const migrationFiles = [
   '052_bound_guest_file_storage.sql',
   '053_bind_shared_action_approvals.sql',
   '057_add_shared_message_recipients.sql',
-  '058_add_shared_agent_read_receipts.sql'
+  '058_add_shared_agent_read_receipts.sql',
+  '064_add_sharing_switch.sql',
+  '065_guest_approval_and_limits.sql',
+  '066_guest_link_requests.sql'
 ];
 
 class TestStore {

@@ -51,6 +51,19 @@ describe('backup_db.sh', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  test('dumps the auth event audit log schema without its rows', () => {
+    const { dir, scripts, bin } = fixture('printf "%s\\n" "$@"');
+    try {
+      const result = spawnSync('bash', [path.join(scripts, 'backup_db.sh')], {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
+      });
+      expect(result.status).toBe(0);
+      const [file] = fs.readdirSync(path.join(dir, 'backups'));
+      const args = require('zlib').gunzipSync(fs.readFileSync(path.join(dir, 'backups', file))).toString();
+      expect(args.split('\n')).toContain('--exclude-table-data=agent_auth_events');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   function runWithOldDump(extraEnv, python) {
     const { dir, scripts, bin } = fixture('printf complete', extraEnv);
     if (python) writeExecutable(path.join(bin, 'python3'), `#!/usr/bin/env bash\n${python}\n`);

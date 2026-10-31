@@ -257,7 +257,7 @@ app.use('/', mcpRoutes);
 // Page routes (HTML rendering)
 // Public instructions have no account access and require no sign-in.
 app.use('/', agentDiscoveryRoutes);
-app.get('/guest', (req, res) => {
+app.get('/guest', async (req, res, next) => {
   if (process.env.FEATURE_SHARED_CONVERSATIONS !== 'true' || process.env.FEATURE_GUEST_SHARING !== 'true') {
     return res.status(404).send('Not found');
   }
@@ -265,7 +265,20 @@ app.get('/guest', (req, res) => {
     'Cache-Control': 'no-store',
     'Referrer-Policy': 'no-referrer'
   });
-  res.render('guest-shared', { layout: false });
+  // Signed-in visitors may ask for access with their account instead of as a guest.
+  let account = null;
+  try {
+    if (req.session?.userId) {
+      const row = (await require('./src/db/connection').query('SELECT email FROM users WHERE user_id=$1', [req.session.userId])).rows[0];
+      if (row) {
+        await new Promise(resolve => csrfProtection(req, res, resolve));
+        account = { email: row.email, csrfToken: res.locals.csrfToken };
+      }
+    }
+  } catch (error) {
+    return next(error);
+  }
+  res.render('guest-shared', { layout: false, account });
 });
 app.use('/', pageRoutes);
 

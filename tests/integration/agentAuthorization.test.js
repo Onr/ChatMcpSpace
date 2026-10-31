@@ -48,6 +48,7 @@ async function setup() {
     };
   }
   await fixture.query(sharedMigration);
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
   await fixture.query(migration);
   jest.doMock('../../src/db/connection', () => ({
     query: fixture.query,

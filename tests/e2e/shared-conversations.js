@@ -44,6 +44,9 @@ async function main() {
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/schema.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/037_add_scheduled_user_messages.sql'), 'utf8'));
     await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/042_add_shared_conversations.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
+    await query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
     for (const migration of [
       '043_add_agent_devices_and_share_grants.sql', '044_add_shared_task_context.sql',
       '045_add_guest_principals_and_membership.sql', '046_add_message_run_overrides.sql',

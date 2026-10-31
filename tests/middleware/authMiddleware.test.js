@@ -2,7 +2,8 @@ const {
   requireSession, 
   attachUserFromSession, 
   requireApiKey, 
-  requireEmailVerification 
+  requireEmailVerification,
+  resetAuthSuccessLogThrottle
 } = require('../../src/middleware/authMiddleware');
 
 const { getUserByApiKey } = require('../../src/services/authService');
@@ -45,6 +46,69 @@ describe('scoped agent config reads', () => {
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() }, next = jest.fn();
     await requireApiKey(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('scoped auth event logging throttle', () => {
+  const { verifyScopedCredential } = require('../../src/services/agentCredentialService');
+  const authEventInserts = () => query.mock.calls.filter(([sql]) => /INSERT INTO agent_auth_events/.test(sql));
+  const authEventTypes = () => authEventInserts().map(([, params]) => params[2]);
+
+  async function authenticate({ credentialId = 'credential-id', scopes = ['agent.responses.read'], path = '/responses' } = {}) {
+    verifyScopedCredential.mockResolvedValue({ agentName: 'Native Agent', agentId: 'agent-id',
+      credentialId, user: { userId: 'owner-id' }, scopes });
+    const req = { method: 'GET', path, query: { agentName: 'Native Agent' }, body: {},
+      headers: { 'x-agent-token': 'test-only' } };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() }, next = jest.fn();
+    await requireApiKey(req, res, next);
+    return { res, next };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-10-28T12:00:00Z') });
+    query.mockReset();
+    query.mockResolvedValue({ rows: [] });
+    resetAuthSuccessLogThrottle();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('records the first successful auth for a credential', async () => {
+    const { next } = await authenticate();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(authEventTypes()).toEqual(['auth_success']);
+  });
+
+  it('skips repeat successes within ten minutes but still authenticates them', async () => {
+    await authenticate();
+    jest.advanceTimersByTime(9 * 60 * 1000);
+    const { next } = await authenticate();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(authEventTypes()).toEqual(['auth_success']);
+  });
+
+  it('records another success once the window has passed', async () => {
+    await authenticate();
+    jest.advanceTimersByTime(10 * 60 * 1000);
+    await authenticate();
+    expect(authEventTypes()).toEqual(['auth_success', 'auth_success']);
+  });
+
+  it('records the first success of a rotated credential immediately for the handshake check', async () => {
+    await authenticate({ credentialId: 'old-credential' });
+    await authenticate({ credentialId: 'new-credential' });
+    expect(authEventInserts().map(([, params]) => params[1])).toEqual(['old-credential', 'new-credential']);
+  });
+
+  it('always records scope denials', async () => {
+    await authenticate();
+    const first = await authenticate({ scopes: [], path: '/responses' });
+    const second = await authenticate({ scopes: [], path: '/responses' });
+    expect(first.res.status).toHaveBeenCalledWith(403);
+    expect(second.res.status).toHaveBeenCalledWith(403);
+    expect(authEventTypes()).toEqual(['auth_success', 'auth_scope_denied', 'auth_scope_denied']);
   });
 });
 

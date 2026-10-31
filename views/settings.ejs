@@ -31,13 +31,13 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <!-- Left Column -->
           <div class="lg:col-span-2 space-y-8">
-            <section class="glass-panel p-6" aria-labelledby="agentIdentitySettingsHeading">
-              <h2 id="agentIdentitySettingsHeading" class="text-xl font-semibold text-slate-100">Agents: identity &amp; goals</h2>
-              <p class="mt-2 text-sm text-slate-400">Edit each agent's role, goals and activity policy. Automatic work is off until explicitly available and enabled.</p>
+            <details class="glass-panel p-6" id="agentIdentitySettings">
+              <summary id="agentIdentitySettingsHeading" class="text-xl font-semibold text-slate-100 cursor-pointer">Agents: identity &amp; goals (optional)</summary>
+              <p class="mt-2 text-sm text-slate-400">Optional: add a role or goals if useful. You can chat with your agents without setting these up. Automatic work stays off unless you enable it.</p>
               <button type="button" id="agentBriefPauseAll" class="agent-brief-entry mt-3">Pause all proactive work</button>
               <span id="agentBriefPauseAllStatus" class="ml-2 text-sm text-slate-400" role="status"></span>
               <div id="agentBriefSettingsList" class="agent-brief-settings-list mt-4" aria-live="polite">Loading agents…</div>
-            </section>
+            </details>
 
             <section id="existing-agent-setup" class="glass-panel p-6" aria-labelledby="externalAgentsHeading">
               <h2 id="externalAgentsHeading" class="text-xl font-semibold text-slate-100">Bring your own agent</h2>

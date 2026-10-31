@@ -88,6 +88,9 @@ async function setup() {
     };
   }
   for (const migration of migrations) await fixture.query(migrationForFixture(migration, Boolean(process.env.SHARED_TEST_DATABASE_URL)));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
   if (process.env.SHARED_TEST_DATABASE_URL) for (const file of ['048_enforce_guest_room_relationships.sql', '049_retain_guest_history_attribution.sql']) {
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations', file), 'utf8'));
   }

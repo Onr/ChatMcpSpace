@@ -2113,6 +2113,8 @@ body.orbit-dragging .agent-seat {
 .agent-seat--focused .agent-avatar > .rounded-full {
   outline: 2px solid rgba(241, 245, 249, 0.9);
   outline-offset: 7px;
+  /* Keep the single outer selection ring; hide the sphere's own pale edge. */
+  border-color: transparent;
 }
 
 @keyframes agentPriorityPulse {
@@ -9112,31 +9114,47 @@ a.rounded-full.border-white\/10:active {
   transform: translateY(0) scale(0.96);
 }
 
-/* Send animation: the draft copy that glides into the conversation
-   (see playSendFlight in dashboard.js). */
+/* Send animation: the draft copy that hovers above the conversation while
+   sending and drops into place once the server accepts it (see
+   playSendFlight in dashboard.js). Styled like .message-bubble--user, but
+   with an opaque background instead of backdrop-filter so it stays cheap to
+   move; only transform and opacity are animated. */
 .send-flight {
   position: fixed;
   z-index: 300;
-  max-height: 7.5rem;
-  overflow: hidden;
-  padding: 0.55rem 0.8rem;
-  border-radius: 1rem 1rem 0.35rem 1rem;
-  font-size: 0.875rem;
-  line-height: 1.35;
-  color: rgb(226, 232, 240);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   pointer-events: none;
-  background-color: rgba(30, 41, 59, 0.92);
-  box-shadow: 0 10px 30px -12px rgba(2, 6, 23, 0.8);
   transform-origin: right bottom;
   will-change: transform, opacity;
-  transition: background-color 380ms ease, color 380ms ease;
 }
 
-.send-flight--sent {
-  background-color: rgba(16, 185, 129, 0.88);
-  color: rgb(2, 6, 23);
+.send-flight__body {
+  max-height: 7.5rem;
+  overflow: hidden;
+  padding: 0.75rem 1rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: #f8fafc;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.24), rgba(6, 182, 212, 0.18)),
+    rgb(22, 32, 48);
+  box-shadow: 0 18px 36px -14px rgba(2, 6, 23, 0.9);
+}
+
+.send-flight--hovering .send-flight__body {
+  animation: sendFlightHover 1.6s ease-in-out infinite alternate;
+}
+
+.send-flight--sent .send-flight__body {
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+@keyframes sendFlightHover {
+  from { transform: translateY(0); }
+  to { transform: translateY(-4px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -9276,6 +9294,7 @@ a.rounded-full.border-white\/10:active {
 @media (min-width: 768px) and (max-width: 1023px) and (min-height: 601px),
        (pointer: coarse) and (min-width: 768px) and (max-width: 1180px) and (min-height: 601px) {
   .dashboard-main-grid > .council-chamber {
+    order: 2;
     flex: 0 0 38% !important;
     min-width: 0 !important;
     max-width: 38% !important;
@@ -9316,13 +9335,30 @@ a.rounded-full.border-white\/10:active {
   }
 
   #councilListSection {
-    flex: 1 1 auto;
+    flex: 1 1 auto !important;
     min-height: 0;
   }
 
-  #mobileStatsToggle {
-    padding: 0.4rem;
-    font-size: 0.65rem;
+  /* The list already has its own column. Keep it visible after selecting a
+     chat, including Fast Mode, without reserving an empty panel. */
+  #agentListPanel,
+  body.dashboard-fast-mode #agentListPanel:not(.mobile-expanded),
+  body.dashboard-fast-mode #agentListPanel.mobile-expanded {
+    display: flex !important;
+    flex: 1 1 auto;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    overflow: hidden !important;
+  }
+
+  #collapseMobileListBtn,
+  #mobileStatsToggle,
+  body.dashboard-fast-mode .fast-mode-chat-list-toggle,
+  body.dashboard-fast-mode .fast-mode-placeholder-open-chats {
+    display: none !important;
   }
 
   .agent-list-header {
@@ -9335,9 +9371,6 @@ a.rounded-full.border-white\/10:active {
     gap: 0.25rem;
   }
 
-  body.dashboard-fast-mode #agentListPanel.mobile-expanded {
-    max-height: none !important;
-  }
 }
 
 /* A useful next step for first-time users and unselected conversations. */
@@ -9471,3 +9504,82 @@ a:focus-visible, select:focus-visible, summary:focus-visible, textarea:focus-vis
 .council-compact :is(.agent-seat, .group-seat):is(:hover, :focus-visible, .agent-seat--focused, .agent-seat--selected) .agent-number-badge { display: block; }
 .council-dense :is(.council-agent-initials, .group-seat__center-label) { visibility: hidden; }
 .council-dense .council-agent-sphere { border-width: .5px; }
+
+/* Phones held sideways have well under 500px of height. Shrink the site bar and
+   dashboard headings so the chat gets the screen instead of the titles. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  body > nav,
+  #mainContent ~ nav { padding-top: 0.25rem !important; }
+  nav .glass-panel {
+    padding: 0.25rem 0.75rem !important;
+    gap: 0.5rem !important;
+    flex-wrap: nowrap !important;
+  }
+  nav .glass-panel > a svg { width: 1.75rem !important; height: 1.75rem !important; }
+  nav .glass-panel > a p { font-size: 0.7rem !important; white-space: nowrap; }
+  nav .nav-right-buttons {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    min-width: 0;
+    gap: 0.35rem !important;
+  }
+  nav .nav-right-buttons > * { flex: 0 0 auto; }
+  #mainContent { padding-top: 0.25rem !important; padding-bottom: 0 !important; }
+  #mobileHeader .council-header-title,
+  .council-header-title,
+  .workspace-welcome__title { display: none !important; }
+  .workspace-welcome > p { display: none; }
+}
+
+/* Under 768px the dashboard stacks vertically, so the side-by-side landscape
+   width above (clamp(230px, 34vw, 340px)) would become the agent panel's
+   height and push the chat off screen. Keep the panel to its compact header
+   and let the expanded agent list overlay the chat. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 600px) and (max-width: 767px) {
+  .dashboard-main-grid > .council-chamber {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+  #mobileHeader { padding-top: 0.15rem !important; padding-bottom: 0.15rem !important; }
+  #mobileHeader > .flex { min-height: 0; }
+  #mobileHeader svg:not(.w-4) { max-height: 2rem; }
+  #mobileStatsToggle { padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
+  #mobileStatsToggle .agent-status-filter-btn { min-height: 2.25rem; }
+}
+
+/* "N want access" chip in the agent list (people waiting on a share link). */
+.agent-brief-entry.agent-access-request-chip {
+  border-color: rgba(251, 191, 36, 0.6);
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.08);
+}
+.agent-brief-entry.agent-access-request-chip:hover { background: rgba(251, 191, 36, 0.18); }
+
+/* Activity/news cards: a long Context path or unbroken token must not widen the bubble past the screen. */
+.message-row-body {
+  min-width: 0;
+  max-width: 100%;
+}
+.news-feed-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.news-feed-card__header {
+  min-width: 0;
+}
+.news-feed-card__context {
+  min-width: 0;
+  max-width: 60%;
+}
+.news-feed-card__summary {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.news-feed-card__summary pre,
+.news-feed-card__summary table {
+  max-width: 100%;
+  overflow-x: auto;
+}

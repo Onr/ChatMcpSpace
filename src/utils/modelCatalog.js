@@ -234,12 +234,9 @@ function dedupeAndNormalizeOptions(options = []) {
     }
   }
 
+  // The input order is meaningful: built-in catalogs are curated by priority,
+  // while provider CLI syncs report the provider's own preferred order.
   const deduped = Array.from(byValue.values());
-  deduped.sort((a, b) => {
-    if (a.value === 'default') return -1;
-    if (b.value === 'default') return 1;
-    return a.value.localeCompare(b.value);
-  });
 
   if (!deduped.some(m => m.value === 'default')) {
     deduped.unshift({ value: 'default', label: 'Default' });
@@ -274,9 +271,10 @@ function getProviderModelCatalog(userId) {
   for (const provider of Object.keys(staticCatalog)) {
     const staticModels = staticCatalog[provider] || [];
     const staticIds = new Set(staticModels.map(option => option.value));
+    const cacheSource = cache[provider]?.source;
     const cachedModels = (Array.isArray(cache[provider]?.models) ? cache[provider].models : []).map(option => {
       const normalized = normalizeModelOption(option);
-      if (normalized && ['public-catalog', 'cli-bundled'].includes(cache[provider]?.source) && !staticIds.has(normalized.value)) {
+      if (normalized && ['public-catalog', 'cli-bundled'].includes(cacheSource) && !staticIds.has(normalized.value)) {
         return { ...normalized, label: `${normalized.label} · New, untested`, unconfirmed: true };
       }
       return option;
@@ -284,7 +282,12 @@ function getProviderModelCatalog(userId) {
     const known = new Set([...staticModels, ...cachedModels].map(option => normalizeModelOption(option)?.value));
     const candidates = (discovered[provider] || []).filter(option => !known.has(option.value))
       .map(option => ({ ...option, label: `${option.label} · New, untested`, unconfirmed: true }));
-    merged[provider] = dedupeAndNormalizeOptions([...staticModels, ...cachedModels, ...candidates]);
+    const cliOrdered = ['cli', 'cli-online'].includes(cacheSource);
+    merged[provider] = dedupeAndNormalizeOptions([
+      ...(cliOrdered ? cachedModels : staticModels),
+      ...(cliOrdered ? staticModels : cachedModels),
+      ...candidates
+    ]);
   }
   return merged;
 }

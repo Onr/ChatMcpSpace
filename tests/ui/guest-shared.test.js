@@ -80,3 +80,37 @@ test('a guest invitation preview names the owner and conversation before joining
   expect(dom.window.document.getElementById('guestStatus').textContent).toContain('separate guest access code');
   dom.window.close();
 });
+
+test('a request link asks the visitor to send the owner a request, as a guest or with their account', async () => {
+  const secret = 'b'.repeat(43);
+  const dom = new JSDOM(`<section id="guestUnlockPanel"><p class="guest-eyebrow">You’re invited</p><h1 id="guestUnlockTitle">Join the conversation</h1><p>Choose a name to chat.</p><form id="guestUnlockForm"><input name="displayName" value="Visitor"><input name="password" value=""><label data-request-only hidden>Message</label><textarea name="note" data-request-only hidden></textarea><button type="submit"><span data-join-label>Join chat</span></button></form><div id="guestAccountRequest" data-csrf-token="account-csrf" hidden><button id="guestAccountRequestButton" type="button">Ask with my account instead</button></div><p id="guestStatus"></p></section><section id="guestWorkspace" hidden></section><button id="guestLogout" hidden>Log out</button>`, {
+    url: `https://space.example/guest#${secret}`, runScripts: 'outside-only'
+  });
+  const bodies = {};
+  dom.window.fetch = jest.fn(async (url, options = {}) => {
+    if (options.body) bodies[url] = { body: JSON.parse(options.body), headers: options.headers };
+    if (url === '/api/guest/preview') return response({ ownerDisplayName: 'Alex', agents: [{ agentName: 'Design Agent' }], accessMode: 'request', accountRequests: true });
+    if (url === '/api/user/shared/link-requests') return response({ state: 'pending', requested: 1 });
+    if (url === '/api/guest/unlock') return response({ error: { message: 'stop here' } }, 400);
+    throw new Error(`Unexpected request ${url}`);
+  });
+  dom.window.eval(script);
+  await settle();
+  const doc = dom.window.document;
+  expect(doc.getElementById('guestUnlockTitle').textContent).toBe('Ask Alex for access');
+  expect(doc.querySelector('[data-join-label]').textContent).toBe('Send request');
+  expect(doc.querySelector('textarea[name="note"]').hidden).toBe(false);
+  expect(doc.getElementById('guestAccountRequest').hidden).toBe(false);
+
+  doc.querySelector('textarea[name="note"]').value = 'From the design team';
+  doc.getElementById('guestUnlockForm').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(bodies['/api/guest/unlock'].body).toMatchObject({ linkSecret: secret, displayName: 'Visitor', note: 'From the design team' });
+
+  doc.getElementById('guestAccountRequestButton').click();
+  await settle();
+  expect(bodies['/api/user/shared/link-requests'].body).toEqual({ linkSecret: secret, note: 'From the design team' });
+  expect(bodies['/api/user/shared/link-requests'].headers['X-CSRF-Token']).toBe('account-csrf');
+  expect(doc.getElementById('guestStatus').textContent).toContain('Request sent. Alex will see it');
+  dom.window.close();
+});

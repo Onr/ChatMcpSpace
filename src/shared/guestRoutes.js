@@ -159,6 +159,7 @@ function createGuestRouter({ rateLimiter = guestUnlockRateLimiter } = {}) {
       const { guest, session } = await guestService.createUnlockedGuestSession({
         verifiedShare: share,
         displayName: guestName,
+        note: typeof req.body?.note === 'string' ? req.body.note : null,
         sessionTokenHash: tokenHash(sessionToken),
         csrfSecretHash: tokenHash(csrfToken)
       });

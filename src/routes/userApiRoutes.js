@@ -928,6 +928,31 @@ router.get('/agents', async (req, res) => {
       // Non-fatal if MCP tables are not present in minimal test schemas
     }
 
+    // People waiting for the owner's approval on a share link, per agent.
+    let accessRequestsByAgent = new Map();
+    try {
+      const requestRows = await query(
+        `SELECT sc.agent_id, COUNT(*)::int AS count FROM (
+           SELECT gm.conversation_id FROM shared_guest_members gm
+             JOIN guest_principals gp ON gp.guest_id = gm.guest_id AND gp.share_id = gm.share_id
+             JOIN guest_shares gs ON gs.share_id = gm.share_id
+            WHERE gs.owner_id = $1 AND gm.status = 'pending' AND gm.approved_at IS NULL
+              AND gp.status <> 'revoked' AND gp.public_key IS NOT NULL
+              AND gs.revoked_at IS NULL AND (gs.expires_at IS NULL OR gs.expires_at > NOW())
+           UNION ALL
+           SELECT r.conversation_id FROM guest_share_account_requests r
+             JOIN guest_shares gs ON gs.share_id = r.share_id
+            WHERE gs.owner_id = $1 AND r.state = 'pending'
+              AND gs.revoked_at IS NULL AND (gs.expires_at IS NULL OR gs.expires_at > NOW())
+         ) waiting JOIN shared_conversations sc ON sc.id = waiting.conversation_id
+         WHERE sc.owner_id = $1 GROUP BY sc.agent_id`,
+        [userId]
+      );
+      accessRequestsByAgent = new Map(requestRows.rows.map((r) => [r.agent_id, Number(r.count)]));
+    } catch (_requestErr) {
+      // Non-fatal if sharing tables are not present in minimal test schemas
+    }
+
     // Format agent data with pre-generated TTS audio URLs for new agent notifications
     const agents = await Promise.all(result.rows.map(async (row) => {
       const notificationText = `New agent ${row.agent_name} has joined the council.`;
@@ -964,6 +989,7 @@ router.get('/agents', async (req, res) => {
         lastMessageTime: lastMessageTime ? lastMessageTime.toISOString() : null,
         lastActivityTime: lastActivityTime ? lastActivityTime.toISOString() : null,
         unreadCount: parseInt(row.unread_count) || 0,
+        accessRequests: accessRequestsByAgent.get(row.agent_id) || 0,
         highestPriority: row.priority_value === 3 ? 'high' : row.priority_value === 2 ? 'normal' : 'low',
         lastMessagePriority: row.last_message_priority === 2 ? 'high' : row.last_message_priority === 1 ? 'normal' : 'low',
         reportedCliVersion,

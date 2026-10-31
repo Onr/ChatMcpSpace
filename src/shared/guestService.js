@@ -92,6 +92,25 @@ function futureExpiry(value) {
   return date;
 }
 
+function messageLimit(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const limit = Number(value);
+  s.check(Number.isInteger(limit) && limit > 0 && limit <= 100000, 400, 'Message limit must be a whole number from 1 to 100000');
+  return limit;
+}
+
+function accessMode(value) {
+  if (value === undefined || value === null || value === '') return 'join';
+  s.check(['join', 'request'].includes(value), 400, 'Invalid guest link type');
+  return value;
+}
+
+function requestNote(value) {
+  if (value === undefined || value === null) return null;
+  s.check(typeof value === 'string' && value.length <= 500, 400, 'Request note must be at most 500 characters');
+  return value.trim() || null;
+}
+
 function passwordValue(value) {
   if (value === undefined || value === null || value === '') return null;
   s.check(typeof value === 'string' && value.length >= 12 && Buffer.byteLength(value, 'utf8') <= 72, 400, 'Guest password must be 12–72 UTF-8 bytes');
@@ -147,6 +166,8 @@ async function createOwnerShare(ownerId, body = {}) {
   const roomMode = body.roomMode || 'separate';
   s.check(['separate', 'common'].includes(roomMode), 400, 'Invalid guest room mode');
   const expiresAt = futureExpiry(body.expiresAt);
+  const maxMessages = messageLimit(body.maxMessages);
+  const mode = accessMode(body.accessMode);
   const title = body.title || 'Guest shared work';
   const rawSecret = newLinkSecret();
   const passwordHash = password ? await bcrypt.hash(password, 12) : null;
@@ -169,8 +190,8 @@ async function createOwnerShare(ownerId, body = {}) {
     } else {
       agents = await ownerAgents(client, ownerId, body.agentIds);
     }
-    const share = await one(client, `INSERT INTO guest_shares(owner_id,token_hash,password_hash,room_mode,expires_at)
-      VALUES($1,$2,$3,$4,$5) RETURNING *`, [s.uuid(ownerId), tokenHash(rawSecret), passwordHash, roomMode, expiresAt]);
+    const share = await one(client, `INSERT INTO guest_shares(owner_id,token_hash,password_hash,room_mode,expires_at,max_messages,access_mode)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [s.uuid(ownerId), tokenHash(rawSecret), passwordHash, roomMode, expiresAt, maxMessages, mode]);
     for (const agent of agents) {
       const room = roomMode === 'common'
         ? linkedConversation && linkedConversation.agent_id === agent.agent_id
@@ -242,10 +263,24 @@ async function updateOwnerShare(ownerId, shareId, body = {}) {
     const changes = [];
     const values = [];
     let bumpRevision = false;
+    // Extending or clearing the expiry and changing the message limit keep
+    // current guests signed in; an earlier deadline re-checks queued work.
+    let extendSessions = null;
     if (body.expiresAt !== undefined) {
-      values.push(futureExpiry(body.expiresAt));
+      const expiresAt = futureExpiry(body.expiresAt);
+      values.push(expiresAt);
       changes.push(`expires_at=$${values.length}`);
-      bumpRevision = true;
+      if (expiresAt && (!current.expires_at || expiresAt < new Date(current.expires_at))) bumpRevision = true;
+      else extendSessions = expiresAt;
+    }
+    if (body.maxMessages !== undefined) {
+      values.push(messageLimit(body.maxMessages));
+      changes.push(`max_messages=$${values.length}`);
+    }
+    // The link type only changes what new visitors see; nobody is signed out.
+    if (body.accessMode !== undefined) {
+      values.push(accessMode(body.accessMode));
+      changes.push(`access_mode=$${values.length}`);
     }
     let rawSecret = null;
     if (body.replaceLink === true) {
@@ -274,6 +309,12 @@ async function updateOwnerShare(ownerId, shareId, body = {}) {
     values.push(current.share_id);
     const updated = await one(client, `UPDATE guest_shares SET ${changes.join(',')},updated_at=NOW()
       WHERE share_id=$${values.length} RETURNING *`, values);
+    if (!bumpRevision && body.expiresAt !== undefined) {
+      const sessions = (await client.query(`SELECT session_id,created_at FROM guest_sessions
+        WHERE share_id=$1 AND revoked_at IS NULL AND expires_at>NOW()`, [current.share_id])).rows;
+      for (const session of sessions) await client.query('UPDATE guest_sessions SET expires_at=$2 WHERE session_id=$1', [session.session_id,
+        new Date(Math.min(new Date(session.created_at).getTime() + SESSION_MAX_AGE_MS, extendSessions ? extendSessions.getTime() : Infinity))]);
+    }
     if (bumpRevision) {
       await client.query(`UPDATE guest_sessions SET revoked_at=NOW()
         WHERE share_id=$1 AND revoked_at IS NULL`, [current.share_id]);
@@ -412,7 +453,11 @@ async function previewGuestLink(secret) {
     ownerDisplayName: owner?.display_name || 'The conversation owner',
     agents: agents.filter(agent => !agent.removed_at).map(agent => ({ agentName: agent.agent_name, title: agent.title || null })),
     expiresAt: share.expires_at || null,
-    requiresCode: Boolean(share.password_hash)
+    maxMessages: share.max_messages || null,
+    requiresCode: Boolean(share.password_hash),
+    accessMode: share.access_mode || 'join',
+    // Signed-in visitors can only join a conversation the owner already shares.
+    accountRequests: share.room_mode === 'common'
   };
 }
 
@@ -456,21 +501,21 @@ async function createGuestPrincipal({ shareId, displayName, publicKey = null }) 
   });
 }
 
-async function insertPrincipal(client, { shareId, displayName, publicKey = null }) {
+async function insertPrincipal(client, { shareId, displayName, publicKey = null, note = null }) {
   const count = await one(client, 'SELECT COUNT(*) AS total FROM guest_principals WHERE share_id=$1', [shareId]);
   s.check(Number(count.total) < MAX_GUESTS_PER_SHARE, 429, 'Guest identity limit reached; create a new share');
-  return one(client, `INSERT INTO guest_principals(share_id,display_name,public_key)
-    VALUES($1,$2,$3) RETURNING guest_id,share_id,display_name,status,created_at,updated_at`, [shareId, text(displayName, 80), publicKey ? JSON.stringify(publicIdentity(publicKey)) : null]);
+  return one(client, `INSERT INTO guest_principals(share_id,display_name,public_key,request_note)
+    VALUES($1,$2,$3,$4) RETURNING guest_id,share_id,display_name,status,created_at,updated_at`, [shareId, text(displayName, 80), publicKey ? JSON.stringify(publicIdentity(publicKey)) : null, requestNote(note)]);
 }
 
 // The password check happens outside the transaction. Bind its successful result
 // to the exact share snapshot, then create both records under the same lock.
-async function createUnlockedGuestSession({ verifiedShare, displayName, sessionTokenHash, csrfSecretHash }) {
+async function createUnlockedGuestSession({ verifiedShare, displayName, note = null, sessionTokenHash, csrfSecretHash }) {
   return tx(async client => {
     const share = await activeShare(client, verifiedShare.share_id, verifiedShare.revision, true);
     s.check(share.token_hash === verifiedShare.token_hash && share.password_hash === verifiedShare.password_hash &&
       Number(share.password_revision) === Number(verifiedShare.password_revision), 409, 'Guest share has changed');
-    const guest = await insertPrincipal(client, { shareId: share.share_id, displayName });
+    const guest = await insertPrincipal(client, { shareId: share.share_id, displayName, note });
     const expiry = new Date(Math.min(Date.now() + SESSION_MAX_AGE_MS, share.expires_at ? new Date(share.expires_at).getTime() : Infinity));
     const session = await insertSession(client, share, guest, sessionTokenHash, csrfSecretHash, expiry);
     return { guest, session, share };
@@ -543,13 +588,14 @@ async function currentGuestAccess({ sessionId, sessionTokenHash, roomId = null, 
     let member = null;
     if (roomId) {
       const mapping = await one(client, `SELECT sa.*,CASE WHEN gs.room_mode='separate' THEN gsr.room_id ELSE sa.room_id END AS resolved_room_id,
-          sc.title,sc.agent_id,sc.owner_id,sc.key_version,sc.membership_version,sc.rotation_required
+          sc.title,sc.agent_id,sc.owner_id,sc.key_version,sc.membership_version,sc.rotation_required,sc.sharing_enabled
         FROM guest_share_agents sa
         JOIN guest_shares gs ON gs.share_id=sa.share_id
         LEFT JOIN guest_share_rooms gsr ON gsr.share_id=sa.share_id AND gsr.guest_id=$2 AND gsr.agent_id=sa.agent_id
         JOIN shared_conversations sc ON sc.id=CASE WHEN gs.room_mode='separate' THEN gsr.room_id ELSE sa.room_id END
         WHERE sa.share_id=$1 AND sc.id=$3 AND sa.removed_at IS NULL`, [access.share.share_id, access.session.guest_id, s.uuid(roomId)]);
       s.check(mapping, 404, 'Guest conversation unavailable');
+      s.check(mapping.sharing_enabled !== false, 403, 'Sharing is turned off by the owner');
       member = await one(client, `SELECT * FROM shared_guest_members
         WHERE share_id=$1 AND guest_id=$2 AND conversation_id=$3`, [access.share.share_id, access.session.guest_id, mapping.resolved_room_id]);
       s.check(member && (!requireActiveMember || member.status === 'active'), 404, 'Guest conversation membership unavailable');
@@ -597,6 +643,7 @@ async function guestRoomsInTransaction(client, access) {
       room = await one(client, 'SELECT * FROM shared_conversations WHERE id=$1 FOR UPDATE', [roomId]);
       s.check(room, 409, 'Guest conversation is unavailable');
     }
+    if (room.sharing_enabled === false) continue;
     let member = await one(client, 'SELECT * FROM shared_guest_members WHERE conversation_id=$1 AND share_id=$2 AND guest_id=$3', [roomId, access.share.share_id, access.guest.guest_id]);
     if (!member) {
       member = await one(client, `INSERT INTO shared_guest_members(conversation_id,share_id,guest_id,status)
@@ -631,7 +678,8 @@ async function guestWorkspace({ sessionId, sessionTokenHash }) {
         shareId: access.share.share_id,
         roomMode: access.share.room_mode,
         revision: access.share.revision,
-        expiresAt: access.share.expires_at || null
+        expiresAt: access.share.expires_at || null,
+        ...await messageAllowance(client, access)
       },
       rooms
     };
@@ -802,7 +850,8 @@ async function provisionGuestKeys(ownerId, shareId, body = {}) {
         VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [entry.roomId, Number(entry.keyVersion), entry.principal, entry.wrappedKey]);
     }
     for (const mapping of mappings) {
-      await client.query(`UPDATE shared_guest_members SET status='active',activated_at=COALESCE(activated_at,NOW()),removed_at=NULL
+      await client.query(`UPDATE shared_guest_members SET status='active',activated_at=COALESCE(activated_at,NOW()),
+        approved_at=COALESCE(approved_at,NOW()),removed_at=NULL
         WHERE conversation_id=$1 AND share_id=$2 AND guest_id=$3`, [mapping.room_id, share.share_id, guest]);
       await client.query('UPDATE shared_conversations SET key_version=$2,rotation_required=FALSE,membership_version=membership_version+1 WHERE id=$1', [mapping.room_id, Number(mapping.key_version) + (mapping.rotation_required ? 1 : 0)]);
       await client.query(`INSERT INTO shared_audit(conversation_id,actor_id,actor_kind,action,subject_id)
@@ -835,7 +884,8 @@ async function guestWorkspaceInTransaction(client, access) {
       room_id: mapping.resolved_room_id
     }));
   for (const mapping of mappings) {
-    const room = mapping.room_id ? await one(client, 'SELECT title,key_version,membership_version,rotation_required FROM shared_conversations WHERE id=$1', [mapping.room_id]) : null;
+    const room = mapping.room_id ? await one(client, 'SELECT title,key_version,membership_version,rotation_required,sharing_enabled FROM shared_conversations WHERE id=$1', [mapping.room_id]) : null;
+    if (room?.sharing_enabled === false) continue;
     const member = mapping.room_id ? await one(client, 'SELECT status FROM shared_guest_members WHERE conversation_id=$1 AND share_id=$2 AND guest_id=$3', [mapping.room_id, access.share.share_id, access.guest.guest_id]) : null;
     const key = room && await one(client, 'SELECT key_version FROM shared_key_envelopes WHERE conversation_id=$1 AND key_version=$2 AND principal=$3', [mapping.room_id, room.key_version, `guest:${access.guest.guest_id}`]);
     rooms.push({
@@ -856,7 +906,8 @@ async function guestWorkspaceInTransaction(client, access) {
       shareId: access.share.share_id,
       roomMode: access.share.room_mode,
       revision: access.share.revision,
-      expiresAt: access.share.expires_at || null
+      expiresAt: access.share.expires_at || null,
+      ...(access.session ? await messageAllowance(client, access) : {})
     },
     rooms
   };
@@ -897,6 +948,7 @@ async function insertGuestMessage({ sessionId, sessionTokenHash, roomId, body })
       return prior;
     }
     await assertGuestQueueCapacity(client, access);
+    await assertGuestMessageAllowance(client, access);
     s.check(!access.room.rotation_required, 409, 'Conversation key rotation is required');
     s.check(!body?.kind || body.kind === 'message', 403, 'Guests can send messages or answer questions');
     s.check(Number(body.keyVersion) === Number(access.room.key_version), 409, 'Stale conversation key');
@@ -939,6 +991,24 @@ async function insertGuestMessage({ sessionId, sessionTokenHash, roomId, body })
     });
     return one(client, 'SELECT * FROM shared_messages WHERE id=$1', [body.id]);
   });
+}
+
+async function guestMessagesUsed(client, access) {
+  // Deleted messages still count, so removing one never frees a slot.
+  const used = await one(client, `SELECT COUNT(*)::integer AS total FROM shared_messages
+    WHERE sender_guest_id=$1 AND kind IN ('message','answer')`, [access.guest.guest_id]);
+  return used.total;
+}
+
+async function messageAllowance(client, access) {
+  const limit = access.share.max_messages ? Number(access.share.max_messages) : null;
+  if (!limit) return { maxMessages: null, messagesRemaining: null };
+  return { maxMessages: limit, messagesRemaining: Math.max(0, limit - await guestMessagesUsed(client, access)) };
+}
+
+async function assertGuestMessageAllowance(client, access) {
+  const { maxMessages, messagesRemaining } = await messageAllowance(client, access);
+  s.check(maxMessages === null || messagesRemaining > 0, 403, `This guest link allows ${maxMessages} messages and you have used them all. Ask the owner for more.`);
 }
 
 async function assertGuestQueueCapacity(client, access) {
@@ -1024,6 +1094,7 @@ async function answerGuestQuestion({ sessionId, sessionTokenHash, roomId, questi
       return { existing: true, message: priorById };
     }
     await assertGuestQueueCapacity(client, access);
+    await assertGuestMessageAllowance(client, access);
     s.check(!access.room.rotation_required, 409, 'Conversation key rotation is required');
     const question = await one(client, `SELECT * FROM shared_messages
       WHERE id=$1 AND conversation_id=$2 AND kind='question' AND deleted_at IS NULL`, [s.uuid(questionId), roomId]);
@@ -1096,6 +1167,7 @@ async function currentGuestAccessInTransaction(client, sessionId, sessionTokenHa
   s.check(mapping, 404, 'Guest conversation unavailable');
   const lockedRoom = await one(client, 'SELECT * FROM shared_conversations WHERE id=$1 FOR UPDATE', [mapping.id]);
   s.check(lockedRoom, 404, 'Guest conversation unavailable');
+  s.check(lockedRoom.sharing_enabled !== false, 403, 'Sharing is turned off by the owner');
   const room = { ...mapping, ...lockedRoom };
   const member = await one(client, `SELECT * FROM shared_guest_members WHERE conversation_id=$1 AND share_id=$2 AND guest_id=$3`, [room.id, share.share_id, session.guest_id]);
   s.check(member && (!requireActiveMember || member.status === 'active'), 404, 'Guest conversation membership unavailable');
@@ -1147,7 +1219,47 @@ async function guestHistory({ sessionId, sessionTokenHash, roomId, after = 0, si
   });
 }
 
+// A signed-in visitor asks to join every conversation behind a common-room link.
+// Nothing is granted here: the owner approves each request in the Share panel.
+async function requestAccountAccess(userId, verifiedShare, note) {
+  const userKey = s.uuid(userId);
+  const cleanNote = requestNote(note);
+  return tx(async client => {
+    const share = await activeShare(client, verifiedShare.share_id, verifiedShare.revision, true);
+    s.check(share.token_hash === verifiedShare.token_hash, 409, 'Guest share has changed');
+    s.check(share.room_mode === 'common', 409, 'This link only admits guests. Continue as a guest instead.');
+    s.check(share.owner_id !== userKey, 409, 'This is your own link');
+    // The owner decides by the requester's email, so it must be proven first.
+    const account = await one(client, 'SELECT email_verified FROM users WHERE user_id=$1', [userKey]);
+    s.check(account?.email_verified === true, 403, 'Verify your email address before asking with your account, or continue as a guest');
+    const rooms = (await client.query(`SELECT sa.room_id,sc.sharing_enabled FROM guest_share_agents sa
+      JOIN shared_conversations sc ON sc.id=sa.room_id WHERE sa.share_id=$1 AND sa.removed_at IS NULL`, [share.share_id])).rows;
+    s.check(rooms.some(room => room.sharing_enabled !== false), 403, 'Sharing is turned off by the owner');
+    const wanted = [];
+    let member = 0;
+    for (const room of rooms.filter(room => room.sharing_enabled !== false)) {
+      const existing = await one(client, 'SELECT status FROM shared_members WHERE conversation_id=$1 AND user_id=$2', [room.room_id, userKey]);
+      if (existing && existing.status !== 'removed') member++;
+      else wanted.push(room);
+    }
+    // Approval provisions keys to the account's sharing identity, so it must exist first.
+    if (wanted.length) s.check(await one(client, 'SELECT principal FROM shared_identities WHERE principal=$1', [`user:${userKey}`]), 409,
+      'Open your dashboard once to set up encrypted sharing, then send the request again');
+    let requested = 0;
+    for (const room of wanted) {
+      const pending = await one(client, `SELECT request_id FROM guest_share_account_requests
+        WHERE conversation_id=$1 AND user_id=$2 AND state='pending' FOR UPDATE`, [room.room_id, userKey]);
+      if (pending) await client.query('UPDATE guest_share_account_requests SET note=COALESCE($2,note) WHERE request_id=$1', [pending.request_id, cleanNote]);
+      else await client.query(`INSERT INTO guest_share_account_requests(share_id,conversation_id,user_id,note)
+        VALUES($1,$2,$3,$4)`, [share.share_id, room.room_id, userKey, cleanNote]);
+      requested++;
+    }
+    return { state: requested ? 'pending' : 'member', requested, alreadyMember: member };
+  });
+}
+
 module.exports = {
+  requestAccountAccess,
   createOwnerShare,
   listOwnerShares,
   getOwnerShare,

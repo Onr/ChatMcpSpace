@@ -57,6 +57,9 @@ async function setup() {
     };
   }
   for (const migration of migrations) await fixture.query(migrationForFixture(migration, Boolean(process.env.SHARED_TEST_DATABASE_URL)));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
   if (process.env.SHARED_TEST_DATABASE_URL) for (const file of ['048_enforce_guest_room_relationships.sql', '049_retain_guest_history_attribution.sql']) {
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations', file), 'utf8'));
   }
@@ -223,6 +226,21 @@ test('guest queue capacity preserves idempotent retries and frees a slot after d
   await expect(queuedGuestMessage()).resolves.toMatchObject({ sender_guest_id: guestId });
 });
 
+test('a guest message limit counts deleted messages and can be raised without signing the guest out, while a shorter deadline does', async () => {
+  await guest.updateOwnerShare(alice.userId, share, { maxMessages: 2 });
+  const firstMessage = await queuedGuestMessage();
+  await queuedGuestMessage();
+  await expect(queuedGuestMessage()).rejects.toMatchObject({ status: 403, message: expect.stringContaining('allows 2 messages') });
+  await guest.removeGuestMessage({ sessionId, sessionTokenHash, roomId: room, messageId: firstMessage.id });
+  await expect(queuedGuestMessage()).rejects.toMatchObject({ status: 403 });
+  expect((await guest.guestWorkspace({ sessionId, sessionTokenHash })).share).toMatchObject({ maxMessages: 2, messagesRemaining: 0 });
+  await fixture.query("UPDATE guest_shares SET expires_at=NOW()+INTERVAL '1 hour' WHERE share_id=$1", [share]);
+  await guest.updateOwnerShare(alice.userId, share, { maxMessages: 3, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() });
+  await expect(queuedGuestMessage()).resolves.toMatchObject({ sender_guest_id: guestId });
+  await guest.updateOwnerShare(alice.userId, share, { expiresAt: new Date(Date.now() + 60000).toISOString() });
+  await expect(queuedGuestMessage()).rejects.toMatchObject({ status: 404 });
+});
+
 test('an unsupported earlier requester cannot starve a later granted guest', async () => withGuestClaims(async () => {
   await fixture.query("INSERT INTO shared_identities(principal,public_key,display_name) VALUES($1,'{}','Bob')", [`user:${bob.userId}`]);
   await fixture.query("INSERT INTO shared_key_envelopes(conversation_id,key_version,principal,wrapped_key) VALUES($1,1,$2,'wrapped')", [room, `user:${bob.userId}`]);
@@ -362,6 +380,16 @@ test('guest membership is typed, room-scoped and encrypted', async () => {
     sessionTokenHash,
     roomId: uid()
   })).rejects.toMatchObject({ status: 404 });
+});
+
+test('sharing off blocks existing guest sessions and workspace rooms, then restores them', async () => {
+  await service.sharingSettings(alice.userId, room, false);
+  await expect(guest.guestHistory({ sessionId, sessionTokenHash, roomId: room })).rejects.toMatchObject({ status: 403 });
+  await expect(guest.currentGuestAccess({ sessionId, sessionTokenHash, roomId: room })).rejects.toMatchObject({ status: 403 });
+  expect((await guest.guestWorkspace({ sessionId, sessionTokenHash })).rooms).toHaveLength(0);
+  await service.sharingSettings(alice.userId, room, true);
+  expect(await guest.guestHistory({ sessionId, sessionTokenHash, roomId: room })).toHaveLength(0);
+  expect((await guest.guestWorkspace({ sessionId, sessionTokenHash })).rooms).toHaveLength(1);
 });
 
 test('guest workspace context exposes only its audience and supports replies, reads and own-message deletion', async () => {
@@ -788,6 +816,26 @@ test('trusted sharing mode cannot be changed during a claimed turn', async () =>
   });
 });
 
+test('the owner sharing switch stops authorizing an existing trusted guest task', async () => {
+  await useTrustedRuntime();
+  await queuedGuestMessage();
+  const batch = await withGuestClaims(() => service.claim(agent, runtimeId));
+  await service.sharingSettings(alice.userId, room, false);
+  const tasks = require('../../src/shared/taskAuthority');
+  await expect(tasks.authorize({ agentId: agent, runtimeId }, batch.id)).resolves.toMatchObject({ authorized: false, state: 'cancellation_requested' });
+});
+
+test('paused guest requests remain queued until sharing resumes', async () => {
+  await useTrustedRuntime();
+  const message = await queuedGuestMessage();
+  await withGuestClaims(async () => {
+    await service.sharingSettings(alice.userId, room, false);
+    expect(await service.claim(agent, runtimeId)).toBeNull();
+    await service.sharingSettings(alice.userId, room, true);
+    expect((await service.claim(agent, runtimeId)).messages.map(item => item.id)).toContain(message.id);
+  });
+});
+
 test('turning guest sharing off stops authorizing an existing trusted task', async () => {
   await useTrustedRuntime();
   await queuedGuestMessage();
@@ -1044,4 +1092,57 @@ test('interruption after a guest is revoked sends the notice only to the owner',
     const saved = (await fixture.query('SELECT recipient_principals FROM shared_messages WHERE id=$1', [message.id])).rows[0];
     expect(saved.recipient_principals).toEqual([{ kind: 'user', id: alice.userId }]);
   });
+});
+
+test('a request link takes notes and account requests that grant nothing until the owner approves', async () => {
+  const created = await guest.createOwnerShare(alice.userId, { conversationId: room, roomMode: 'common', accessMode: 'request' });
+  expect(created.access_mode).toBe('request');
+  await expect(guest.createOwnerShare(alice.userId, { conversationId: room, roomMode: 'common', accessMode: 'open' })).rejects.toMatchObject({ status: 400 });
+  const preview = await guest.previewGuestLink(created.linkSecret);
+  expect(preview).toMatchObject({ accessMode: 'request', accountRequests: true });
+
+  const verified = await guest.findShareByLinkSecret(created.linkSecret);
+  const visitor = await guest.createUnlockedGuestSession({ verifiedShare: verified, displayName: 'Visitor', note: '  From the design team  ', sessionTokenHash: hash('v'), csrfSecretHash: hash('w') });
+  expect((await fixture.query('SELECT request_note FROM guest_principals WHERE guest_id=$1', [visitor.guest.guest_id])).rows[0].request_note).toBe('From the design team');
+
+  const carol = await seedUser(fixture.query, { email: 'guest-requester@example.test' });
+  await fixture.query('UPDATE users SET email_verified=false WHERE user_id=$1', [carol.userId]);
+  await expect(guest.requestAccountAccess(carol.userId, verified, 'hi')).rejects.toMatchObject({ status: 403 });
+  await fixture.query('UPDATE users SET email_verified=true WHERE user_id=$1', [carol.userId]);
+  await expect(guest.requestAccountAccess(carol.userId, verified, 'hi')).rejects.toMatchObject({ status: 409 });
+  await fixture.query(`INSERT INTO shared_identities(principal,public_key,display_name) VALUES($1,'{}'::jsonb,'Carol')`, [`user:${carol.userId}`]);
+  expect(await guest.requestAccountAccess(carol.userId, verified, 'Please add me')).toMatchObject({ state: 'pending', requested: 1 });
+  expect(await guest.requestAccountAccess(carol.userId, verified, null)).toMatchObject({ state: 'pending', requested: 1 });
+  expect(await guest.requestAccountAccess(bob.userId, verified, null)).toMatchObject({ state: 'member', requested: 0 });
+  await expect(guest.requestAccountAccess(alice.userId, verified, null)).rejects.toMatchObject({ status: 409 });
+
+  // A pending request is not membership.
+  await expect(service.get(carol.userId, room)).rejects.toMatchObject({ status: expect.any(Number) });
+  const waiting = (await service.get(alice.userId, room)).accountRequests;
+  expect(waiting).toHaveLength(1);
+  expect(waiting[0]).toMatchObject({ user_id: carol.userId, note: 'Please add me', email: 'guest-requester@example.test' });
+  expect((await service.get(bob.userId, room)).accountRequests).toEqual([]);
+  await expect(service.decideAccountRequest(bob.userId, room, waiting[0].request_id, true)).rejects.toMatchObject({ status: 403 });
+
+  await service.decideAccountRequest(alice.userId, room, waiting[0].request_id, false);
+  expect((await service.get(alice.userId, room)).accountRequests).toEqual([]);
+  expect((await fixture.query('SELECT 1 FROM shared_members WHERE conversation_id=$1 AND user_id=$2', [room, carol.userId])).rows).toHaveLength(0);
+  await expect(service.decideAccountRequest(alice.userId, room, waiting[0].request_id, true)).rejects.toMatchObject({ status: 404 });
+
+  await guest.requestAccountAccess(carol.userId, verified, null);
+  const again = (await service.get(alice.userId, room)).accountRequests[0];
+  await service.decideAccountRequest(alice.userId, room, again.request_id, true);
+  expect((await fixture.query('SELECT status FROM shared_members WHERE conversation_id=$1 AND user_id=$2', [room, carol.userId])).rows[0].status).toBe('pending');
+  expect((await service.get(alice.userId, room)).accountRequests).toEqual([]);
+
+  // Switching the link type keeps everyone signed in.
+  const before = Number(verified.revision);
+  const updated = await guest.updateOwnerShare(alice.userId, created.shareId, { accessMode: 'join' });
+  expect(updated).toMatchObject({ access_mode: 'join' });
+  expect(Number(updated.revision)).toBe(before);
+});
+
+test('signed-in requests are refused for guest-only links', async () => {
+  const verified = (await fixture.query('SELECT * FROM guest_shares WHERE share_id=$1', [share])).rows[0];
+  await expect(guest.requestAccountAccess(bob.userId, verified, null)).rejects.toMatchObject({ status: 409 });
 });

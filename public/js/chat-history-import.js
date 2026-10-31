@@ -14,6 +14,9 @@
   const guestControls = document.getElementById('shareGuestControls');
   const prepareButton = document.getElementById('shareExistingChatPrepare');
   const retryButton = document.getElementById('shareExistingChatRetry');
+  const sharingSwitch = document.getElementById('agentSharingSwitch');
+  const sharingSwitchRow = document.getElementById('agentSharingSwitchRow');
+  let sharingEnabled = false;
   let captured = null;
   let preview = null;
   let busy = false;
@@ -26,6 +29,47 @@
   let focusReturn = null;
   let openAgentRequest = 0;
   let importDbPromise = null;
+
+  function renderSharingSwitch(enabled, disabled = false) {
+    sharingEnabled = enabled;
+    if (!sharingSwitch) return;
+    sharingSwitch.setAttribute('aria-checked', String(enabled));
+    sharingSwitch.disabled = disabled;
+    sharingSwitch.querySelector('[data-sharing-switch-label]').textContent = enabled ? 'On' : 'Off';
+    const hint = document.getElementById('agentSharingSwitchHint');
+    hint.textContent = captured?.mode === 'shared'
+      ? enabled ? 'Invited people and guest links can access this conversation.' : 'Access is paused for invited people and guests. Turn on to restore it. You can still chat.'
+      : 'Review the history below before turning on sharing.';
+    if (captured?.mode === 'shared' && captured.role === 'owner') {
+      invitesPanel.hidden = !enabled;
+      if (guestControls) guestControls.hidden = !enabled;
+    }
+  }
+
+  async function toggleSharing() {
+    if (busy || !isCurrent(dialogEpoch)) return;
+    if (captured?.mode !== 'shared') {
+      if (!prepareButton.disabled) await convert();
+      return;
+    }
+    const epoch = dialogEpoch, conversationId = captured.conversationId;
+    const previous = sharingEnabled;
+    busy = true;
+    renderSharingSwitch(previous, true);
+    try {
+      const response = await sessionFetch(`/api/user/shared/${encodeURIComponent(conversationId)}/sharing`, {
+        method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': root.csrfToken || '' },
+        body: JSON.stringify({ enabled: !previous })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error?.message || 'Could not change sharing. Please retry.');
+      if (!isCurrent(epoch, conversationId)) return;
+      renderSharingSwitch(result.enabled);
+      status.textContent = result.enabled ? 'Sharing is on. Existing invitations and guest links work again.' : 'Sharing is off. Your conversation and access list are saved.';
+    } catch (error) {
+      if (isCurrent(epoch, conversationId)) { renderSharingSwitch(previous); status.textContent = error.message; }
+    } finally { busy = false; }
+  }
 
   function openImportDb() {
     if (!root.indexedDB) return Promise.resolve(null);
@@ -97,6 +141,60 @@
     if (!conversationId) return true;
     return captured?.conversationId === conversationId;
   }
+  function renderLimitInputs(shareActive = Boolean(guestShareId)) {
+    const preset = document.getElementById('shareGuestExpiryPreset');
+    const custom = document.getElementById('shareGuestExpiresAtLabel');
+    if (custom) custom.hidden = preset?.value !== 'custom';
+    const save = document.getElementById('shareGuestLimitsSave');
+    if (save) save.hidden = !shareActive;
+  }
+  // Returns { expiresAt, maxMessages } with null meaning "no limit", or null
+  // after reporting an invalid value.
+  function guestLimits(statusNode) {
+    const preset = document.getElementById('shareGuestExpiryPreset')?.value || '';
+    const custom = document.getElementById('shareGuestExpiresAt')?.value || '';
+    const rawLimit = (document.getElementById('shareGuestMaxMessages')?.value || '').trim();
+    let expiresAt = null;
+    if (preset === 'custom') {
+      if (!custom) { statusNode.textContent = 'Choose the date when guest access ends.'; return null; }
+      expiresAt = new Date(custom).toISOString();
+    } else if (preset) expiresAt = new Date(Date.now() + Number(preset)).toISOString();
+    const maxMessages = rawLimit ? Number(rawLimit) : null;
+    if (maxMessages !== null && !(Number.isInteger(maxMessages) && maxMessages > 0 && maxMessages <= 100000)) {
+      statusNode.textContent = 'Messages per guest must be a whole number from 1 to 100000, or empty for no limit.';
+      return null;
+    }
+    const accessMode = document.getElementById('shareGuestAccessMode')?.value === 'request' ? 'request' : 'join';
+    return { expiresAt, maxMessages, accessMode };
+  }
+  function describeLimits(share) {
+    const parts = [share.access_mode === 'request' ? 'request link' : 'join link'];
+    parts.push(share.expires_at ? `open until ${new Date(share.expires_at).toLocaleString()}` : 'no time limit');
+    parts.push(share.max_messages ? `${share.max_messages} messages per guest` : 'no message limit');
+    return parts.join(', ');
+  }
+  async function saveGuestLimits() {
+    const conversationId = captured?.conversationId;
+    const shareId = guestShareId;
+    const epoch = dialogEpoch;
+    const statusNode = document.getElementById('shareGuestLimitsStatus');
+    if (!conversationId || !shareId || guestShareConversationId !== conversationId) return;
+    const limits = guestLimits(statusNode);
+    if (!limits) return;
+    const button = document.getElementById('shareGuestLimitsSave');
+    button.disabled = true;
+    try {
+      const response = await sessionFetch('/api/user/shared/guest-shares/' + encodeURIComponent(shareId), {
+        method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': root.csrfToken || '' },
+        body: JSON.stringify(limits)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error?.message || 'Could not save guest limits.');
+      if (!isCurrent(epoch, conversationId) || guestShareId !== shareId) return;
+      statusNode.textContent = `Saved: ${describeLimits(result)}. Current guests stay signed in.`;
+    } catch (error) { if (isCurrent(epoch, conversationId)) statusNode.textContent = error.message; }
+    finally { button.disabled = false; }
+  }
   function localDateTimeValue(value) {
     const date = new Date(value);
     if (!Number.isFinite(date.getTime())) return '';
@@ -138,6 +236,8 @@
     const title = document.getElementById('shareExistingChatTitle');
     if (title) title.textContent = captured?.agentName ? `Share ${captured.agentName}` : 'Share this conversation';
     preview = null;
+    if (sharingSwitchRow) sharingSwitchRow.hidden = !captured || captured.role !== 'owner' || captured.agentType === 'news_feed';
+    renderSharingSwitch(false, true);
     if (!captured || captured.agentType === 'news_feed') {
       status.textContent = 'Select one of your private agent conversations to share it.';
       return;
@@ -152,12 +252,13 @@
         return;
       }
       previewNode.hidden = true;
-      invitesPanel.hidden = false;
+      invitesPanel.hidden = Boolean(sharingSwitch);
       void root.CouncilSharing?.loadMessagingSettings(captured);
-      if (guestControls) guestControls.hidden = false;
+      if (guestControls) guestControls.hidden = Boolean(sharingSwitch);
       status.textContent = 'Invite someone into this same conversation. They can join from the email or dashboard inbox.';
       void loadInvitations(epoch, captured.conversationId);
       void discoverGuestShare(epoch, captured.conversationId, captured.agentId);
+      watchAccessRequests(epoch, captured.conversationId);
       (document.getElementById('shareInviteEmail') || document.getElementById('shareExistingChatClose')).focus();
       return;
     }
@@ -177,10 +278,11 @@
     guestShareConversationId = null;
     guestShareDiscoveryRequest += 1;
     activeImport = null;
-    for (const id of ['shareGuestPasscode','shareGuestLinkValue','shareInviteEmail','shareInviteSignupLink','shareGuestExpiresAt']) {
+    for (const id of ['shareGuestPasscode','shareGuestLinkValue','shareInviteEmail','shareInviteSignupLink','shareGuestExpiresAt','shareGuestExpiryPreset','shareGuestMaxMessages','shareGuestLimitsStatus']) {
       const input = document.getElementById(id);
-      if (input) input.value = '';
+      if (input) { if ('value' in input) input.value = ''; else input.textContent = ''; }
     }
+    renderLimitInputs(false);
     for (const id of ['shareGuestLinkResult','shareInviteSignupResult']) {
       const result = document.getElementById(id);
       if (result) result.hidden = true;
@@ -189,6 +291,7 @@
     if (link) { link.textContent = 'Create guest link'; link.disabled = true; }
     const revoke = document.getElementById('shareGuestLinkDisable');
     if (revoke) revoke.hidden = true;
+    renderQuickLink();
     const clearPasscode = document.getElementById('shareGuestClearPasscode');
     if (clearPasscode) clearPasscode.checked = false;
     const linkStatus = document.getElementById('shareGuestLinkStatus');
@@ -196,8 +299,20 @@
     const inviteDelivery = document.getElementById('shareInviteDelivery');
     if (inviteDelivery) inviteDelivery.textContent = 'Add an email now. The invitation will be sent after you finish sharing this conversation.';
   }
+  // New join requests show up while the panel stays open, without touching the
+  // list while the owner is using one of its buttons.
+  let accessRequestTimer = null;
+  function watchAccessRequests(epoch, conversationId) {
+    clearInterval(accessRequestTimer);
+    accessRequestTimer = setInterval(() => {
+      if (!isCurrent(epoch, conversationId) || dialog.classList.contains('hidden')) { clearInterval(accessRequestTimer); return; }
+      if (document.hidden || inviteList.contains(document.activeElement)) return;
+      void loadInvitations(epoch, conversationId);
+    }, 20000);
+  }
   function close() {
     if (busy) return;
+    clearInterval(accessRequestTimer);
     dialogEpoch += 1;
     openAgentRequest += 1;
     dialog.classList.add('hidden');
@@ -229,6 +344,12 @@
       const agentId = captured.agentId;
       const context = await request('/resolve', { agentId });
       if (!isCurrent(epoch) || context.agentId !== agentId) return;
+      if (context.mode === 'shared' || context.state === 'shared') {
+        await root.DashboardHelpers.selectChatContext(context);
+        if (epoch !== dialogEpoch) return;
+        open();
+        return;
+      }
       if (!captured || context.agentId !== captured.agentId || !['private','preparing'].includes(context.state)) {
         throw new Error('This conversation is already being shared or is not available.');
       }
@@ -272,6 +393,7 @@
           ? `Saved preparation: ${activeImport?.importedItems || 0} of ${activeImport?.expectedItems || 0} messages converted. Resume here; your history remains private until completion.`
           : 'Review the source scope before converting. Your private history is read and re-encrypted in this browser.';
         prepareButton.disabled = false;
+        renderSharingSwitch(false);
         if (context.state === 'preparing') prepareButton.textContent = 'Resume preparation';
       }
       previewNode.textContent = `${preview.agentName}: ${preview.includedMessages} messages and ${preview.includedFiles || 0} files will be included.`;
@@ -298,6 +420,8 @@
       if (roomResponse.ok) {
         const details = await roomResponse.json();
         if (!isCurrent(epoch, conversationId)) return;
+        renderSharingSwitch(details.room?.sharing_enabled !== false);
+        if (details.room?.sharing_enabled === false) status.textContent = 'Sharing is off. Turn it on to restore access for invited people and guests.';
         const rosterHeading = document.createElement('p');
         rosterHeading.className = 'font-semibold text-slate-200';
         rosterHeading.textContent = 'People with access';
@@ -334,7 +458,7 @@
           const row = document.createElement('div');
           row.className = 'flex items-center justify-between gap-2';
           const label = document.createElement('span');
-          label.textContent = `${guest.display_name || 'Guest'} · ${guest.status}`;
+          label.textContent = `${guest.display_name || 'Guest'} · ${guest.status === 'active' ? 'Guest, joined' : 'Guest, approved, activating access'}`;
           row.append(label);
           const remove = document.createElement('button');
           remove.type = 'button'; remove.className = 'min-h-11 px-2 text-amber-300'; remove.textContent = 'Remove guest';
@@ -357,7 +481,82 @@
           row.append(remove);
           inviteList.append(row);
         }
-      }
+        for (const guest of details.guestRequests || []) {
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between gap-2';
+          const label = document.createElement('span');
+          label.textContent = `${guest.display_name || 'Guest'} · Wants to join (no account)`;
+          if (guest.request_note) label.append(requestNoteNode(guest.request_note));
+          row.append(label);
+          const actions = document.createElement('span');
+          actions.className = 'flex shrink-0 gap-1 whitespace-nowrap';
+          const approve = document.createElement('button');
+          approve.type = 'button'; approve.className = 'min-h-11 px-2 text-emerald-300'; approve.textContent = 'Approve';
+          approve.setAttribute('aria-label', `Approve ${guest.display_name || 'guest'}`);
+          const decline = document.createElement('button');
+          decline.type = 'button'; decline.className = 'min-h-11 px-2 text-amber-300'; decline.textContent = 'Decline';
+          decline.setAttribute('aria-label', `Decline ${guest.display_name || 'guest'}`);
+          const decide = async approved => {
+            approve.disabled = true; decline.disabled = true;
+            try {
+              if (!approved && !guestShareId) await discoverGuestShare(epoch, conversationId, captured.agentId);
+              if (!approved && !guestShareId) throw new Error('Guest link details are unavailable.');
+              const response = await sessionFetch(approved
+                ? `/api/user/shared/${encodeURIComponent(conversationId)}/guests/${encodeURIComponent(guest.guest_id)}/approve`
+                : `/api/user/shared/guest-shares/${encodeURIComponent(guestShareId)}/guests/${encodeURIComponent(guest.guest_id)}`, {
+                method: approved ? 'POST' : 'DELETE', credentials: 'same-origin', headers: { 'X-CSRF-Token': root.csrfToken || '' }
+              });
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(result.error?.message || (approved ? 'Could not approve this guest.' : 'Could not decline this guest.'));
+              if (!isCurrent(epoch, conversationId)) return;
+              const context = root.InPlaceChat?.getContext?.();
+              if (context?.conversationId === conversationId) await root.InPlaceChat.prepareOwnerShare(context);
+              if (isCurrent(epoch, conversationId)) await loadInvitations(epoch, conversationId);
+            } catch (error) { if (isCurrent(epoch, conversationId)) status.textContent = error.message; approve.disabled = false; decline.disabled = false; }
+          };
+          approve.addEventListener('click', () => void decide(true));
+          decline.addEventListener('click', () => void decide(false));
+          actions.append(approve, decline);
+          row.append(actions);
+          inviteList.append(row);
+        }
+        for (const item of details.accountRequests || []) {
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between gap-2';
+          const label = document.createElement('span');
+          const who = item.display_name ? `${item.display_name} (${item.email})` : item.email;
+          label.textContent = `${who} · Asks to join with an account`;
+          if (item.note) label.append(requestNoteNode(item.note));
+          row.append(label);
+          const actions = document.createElement('span');
+          actions.className = 'flex shrink-0 gap-1 whitespace-nowrap';
+          const approve = document.createElement('button');
+          approve.type = 'button'; approve.className = 'min-h-11 px-2 text-emerald-300'; approve.textContent = 'Approve';
+          approve.setAttribute('aria-label', `Approve ${who}`);
+          const decline = document.createElement('button');
+          decline.type = 'button'; decline.className = 'min-h-11 px-2 text-amber-300'; decline.textContent = 'Decline';
+          decline.setAttribute('aria-label', `Decline ${who}`);
+          const decide = async approved => {
+            approve.disabled = true; decline.disabled = true;
+            try {
+              const response = await sessionFetch(`/api/user/shared/${encodeURIComponent(conversationId)}/access-requests/${encodeURIComponent(item.request_id)}${approved ? '/approve' : ''}`, {
+                method: approved ? 'POST' : 'DELETE', credentials: 'same-origin', headers: { 'X-CSRF-Token': root.csrfToken || '' }
+              });
+              const result = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(result.error?.message || (approved ? 'Could not approve this request.' : 'Could not decline this request.'));
+              if (!isCurrent(epoch, conversationId)) return;
+              const context = root.InPlaceChat?.getContext?.();
+              if (approved && context?.conversationId === conversationId) await root.InPlaceChat.prepareOwnerShare(context);
+              if (isCurrent(epoch, conversationId)) await loadInvitations(epoch, conversationId);
+            } catch (error) { if (isCurrent(epoch, conversationId)) status.textContent = error.message; approve.disabled = false; decline.disabled = false; }
+          };
+          approve.addEventListener('click', () => void decide(true));
+          decline.addEventListener('click', () => void decide(false));
+          actions.append(approve, decline);
+          row.append(actions);
+          inviteList.append(row);
+        }
+      } else throw new Error('Could not load sharing settings. Close this panel and try again.');
       for (const item of rows.filter(item => item.state === 'pending')) {
         const row = document.createElement('div');
         row.className = 'flex items-center justify-between gap-2';
@@ -428,6 +627,56 @@
     } catch (error) { if (isCurrent(epoch, conversationId)) document.getElementById('shareInviteDelivery').textContent = error.message; }
     finally { button.disabled = false; }
   }
+  function requestNoteNode(note) {
+    const node = document.createElement('span');
+    node.className = 'block text-xs text-slate-400';
+    node.textContent = `“${note}”`;
+    return node;
+  }
+  function renderQuickLink() {
+    const hint = document.getElementById('shareLinkQuickHint');
+    if (!hint) return;
+    const hasLink = Boolean(document.getElementById('shareGuestLinkValue')?.value);
+    const asking = document.getElementById('shareGuestAccessMode')?.value === 'request';
+    hint.textContent = hasLink ? (asking
+      ? 'People who open the link are asked to send you a request, with or without an account. You approve each one before they can see or send messages.'
+      : 'Anyone with the link can ask to join, even without an account. You approve each guest before they can see or send messages.')
+      : guestShareId ? 'A guest link is active, but it is shown only once. Copy link or Send link makes a new one; current guests will be signed out.'
+        : 'Copy link or Send link creates a guest link. Anyone with it can ask to join this conversation.';
+  }
+  async function copyLinkValue(input, statusNode, copiedText) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(input.value);
+      statusNode.textContent = copiedText;
+    } catch (_) {
+      input.focus();
+      input.select();
+      statusNode.textContent = 'The link is selected. Press Copy again or copy it manually.';
+    }
+  }
+  async function sendLinkValue(url, statusNode, { title, text }) {
+    if (navigator.share) {
+      try { await navigator.share({ title, text, url }); statusNode.textContent = 'Link sent.'; }
+      catch (error) { if (error?.name !== 'AbortError') statusNode.textContent = 'Your link is ready. Press Send again, or use Copy.'; }
+      return;
+    }
+    root.location.href = `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`${text}\n\n${url}`)}`;
+    statusNode.textContent = 'Opened your email app with the link.';
+  }
+  async function quickLinkAction(action) {
+    if (busy) return;
+    const input = document.getElementById('shareGuestLinkValue');
+    const statusNode = document.getElementById('shareGuestLinkStatus');
+    const buttons = ['shareLinkCopy', 'shareLinkSend'].map(id => document.getElementById(id));
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+      if (!input.value && !(await createGuestLink())) return;
+      const name = captured?.agentName || 'this agent';
+      if (action === 'copy') await copyLinkValue(input, statusNode, 'Link copied. Paste it to anyone you want to invite.');
+      else await sendLinkValue(input.value, statusNode, { title: `Join ${name} on ChatMCP`, text: `You're invited to chat with ${name} on ChatMCP.` });
+    } finally { buttons.forEach(button => { button.disabled = false; }); }
+  }
   async function createGuestLink() {
     if (!captured?.conversationId || !captured?.agentId) return;
     const epoch = dialogEpoch;
@@ -437,31 +686,36 @@
     const button = document.getElementById('shareGuestLinkCreate');
     if (guestShareConversationId !== conversationId) {
       document.getElementById('shareGuestLinkStatus').textContent = 'Still checking guest access for this conversation. Try again in a moment.';
-      return;
+      return null;
     }
     const statusNode = document.getElementById('shareGuestLinkStatus');
     const passphrase = document.getElementById('shareGuestPasscode')?.value || '';
-    const expiryInput = document.getElementById('shareGuestExpiresAt');
+    const limits = guestLimits(statusNode);
+    if (!limits) return null;
     if (passphrase && (passphrase.length < 12 || new root.Blob([passphrase]).size > 72)) {
       statusNode.textContent = 'A guest passphrase must be 12–72 UTF-8 bytes.';
-      return;
+      return null;
     }
     button.disabled = true;
     try {
       const rotating = Boolean(guestShareId);
-      if (rotating && !root.confirm('Replace this guest link? Current guests will be signed out and need to join again with the new link.')) return;
+      if (rotating && !root.confirm('Replace this guest link? Current guests will be signed out and need to join again with the new link.')) return null;
       if (!isCurrent(epoch, conversationId) || captured.agentId !== agentId) throw new Error('The selected conversation changed. Reopen Share and try again.');
       const body = rotating ? { replaceLink: true } : { conversationId, agentIds: [agentId], roomMode: 'common', title: agentName || 'Shared conversation' };
       if (passphrase) body.password = passphrase;
       else if (rotating && document.getElementById('shareGuestClearPasscode')?.checked) body.password = '';
-      if (expiryInput?.value) body.expiresAt = new Date(expiryInput.value).toISOString();
+      if (!rotating) {
+        if (limits.expiresAt) body.expiresAt = limits.expiresAt;
+        if (limits.maxMessages) body.maxMessages = limits.maxMessages;
+        body.accessMode = limits.accessMode;
+      }
       const response = await sessionFetch('/api/user/shared/guest-shares'+(rotating?'/'+encodeURIComponent(guestShareId):''), {
         method:rotating?'PATCH':'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':root.csrfToken||''},
         body:JSON.stringify(body)
       });
       const result=await response.json().catch(()=>({}));
       if(!response.ok) throw new Error(result.error?.message||'Could not create a guest link.');
-      if (!isCurrent(epoch, conversationId)) return;
+      if (!isCurrent(epoch, conversationId)) return null;
       guestShareId=result.shareId;
       guestShareConversationId=conversationId;
       const clearPasscode = document.getElementById('shareGuestClearPasscode');
@@ -472,7 +726,10 @@
       statusNode.textContent=rotating?'Guest link replaced; previous guest sessions were signed out. Copy the new link and send it to the invited guests.':'Guest link created for this conversation. Copy it now; the secret is shown only once.';
       const disable = document.getElementById('shareGuestLinkDisable');
       if (disable) disable.hidden = false;
-    } catch(error) { if (isCurrent(epoch, conversationId)) statusNode.textContent=error.message; }
+      renderLimitInputs(true);
+      renderQuickLink();
+      return url;
+    } catch(error) { if (isCurrent(epoch, conversationId)) statusNode.textContent=error.message; return null; }
     finally { button.disabled=false; }
   }
   async function discoverGuestShare(epoch = dialogEpoch, conversationId = captured?.conversationId, agentId = captured?.agentId) {
@@ -493,11 +750,19 @@
         guestShareId=share.shareId;
         button.textContent='Replace guest link';
         const expiry = document.getElementById('shareGuestExpiresAt');
+        const preset = document.getElementById('shareGuestExpiryPreset');
         if (expiry && share.expires_at) expiry.value = localDateTimeValue(share.expires_at);
-        document.getElementById('shareGuestLinkStatus').textContent = `Guest link is active${share.expires_at ? ` until ${new Date(share.expires_at).toLocaleString()}` : ' with no expiry'}. Replace it to change its one-time secret or access code.`;
+        if (preset) preset.value = share.expires_at ? 'custom' : '';
+        const maxMessages = document.getElementById('shareGuestMaxMessages');
+        if (maxMessages) maxMessages.value = share.max_messages || '';
+        const accessMode = document.getElementById('shareGuestAccessMode');
+        if (accessMode) accessMode.value = share.access_mode === 'request' ? 'request' : 'join';
+        document.getElementById('shareGuestLinkStatus').textContent = `Guest link is active (${describeLimits(share)}). Replace it to change its one-time secret or access code.`;
         const disable = document.getElementById('shareGuestLinkDisable');
         if (disable) disable.hidden = false;
       }
+      renderLimitInputs(Boolean(share));
+      renderQuickLink();
     } catch(error) {
       if (isCurrent(epoch, conversationId) && requestId === guestShareDiscoveryRequest) document.getElementById('shareGuestLinkStatus').textContent = error.message || 'Could not check guest access.';
     } finally {
@@ -527,6 +792,8 @@
       document.getElementById('shareGuestLinkValue').value = '';
       document.getElementById('shareGuestLinkStatus').textContent = 'Guest access disabled. Existing guest sessions were signed out.';
       button.hidden = true;
+      renderLimitInputs(false);
+      renderQuickLink();
     } catch (error) {
       if (isCurrent(epoch, conversationId)) document.getElementById('shareGuestLinkStatus').textContent = error.message;
     } finally { button.disabled = false; }
@@ -656,6 +923,7 @@
       const abortButton = document.getElementById('shareHistoryAbort');
       if (abortButton) abortButton.hidden = true;
       captured = { ...captured, ...sharedContext, mode: 'shared', role: 'owner' };
+      renderSharingSwitch(true);
       prepareButton.hidden = true;
       document.getElementById('shareExistingChatCancel').textContent = 'Done';
       previewNode.hidden = true;
@@ -680,6 +948,7 @@
     } finally {
       busy = false;
       prepareButton.disabled = false;
+      if (sharingSwitch) sharingSwitch.disabled = false;
       document.getElementById('shareExistingChatClose').disabled = false;
       document.getElementById('shareExistingChatCancel').disabled = false;
     }
@@ -689,12 +958,14 @@
       if (busy) return;
       const requestNumber = ++openAgentRequest;
       const selected = root.DashboardHelpers?.getSelectedAgentIdentity?.();
-      if (selected?.agentId !== agentId) {
+      if (selected?.agentId !== agentId || selected?.mode !== 'shared') {
         const context = await request('/resolve', { agentId });
         if (requestNumber !== openAgentRequest) return;
         const current = root.DashboardHelpers?.getSelectedAgentIdentity?.();
         if (current?.agentId !== selected?.agentId || current?.conversationId !== selected?.conversationId) return;
-        await root.DashboardHelpers.selectChatContext(context);
+        if (selected?.agentId !== agentId || selected?.conversationId !== context.conversationId || selected?.mode !== context.mode) {
+          await root.DashboardHelpers.selectChatContext(context);
+        }
         if (requestNumber !== openAgentRequest) return;
       }
       open();
@@ -702,6 +973,7 @@
     }
   };
   trigger.addEventListener('click', open);
+  sharingSwitch?.addEventListener('click', () => void toggleSharing());
   retryButton?.addEventListener('click', () => {
     if (busy || !isCurrent(dialogEpoch)) return;
     status.textContent = 'Checking this conversation…';
@@ -745,8 +1017,22 @@
     catch (_) { input.select(); document.execCommand('copy'); }
     document.getElementById('shareInviteDelivery').textContent = 'Signup link copied. Send it to the invited email address owner.';
   });
+  document.getElementById('shareInviteSignupSend')?.addEventListener('click', () => {
+    const input = document.getElementById('shareInviteSignupLink');
+    if (input.value) void sendLinkValue(input.value, document.getElementById('shareInviteDelivery'), { title: `Join ${captured?.agentName || 'this agent'} on ChatMCP`, text: 'You have been invited to a shared ChatMCP conversation. Sign up or sign in with the invited email address to join.' });
+  });
   document.getElementById('shareGuestLinkCreate')?.addEventListener('click', () => void createGuestLink());
+  document.getElementById('shareLinkCopy')?.addEventListener('click', () => void quickLinkAction('copy'));
+  document.getElementById('shareLinkSend')?.addEventListener('click', () => void quickLinkAction('send'));
+  document.getElementById('shareGuestLinkSend')?.addEventListener('click', () => {
+    const input = document.getElementById('shareGuestLinkValue');
+    const name = captured?.agentName || 'this agent';
+    if (input.value) void sendLinkValue(input.value, document.getElementById('shareGuestLinkStatus'), { title: `Join ${name} on ChatMCP`, text: `You're invited to chat with ${name} on ChatMCP.` });
+  });
   document.getElementById('shareGuestLinkDisable')?.addEventListener('click', () => void disableGuestLink());
+  document.getElementById('shareGuestExpiryPreset')?.addEventListener('change', () => renderLimitInputs());
+  document.getElementById('shareGuestAccessMode')?.addEventListener('change', () => renderQuickLink());
+  document.getElementById('shareGuestLimitsSave')?.addEventListener('click', () => void saveGuestLimits());
   document.getElementById('shareGuestPasscodeGenerate')?.addEventListener('click', () => {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
     const random = new Uint8Array(20);

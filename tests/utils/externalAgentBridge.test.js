@@ -157,6 +157,65 @@ describe('External agent bridge', () => {
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 
+  it('uploads local images referenced in a reply and keeps them across a delivery retry', async () => {
+    const state = fixture();
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'chatspace-reply-images-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'chatspace-reply-outside-'));
+    fs.writeFileSync(path.join(project, 'shot one.png'), 'png-1');
+    fs.writeFileSync(path.join(project, 'notes.txt'), 'text');
+    fs.writeFileSync(path.join(outside, 'secret.png'), 'png-2');
+    fs.symlinkSync(path.join(outside, 'secret.png'), path.join(project, 'link.png'));
+    const reply = [
+      `![Settings](${path.join(project, 'shot%20one.png')})`,
+      `again ![](<${path.join(project, 'shot one.png')}>)`,
+      `![Outside](${path.join(outside, 'secret.png')})`,
+      `![Link](${path.join(project, 'link.png')})`,
+      `![Notes](${path.join(project, 'notes.txt')})`,
+      `![Gone](${path.join(project, 'missing.png')})`,
+      '![Web](https://example.test/a.png)'
+    ].join('\n');
+    let uploads = 0;
+    const fetchImpl = jest.fn(async url => String(url).endsWith('/api/agent/attachments')
+      ? { ok: true, json: async () => ({ attachmentId: `attachment-${++uploads}` }) }
+      : { ok: true, json: async () => ({ choices: [{ message: { content: reply } }] }) });
+    try {
+      const bridge = new Bridge(state, { fetchImpl, runtimeKey: 'local-key', replyFileRoots: [project] });
+      bridge.api = jest.fn(async route => {
+        if (route === '/heartbeat') return {};
+        throw new Error('Connection lost');
+      });
+      await expect(bridge.completePending()).rejects.toThrow('Connection lost');
+      expect(uploads).toBe(1);
+      expect(state.pending.reply.attachmentIds).toEqual(['attachment-1']);
+      const text = open(state.pending.reply.content, state.key);
+      expect(text).toContain('[Image attached: Settings]');
+      expect(text).toContain('again [Image attached: shot one.png]');
+      expect(text).toContain('[Image not attached: Outside (outside the agent\'s project folder)]');
+      expect(text).toContain('[Image not attached: Link (outside the agent\'s project folder)]');
+      expect(text).toContain('[Image not attached: Notes (not a supported image type)]');
+      expect(text).toContain('[Image not attached: Gone (file not found)]');
+      expect(text).toContain('![Web](https://example.test/a.png)');
+      expect(text).not.toContain(project);
+      bridge.api = jest.fn().mockResolvedValue({});
+      await bridge.completePending();
+      expect(uploads).toBe(1);
+      expect(bridge.api.mock.calls[0][1].attachmentIds).toEqual(['attachment-1']);
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves reply images alone when no local folder is approved', async () => {
+    const state = fixture();
+    const fetchImpl = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: '![a](/tmp/a.png)' } }] }) });
+    const bridge = new Bridge(state, { fetchImpl, runtimeKey: 'local-key' });
+    bridge.api = jest.fn().mockResolvedValue({});
+    await bridge.completePending();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(bridge.api.mock.calls.find(([route]) => route === '/messages')[1].attachmentIds).toBeUndefined();
+  });
+
   it('uploads encrypted files with plaintext integrity metadata', async () => {
     const state = fixture();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chatspace-bridge-upload-'));
@@ -316,4 +375,65 @@ describe('shared DM bridge encryption', () => {
     const noKey = new Bridge(fixture(),{groupPassword:'',groupSalt:''});
     expect(()=>noKey.prepareReply({kind:'direct',id:'id',message:{shared:true,fromAgent:'remote'},output:'Result'})).toThrow('GROUP_PASSWORD');
   });
+
+  it('sends a peer DM when the token lacks agent.discover.read', async () => {
+    const http = require('http');
+    const { execFile } = require('child_process');
+    const requests = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        requests.push({ path: req.url, body: body && JSON.parse(body) });
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/api/agent/connect-guide') return res.end(JSON.stringify({ externalAgentBridge: { protocolVersion: 1 } }));
+        if (req.url === '/api/agent/discover') { res.statusCode = 403; return res.end(JSON.stringify({ error: { code: 'FORBIDDEN_RESOURCE' } })); }
+        res.statusCode = 201; res.end('{}');
+      });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-dm-'));
+    const file = path.join(dir, 'state.json');
+    const state = fixture(); state.pending = null; state.baseUrl = `http://127.0.0.1:${server.address().port}`;
+    saveState(file, state);
+    try {
+      const child = execFile(process.execPath, [path.join(__dirname, '../../scripts/external-agent-bridge.js'), 'send'],
+        { env: { ...process.env, CHATSPACE_BRIDGE_STATE: file, CHATSPACE_TO_AGENT: 'Peer' } });
+      child.stdin.end('Hello peer');
+      const [code, stdout] = await new Promise(resolve => {
+        let out = ''; child.stdout.on('data', d => { out += d; });
+        child.on('close', exitCode => resolve([exitCode, out]));
+      });
+      expect(code).toBe(0);
+      expect(stdout).toContain('Message sent.');
+      const dm = requests.find(r => r.path === '/api/agent/messages/direct');
+      expect(dm.body).toMatchObject({ toAgentName: 'Peer', encrypted: true });
+      expect(dm.body.encryptionScope).toBeUndefined();
+      expect(open(dm.body.content, state.key)).toBe('Hello peer');
+    } finally {
+      server.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+it('notifies a standalone bridge owner of provider quota failures and retries delivery without replay', async () => {
+  const state = fixture();
+  const runtime = jest.fn(async () => new Response('{"error":{"code":"insufficient_quota","message":"PRIVATE_SECRET"}}', { status: 429 }));
+  const bridge = new Bridge(state, { fetchImpl: runtime, runtimeKey: 'local-key' });
+  let failed = false;
+  bridge.api = jest.fn(async route => { if (route === '/messages' && !failed) { failed = true; throw new Error('offline'); } return {}; });
+  await expect(bridge.completePending()).rejects.toThrow('Inspect the runtime');
+  expect(state.pending).toMatchObject({ phase: 'uncertain', providerFailure: { category: 'quota' } });
+  const savedNotice = { ...state.pending.failureNotice };
+  expect(savedNotice.priority).toBe(1);
+  expect(open(savedNotice.content, state.key)).toContain('usage or credit limit');
+  expect(open(savedNotice.content, state.key)).not.toContain('PRIVATE_SECRET');
+  await expect(bridge.completePending()).rejects.toThrow('uncertain outcome');
+  await expect(bridge.completePending()).rejects.toThrow('uncertain outcome');
+  expect(bridge.api.mock.calls.filter(([route]) => route === '/messages')).toEqual([
+    ['/messages', savedNotice], ['/messages', savedNotice]
+  ]);
+  expect(runtime).toHaveBeenCalledTimes(1);
+  expect(state.pending.failureNoticeSent).toBe(true);
 });

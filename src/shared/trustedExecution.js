@@ -8,6 +8,7 @@ const isTrusted = runtime => runtime?.capabilities?.executionMode === 'trusted';
 const one = async (client, sql, values) => (await client.query(sql, values)).rows[0];
 
 async function requesterAccess(client, agentId, room, kind, id) {
+  if (room.sharing_enabled === false && (kind !== 'user' || id !== room.owner_id)) return null;
   if (kind === 'user') {
     const member = await one(client, `SELECT expires_at FROM shared_members WHERE conversation_id=$1 AND user_id=$2
       AND status='active' AND (expires_at IS NULL OR expires_at>NOW())`, [room.id, id]);

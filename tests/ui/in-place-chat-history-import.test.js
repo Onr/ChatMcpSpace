@@ -221,3 +221,22 @@ test('guest-link discovery is bound to the selected conversation when switching 
   expect(JSON.parse(create.options.body)).toMatchObject({ conversationId: 'room-b', agentIds: [agentB] });
   expect(window.confirm).not.toHaveBeenCalled();
 });
+
+test('opening sharing recovers a stale private selection when the server already has a shared conversation', async () => {
+  document.body.innerHTML = `<div id="shareExistingChatDialog" class="hidden"><button id="shareExistingChatClose"></button><button id="shareExistingChatCancel"></button><p id="shareExistingChatStatus"></p><div id="shareExistingChatPreview"></div><div id="shareExistingChatInvites"><input id="shareInviteEmail"><button id="shareInviteSubmit"></button><div id="shareInviteList"></div></div><button id="shareExistingChatPrepare"></button></div><button id="headerShareExistingChatBtn"></button>`;
+  let selected = { agentId: id, agentName: 'Mira', mode: 'private', role: 'owner' };
+  window.DashboardHelpers = { getSelectedAgentIdentity: () => selected,
+    selectChatContext: jest.fn(async context => { selected = context; }) };
+  window.fetch = jest.fn(async url => {
+    if (url.endsWith('/resolve')) return response({ agentId: id, conversationId: id, agentName: 'Mira', mode: 'shared', state: 'shared', role: 'owner' });
+    if (url.endsWith('/invitations')) return response([]);
+    return response({ room: { sharing_enabled: true }, members: [], guests: [] });
+  });
+  window.eval(script);
+  document.getElementById('headerShareExistingChatBtn').click();
+  await tick();
+  expect(window.DashboardHelpers.selectChatContext).toHaveBeenCalledTimes(1);
+  expect(document.getElementById('shareExistingChatPrepare').hidden).toBe(true);
+  expect(document.getElementById('shareExistingChatStatus').textContent).not.toContain('not available');
+  expect(document.getElementById('shareExistingChatInvites').hidden).toBe(false);
+});

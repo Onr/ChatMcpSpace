@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const C = require('../../public/js/shared-crypto');
+jest.mock('../../scripts/discover-provider-models', () => ({ discover: jest.fn(async () => []) }));
 const { RestrictedTaskFiles } = require('../../src/shared/restrictedExecutor');
 const { actionDigest } = require('../../src/shared/boundActionBroker');
 const {
@@ -20,6 +21,7 @@ beforeAll(async () => {
   pair = await C.identity(account, 'fixture');
 }, 30000);
 beforeEach(async () => {
+  require('../../scripts/discover-provider-models').discover.mockReset().mockResolvedValue([]);
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-runner-test-'));
   outputStore = process.env.SHARED_TEST_OUTPUT_STORE || fs.mkdtempSync(path.join(os.tmpdir(), 'shared-output-store-fixture-'));
   if (!process.env.SHARED_TEST_OUTPUT_STORE) {
@@ -1480,5 +1482,71 @@ test('a trusted interrupted private turn sends a normal reply and releases its s
   expect(runner.api).toHaveBeenCalledWith('/release', { executionId: execution });
   expect(runner.api).not.toHaveBeenCalledWith('/acquire', expect.anything());
   expect(runner.state.shared.privateExecution).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test('a quota subprocess failure discovers future model IDs and keeps raw diagnostics private', async () => {
+  const discovery = require('../../scripts/discover-provider-models').discover;
+  discovery.mockResolvedValue([{ value: 'future-generation-high' }, { value: 'future-generation-low' }, { value: 'bad\nSECRET' }]);
+  runner.bridge.api = jest.fn(async () => ({}));
+  runner.invokeOverride = null;
+  const profile = { provider: 'antigravity', model: 'future-generation-high', managedRunner: true,
+    command: [process.execPath, '-e', `process.stderr.write('PRIVATE_PROMPT secret=PRIVATE_TOKEN\\nAGY_ERROR: '+JSON.stringify({error_code:429,short_error:'Individual quota reached. Resets in 2h.'}));process.exitCode=3;`] };
+  const error = await runner.invoke(profile, [], 'private').catch(e => e);
+  expect(error.providerFailure).toMatchObject({ category: 'quota', alternatives: ['future-generation-low'], modelsRefreshed: true });
+  expect(discovery).toHaveBeenCalledWith('antigravity');
+  expect(runner.bridge.api).toHaveBeenCalledWith('/models/sync', expect.objectContaining({ provider: 'antigravity', source: 'cli-metadata' }));
+  expect(fs.statSync(error.diagnosticsFile).mode & 0o077).toBe(0);
+  expect(fs.readFileSync(error.diagnosticsFile, 'utf8')).toContain('PRIVATE_TOKEN');
+  expect(JSON.stringify(error.providerFailure)).not.toMatch(/PRIVATE_TOKEN|PRIVATE_PROMPT/);
+  await runner.describeProviderFailure(error, profile);
+  expect(discovery).toHaveBeenCalledTimes(1);
+  trustedInterruptedBatch();
+  runner.state.shared.pending.providerFailure = error.providerFailure;
+  await runner.sharedTurn();
+  const notice = runner.api.mock.calls.find(([route]) => route.endsWith('/interrupted'))[1].message;
+  const content = (await C.decrypt(key, notice.payload, `${room}:1`)).text;
+  expect(content).toContain('usage or credit limit');
+  expect(content).not.toMatch(/PRIVATE_TOKEN|PRIVATE_PROMPT|future-generation/);
+});
+
+test('discovery outages preserve actionable errors without claiming a refreshed list or retrying tools', async () => {
+  const discovery = require('../../scripts/discover-provider-models').discover;
+  discovery.mockRejectedValue(new Error('PRIVATE_API_KEY'));
+  const failure = await runner.describeProviderFailure(Object.assign(new Error(), { status: 429 }), { managedRunner: true, provider: 'antigravity', model: 'default' });
+  expect(failure).toMatchObject({ category: 'rate_limit', alternatives: [], modelsRefreshed: false });
+  expect(runner.interruptionReply({ providerFailure: failure })).toContain('Wait before');
+  expect(runner.interruptionReply({ providerFailure: failure })).not.toMatch(/PRIVATE_API_KEY|refreshed automatically/);
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+test('an empty successful CLI exit carries its headless permission denial into recovery', async () => {
+  runner.invokeOverride = null;
+  const error = await runner.invoke({ provider: 'test', model: 'default', command: [process.execPath, '-e',
+    `process.stderr.write('jetski: no output produced; a tool required command permission; auto-denied');`] }, [], 'private').catch(e => e);
+  expect(error.providerFailure.category).toBe('permission');
+});
+
+test('private failure recovery survives restart and delivers one encrypted actionable notification', async () => {
+  runner.executionMode = 'trusted';
+  runner.state.shared.privateExecution = crypto.randomUUID();
+  const failure = { category: 'quota', retryAt: '2030-01-02T12:00:00.000Z', alternatives: ['future-model-low'], modelsRefreshed: true };
+  runner.state.pending = { phase: 'uncertain', id: crypto.randomUUID(), kind: 'user', channel: 'user', message: {}, providerFailure: failure };
+  runner.persist();
+  const bridge = new Bridge(JSON.parse(fs.readFileSync(runner.bridge.file)), { file: runner.bridge.file });
+  const restored = new SharedRunner(bridge, runner.profiles, { executionMode: 'trusted', protocolVersion: 2, invoke });
+  restored.register = jest.fn(); restored.api = jest.fn(async () => ({})); bridge.heartbeat = jest.fn();
+  let first = true;
+  bridge.api = jest.fn(async route => { if (route === '/messages' && first) { first = false; throw new Error('delivery offline'); } return {}; });
+  await expect(restored.tick()).rejects.toThrow('delivery offline');
+  const saved = { ...bridge.state.pending.reply };
+  expect(saved).toMatchObject({ encrypted: true, priority: 1 });
+  const content = open(saved.content, bridge.state.key);
+  expect(content).toContain('usage or credit limit');
+  expect(content).toContain('future-model-low');
+  expect(content).toContain('refreshed automatically');
+  await restored.tick();
+  expect(bridge.api.mock.calls.filter(([route]) => route === '/messages')[1][1]).toEqual(saved);
+  expect(bridge.state.pending).toBeNull();
   expect(invoke).not.toHaveBeenCalled();
 });

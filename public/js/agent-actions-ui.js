@@ -34,6 +34,7 @@
   }
 
   window.AgentActionsUI = {
+    openSharing: openSharing,
     position(rect, agentId, { name = 'Agent', shareable = true } = {}) {
       anchorRect = rect;
       if (agentId) menu.dataset.agentId = agentId;
@@ -126,14 +127,12 @@
     if (records.some(record => [...record.addedNodes].some(node => node.nodeType === 1))) enhanceIcons(list);
   }).observe(list, { childList: true, subtree: true });
 
-  document.getElementById('floatingShareAgentBtn')?.addEventListener('click', async () => {
-    const agentId = menu.dataset.agentId;
+  async function openSharing(agentId, name = 'Agent') {
     if (!agentId) return;
-    const name = document.getElementById('floatingAgentName').textContent;
-    if (document.getElementById('shareExistingChatDialog')) {
+    if (window.AgentChatSharing?.openForAgent || document.getElementById('shareExistingChatDialog')) {
       closeMenu();
-      try { await window.AgentChatSharing.openForAgent(agentId, name); }
-      catch (error) { window.showError?.(error.message); }
+      if (!window.AgentChatSharing?.openForAgent) throw new Error('Agent sharing is still loading. Please try again.');
+      await window.AgentChatSharing.openForAgent(agentId, name);
       return;
     }
     if (!dialog) return;
@@ -145,6 +144,11 @@
     if (guest) guest.href = '/guest-sharing?' + query;
     closeMenu();
     dialog.showModal();
+  }
+  document.getElementById('floatingShareAgentBtn')?.addEventListener('click', async event => {
+    event.stopPropagation();
+    try { await openSharing(menu.dataset.agentId, document.getElementById('floatingAgentName').textContent); }
+    catch (error) { window.showError?.(error.message); }
   });
   document.getElementById('agentShareClose')?.addEventListener('click', () => dialog.close());
   dialog?.addEventListener('click', event => {

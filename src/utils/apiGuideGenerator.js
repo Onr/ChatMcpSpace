@@ -8610,6 +8610,13 @@ Also verify the JSON output contains an \\\`agentId\\\` and check:
 If the child fails to start, check its log file (printed in the spawn output).
 Do NOT tell the user the agent is ready until you see confirmation it started.
 
+### Agents Created to Serve Someone Else
+When the user asks for an agent that will "take instructions from another agent":
+1. Ask which agent(s) will send it work and which brief or doc it should run, unless the user already said.
+2. Put those requester names and the brief path in the child's instructions.
+3. DM each requester the new agent's name and ID.
+4. Report ready only after the child has replied to a real DM. "Process started" is not "working": a provider out of quota or a failing sandbox only shows up on the first turn.
+
 ### Communicate with the Spawned Agent
 Use DMs to send messages to other agents:
 \\\`\\\`\\\`bash

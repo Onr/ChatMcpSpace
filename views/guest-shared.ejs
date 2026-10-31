@@ -25,8 +25,16 @@
       <form id="guestUnlockForm" autocomplete="off">
         <label for="guestDisplayName">Display name</label><input id="guestDisplayName" name="displayName" maxlength="80" required autocomplete="name" placeholder="What should we call you?">
         <label for="guestPassword">Guest access code <span class="chat-help">(if required)</span></label><input id="guestPassword" name="password" type="password" maxlength="72" autocomplete="current-password" placeholder="Code provided by the person who shared this chat">
-        <button type="submit" class="chat-primary">Join chat <span aria-hidden="true">→</span></button>
+        <label for="guestRequestNote" data-request-only hidden>Message to the owner <span class="chat-help">(optional)</span></label><textarea id="guestRequestNote" name="note" maxlength="500" rows="2" data-request-only hidden placeholder="Say who you are or why you’d like access"></textarea>
+        <button type="submit" class="chat-primary"><span data-join-label>Join chat</span> <span aria-hidden="true">→</span></button>
       </form>
+      <% if (locals.account) { %>
+      <div id="guestAccountRequest" class="guest-account-request" data-csrf-token="<%= account.csrfToken %>" hidden>
+        <p>You’re signed in as <strong><%= account.email %></strong>.</p>
+        <button id="guestAccountRequestButton" type="button" class="guest-secondary">Ask with my account instead</button>
+        <p class="chat-help">The owner sees your name and email. Once they approve, the chat appears in your dashboard.</p>
+      </div>
+      <% } %>
       <p id="guestStatus" class="guest-status chat-status" role="status" aria-live="polite"></p>
       <p class="chat-help">The owner can see activity in your shared conversations.</p>
     </section>

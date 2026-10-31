@@ -282,6 +282,11 @@ describe('Gemini MCP OAuth and Streamable HTTP routes', () => {
       }).expect(200);
       expect(listed.body.result.structuredContent.agents).toEqual([{ id: ownAgentId, name: 'Visible agent' }]);
       expect(JSON.stringify(listed.body)).not.toContain('Private agent');
+      const status = await request(context.app).post('/mcp').set('Authorization', `Bearer ${rotated.body.access_token}`).send({
+        jsonrpc: '2.0', id: 'status', method: 'tools/call', params: { name: 'get_connection_status', arguments: {} }
+      }).expect(200);
+      expect(status.body.result.structuredContent).toMatchObject({ mode: 'catalogue', gateway: 'not_applicable', messaging: false, reconnectRequired: true });
+      expect(status.body.result.content[0].text).toContain('read-only agent catalogue');
       await request(context.app).post('/mcp').set('Authorization', 'Bearer not-a-token').send({
         jsonrpc: '2.0', id: 3, method: 'tools/list'
       }).expect(401);

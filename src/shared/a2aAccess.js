@@ -17,7 +17,7 @@ async function peers(userId, agentId, client = db) {
       AND member.user_id=CASE WHEN room.agent_id=target.agent_id THEN caller.user_id ELSE target.user_id END
     WHERE caller.agent_id=$1 AND caller.user_id=$2
       AND caller.inter_agent_mode='listen_all' AND target.inter_agent_mode='listen_all'
-      AND room.allow_agent_messages=TRUE AND room.rotation_required=FALSE
+      AND room.allow_agent_messages=TRUE AND room.rotation_required=FALSE AND room.sharing_enabled=TRUE
       AND caller.stop_requested_at IS NULL AND target.stop_requested_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shared_runtimes other_runtime
         WHERE other_runtime.agent_id IN (caller.agent_id,target.agent_id)

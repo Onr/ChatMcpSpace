@@ -58,6 +58,7 @@ async function lockTask(client, taskId, runtime = null) {
 }
 async function currentAuthorization(client, task, room) {
   if (!ACTIVE.includes(task.state)) return null;
+  if (room.sharing_enabled === false && (task.requester_kind !== 'user' || task.requester_id !== room.owner_id)) return null;
   if (task.execution_context?.execution?.mode === 'trusted') {
     const runtime = await one(client, 'SELECT * FROM shared_runtimes WHERE agent_id=$1', [task.agent_id]);
     return trustedExecution.authorizeTask(client, task, room, runtime);

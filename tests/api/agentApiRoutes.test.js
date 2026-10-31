@@ -93,7 +93,7 @@ describe('Agent API routes', () => {
     const f = await createAgentApiTestContext({ scopedContext: { type: 'agent_token', agentId, agentName: 'Locked Out' } });
     try {
       const fs = require('fs'), path = require('path');
-      for (const migration of ['041_add_message_idempotency.sql', '042_add_shared_conversations.sql', '054_add_agent_chat_threads.sql']) {
+      for (const migration of ['041_add_message_idempotency.sql', '042_add_shared_conversations.sql', '054_add_agent_chat_threads.sql', '064_add_sharing_switch.sql']) {
         await f.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations', migration), 'utf8'));
       }
       await f.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, f.userId, 'Locked Out']);
@@ -369,6 +369,7 @@ describe('Agent API routes', () => {
     const fs = require('fs'), path = require('path');
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/041_add_message_idempotency.sql'), 'utf8'));
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/042_add_shared_conversations.sql'), 'utf8'));
+    await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/054_add_agent_chat_threads.sql'), 'utf8'));
     await fixture.query('INSERT INTO agents(agent_id,user_id,agent_name,position) VALUES($1,$2,$3,1)', [agentId, fixture.userId, 'Alpha']);
     await fixture.query("INSERT INTO shared_conversations(id,agent_id,owner_id,title) VALUES($1,$2,$3,'Shared Alpha')", [roomId, agentId, fixture.userId]);

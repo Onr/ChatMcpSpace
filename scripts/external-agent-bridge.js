@@ -22,6 +22,106 @@ const INACTIVITY_SHUTDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 const MIME_TYPES = { '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.pdf': 'application/pdf',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 
+// Diagnostics remain local. Persist only an allowlisted category and numeric
+// retry time; never forward provider output, prompts, URLs or credentials.
+function providerFailure(error = {}, diagnostics = '', { now = Date.now(), retryAfter } = {}) {
+  const text = `${error.message || ''}\n${diagnostics}`.slice(-64000).replace(/\x1b\[[0-9;]*m/g, '');
+  let status = Number(error.status ?? error.statusCode ?? error.code);
+  retryAfter ??= error.retryAfter;
+  let reportedReset;
+  let evidence = text;
+  for (const line of text.split('\n')) {
+    const start = line.indexOf('{');
+    if (start < 0) continue;
+    try {
+      const value = JSON.parse(line.slice(start));
+      const detail = value.error || value;
+      status ||= Number(detail.error_code || detail.status_code || detail.status || detail.code);
+      evidence += '\n' + [detail.type, detail.code, detail.status, detail.short_error, detail.message].filter(v => typeof v === 'string').join(' ');
+      if (retryAfter === undefined) retryAfter = detail.retry_after ?? detail.retryAfter;
+      const reset = detail.resets_at ?? detail.reset_at ?? detail.resetAt;
+      if (reset !== undefined) reportedReset = /^\d+(?:\.\d+)?$/.test(String(reset))
+        ? Number(reset) * (Number(reset) < 1e12 ? 1000 : 1) : Date.parse(reset);
+      for (const item of Array.isArray(detail.details) ? detail.details : []) {
+        if (typeof item?.retryDelay === 'string' && /^\d+(?:\.\d+)?s$/.test(item.retryDelay)) evidence += '\nretry after ' + item.retryDelay;
+      }
+    } catch (_) { /* Providers also emit ordinary text and partial JSON. */ }
+  }
+  let category = 'unknown';
+  if (error.code === 'PROVIDER_TIMEOUT' || error.name === 'TimeoutError') category = 'timeout';
+  else if (error.code === 'ENOENT') category = 'not_installed';
+  else if (/insufficient[_ ]quota|quota.{0,80}(?:reach|exceed|exhaust|limit)|usage[_ ]limit|hit your limit|(?:credit|balance).{0,40}(?:exhaust|insufficient|empty|too low)|billing[_ ]hard[_ ]limit/i.test(evidence) || status === 402) category = 'quota';
+  else if (status === 401 || /unauthenticated|invalid[_ ]api[_ ]key|(?:token|session|credentials?).{0,35}(?:expired|invalid)|(?:login|sign.?in|authentication) (?:is )?required/i.test(evidence)) category = 'authentication';
+  else if (/invalid model selection|(?:model|effort).{0,80}conflicts? with|unsupported.{0,30}(?:effort|reasoning)/i.test(evidence)) category = 'model_configuration';
+  else if (/(?:model|deployment).{0,100}(?:not[_ ]found|does not exist|no longer|retired|deprecated|not available|unavailable|not supported)|(?:unknown|invalid|unsupported)[_ ]model/i.test(evidence)) category = 'model_unavailable';
+  else if (status === 429 || /rate[_ -]?limit|too many requests|resource_exhausted|overloaded/i.test(evidence)) category = 'rate_limit';
+  else if (/context[_ ](?:length|window)|maximum context|too many tokens|prompt.{0,30}too long/i.test(evidence)) category = 'context_limit';
+  else if (status === 403 || /permission.{0,80}(?:denied|required)|auto-denied|cannot prompt|access[_ ]denied/i.test(evidence)) category = 'permission';
+  else if (status >= 500 && status <= 599) category = 'unavailable';
+  else if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|fetch failed|network error/i.test(evidence)) category = 'network';
+  else if (error.code === 'EMPTY_PROVIDER_RESPONSE') category = 'empty_response';
+  let delay = /^\d+(?:\.\d+)?$/.test(String(retryAfter ?? '')) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - now;
+  if (!Number.isFinite(delay)) {
+    const duration = /(?:resets? in|retry (?:in|after)|try again in)\s*((?:\d+(?:\.\d+)?\s*(?:milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\s*)+)/i.exec(evidence)?.[1];
+    if (duration) {
+      delay = 0;
+      for (const match of duration.matchAll(/(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)/gi)) {
+        const unit = match[2].toLowerCase();
+        delay += Number(match[1]) * (/^(?:milliseconds?|ms)$/.test(unit) ? 1 : unit.startsWith('d') ? 86400000 : unit.startsWith('h') ? 3600000 : unit.startsWith('m') ? 60000 : 1000);
+      }
+    }
+  }
+  const retryAt = Number.isFinite(reportedReset) ? reportedReset : now + delay;
+  return { category, ...(Number.isFinite(retryAt) && retryAt > now && retryAt - now <= 90 * 86400000 ? { retryAt: new Date(retryAt).toISOString() } : {}) };
+}
+
+function providerFailureMessage(failure, { timeoutMs = 600000, shared = false } = {}) {
+  const messages = {
+    quota: ['The AI provider has reached a usage or credit limit.', 'Choose another model or provider in the agent settings, or check your provider usage and wait for the limit to reset.'],
+    rate_limit: ['The AI provider is temporarily limiting requests.', 'Wait before sending this task again, or choose another model or provider in the agent settings.'],
+    authentication: ['The AI provider could not authenticate this agent.', 'Sign in again to the provider CLI on the machine running this agent, using the same OS user, or renew its API credential.'],
+    model_unavailable: ['The selected model is no longer available or is not enabled for this account.', 'Open the agent settings, refresh the model list, and select a currently listed model.'],
+    model_configuration: ['The selected model and reasoning settings are incompatible.', 'Open the agent settings and choose a thinking effort supported by that model, or clear the effort override.'],
+    permission: ['The AI provider could not obtain a required permission.', 'Review the agent permissions and provider CLI settings on the machine running it, then approve only the access needed for this task.'],
+    context_limit: ['This task exceeded the model’s context limit.', 'Start a new conversation, shorten the request or attachments, or choose a model with a larger context window.'],
+    not_installed: ['The provider CLI could not be started.', 'Install or repair the provider CLI and make sure it is on PATH for the OS user running this agent.'],
+    unavailable: ['The AI provider is temporarily unavailable.', 'Try again later or choose another provider in the agent settings.'],
+    network: ['The agent could not reach its AI provider.', 'Check the network or proxy on the machine running this agent, then try again.'],
+    empty_response: ['The AI provider finished without returning a reply.', 'Check the provider CLI and its permissions on the machine running this agent, then try a short message.'],
+    timeout: [`This run reached its ${Math.ceil(timeoutMs / 60000)}-minute time limit before finishing.`, 'Try a smaller task or review the runner time limit.']
+  };
+  const [cause, action] = (Object.hasOwn(messages, failure?.category) && messages[failure.category]) || ['The agent stopped before returning a confirmed result.', 'Check the runner log on the machine running this agent, then send a new message when it is ready.'];
+  const lines = [cause];
+  const retryAt = Date.parse(failure?.retryAt);
+  if (Number.isFinite(retryAt)) lines.push(`Provider-reported retry time: ${new Date(retryAt).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}.`);
+  lines.push(shared ? `The agent owner can help: ${action}` : action);
+  const alternatives = Array.isArray(failure?.alternatives) ? failure.alternatives.filter(id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._:/@\[\]-]{0,119}$/.test(id)).slice(0, 3) : [];
+  if (!shared && alternatives.length) {
+    lines.push(`Other models currently listed by your provider: ${alternatives.map(id => '`' + id + '`').join(', ')}. Their quota and availability have not been tested. Use a thinking effort compatible with the chosen model.`);
+  }
+  if (!shared && failure?.modelsRefreshed) lines.push('The model list in your agent settings has been refreshed automatically.');
+  lines.push('Your request has been preserved. Review any partial work before sending it again.');
+  return lines.join('\n\n');
+}
+
+async function providerHttpError(response) {
+  const diagnostics = await readResponseBytes(response, 64000).then(bytes => bytes.toString()).catch(() => '');
+  const error = new Error(`External runtime returned HTTP ${response.status}.`);
+  error.status = response.status;
+  error.providerFailure = providerFailure(error, diagnostics, { retryAfter: response.headers?.get?.('retry-after') ?? undefined });
+  return error;
+}
+
+async function replaceAsync(text, pattern, replacer) {
+  const matches = [];
+  text.replace(pattern, (...args) => { matches.push(args); return ''; });
+  // One at a time, so uploads keep the order they appear in the text.
+  const values = [];
+  for (const args of matches) values.push(await replacer(...args));
+  let index = 0;
+  return text.replace(pattern, () => values[index++]);
+}
+
 async function readResponseBytes(response, limit) {
   if (!response.body) {
     const declared = Number(response.headers?.get?.('content-length') || 0);
@@ -120,7 +220,7 @@ function acquireLock(file) {
 
 class Bridge {
   constructor(state, { file, fetchImpl = global.fetch, runtimeUrl = 'http://127.0.0.1:8642/v1', runtimeKey,
-    model = 'hermes-agent', timeoutMs = 600000, attachmentDir, sharedFiles = false,
+    model = 'hermes-agent', timeoutMs = 600000, attachmentDir, sharedFiles = false, replyFileRoots = [],
     groupPassword = process.env.GROUP_PASSWORD, groupSalt = process.env.GROUP_SALT, keyCandidates = [],
     inactivityTimeoutMs = Number(process.env.CHATSPACE_INACTIVITY_TIMEOUT_MS) || INACTIVITY_SHUTDOWN_MS } = {}) {
     this.state = state;
@@ -136,6 +236,9 @@ class Bridge {
     this.timeoutMs = timeoutMs;
     this.attachmentDir = attachmentDir || (file ? `${file}.attachments` : null);
     this.sharedFiles = sharedFiles;
+    // Local directories whose images a reply may reference by path; those are
+    // uploaded as attachments because the user's browser cannot load them.
+    this.replyFileRoots = replyFileRoots.filter(root => typeof root === 'string' && path.isAbsolute(root));
     this.nextPollMs = 10000;
     this.busy = false;
     this.stopped = false;
@@ -305,6 +408,34 @@ class Bridge {
     return result.attachmentId;
   }
 
+  // Replace markdown images that point at local files with uploaded attachments.
+  async attachReplyImages(p) {
+    if (p.kind !== 'user' || !this.replyFileRoots.length) return;
+    const roots = this.replyFileRoots.flatMap(root => { try { return [fs.realpathSync(root)]; } catch (_) { return []; } });
+    const uploaded = new Map();
+    p.attachmentIds = [];
+    p.output = await replaceAsync(p.output, /!\[([^\]\n]*)\]\(\s*(?:<((?:file:\/\/)?\/[^>\n]+)>|((?:file:\/\/)?\/[^)\s]+))(?:\s+"[^"]*")?\s*\)/g, async (match, alt, bracketed, bare) => {
+      const target = bracketed || bare;
+      let filePath = target;
+      try { filePath = decodeURIComponent(target.replace(/^file:\/\//, '')); } catch (_) { /* Keep the literal path. */ }
+      const name = path.basename(filePath);
+      const label = alt.trim() || name;
+      try {
+        const real = fs.realpathSync(filePath);
+        if (uploaded.has(real)) return `[Image attached: ${label}]`;
+        if (!roots.some(root => real.startsWith(root + path.sep))) throw new Error('outside the agent\'s project folder');
+        if (!String(MIME_TYPES[path.extname(real).toLowerCase()] || '').startsWith('image/')) throw new Error('not a supported image type');
+        if (p.attachmentIds.length >= 10) throw new Error('a message can have at most 10 files');
+        p.attachmentIds.push(await this.uploadAttachment(real));
+        uploaded.set(real, true);
+        return `[Image attached: ${label}]`;
+      } catch (error) {
+        return `[Image not attached: ${label} (${error.code === 'ENOENT' ? 'file not found' : error.message})]`;
+      }
+    });
+    if (!p.attachmentIds.length) delete p.attachmentIds;
+  }
+
   async prepareRuntimeInput(content, attachments, source, encryptionKey = this.messageKey) {
     const files = [];
     for (const attachment of attachments || []) files.push(await this.downloadAttachment(attachment, encryptionKey));
@@ -429,12 +560,27 @@ class Bridge {
     });
   }
 
+  async notifyProviderFailure(p) {
+    if (this.failureRecoveryHandled || !p.providerFailure || p.failureNoticeSent) return;
+    if (!p.failureNotice) {
+      const text = providerFailureMessage(p.providerFailure, { timeoutMs: this.timeoutMs }) +
+        '\n\nAfter checking the runtime, resolve this attempt with the bridge retry or skip command.';
+      p.failureNotice = { agentName: this.state.agentName, encrypted: true, priority: 1,
+        clientMessageId: crypto.randomUUID(), content: seal(text, this.messageKey) };
+      this.persist();
+    }
+    await this.api('/messages', p.failureNotice);
+    p.failureNoticeSent = true;
+    this.persist();
+  }
+
   async completePending() {
     const p = this.state.pending;
     if (!p) return;
     this.lastActivityAt = Date.now();
     if (p.phase === 'running' || p.phase === 'uncertain') {
-      throw new Error('An external run has an uncertain outcome. Inspect Hermes, then use retry or skip explicitly.');
+      await this.notifyProviderFailure(p);
+      throw new Error('An external run has an uncertain outcome. Inspect the runtime, then use retry or skip explicitly.');
     }
     if (p.phase === 'queued') {
       let content;
@@ -479,18 +625,24 @@ class Bridge {
               ] }),
               signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.timeoutMs)]), redirect: 'error'
             });
-            if (!response.ok) throw new Error(`External runtime returned HTTP ${response.status}.`);
+            if (!response.ok) throw await providerHttpError(response);
             const result = await response.json();
             const output = result.choices?.[0]?.message?.content;
             if (typeof output !== 'string' || !output.trim()) throw new Error('External runtime returned no text result.');
             if (Buffer.byteLength(output) > 60000) throw new Error('External result exceeds the bridge text limit; inspect it locally.');
             p.output = output;
+            await this.attachReplyImages(p);
             this.prepareReply(p);
           } catch (error) {
             p.phase = 'uncertain';
+            p.providerFailure = error.providerFailure || providerFailure(error);
             if (error.code === 'PROVIDER_TIMEOUT' || error.name === 'TimeoutError') p.failureReason = 'timeout';
+            if (error.diagnosticsFile) p.diagnosticsFile = error.diagnosticsFile;
             delete p.output;
             this.persist();
+            // Keep the uncertain task intact; only the idempotent notification
+            // is retried if delivery failed. Never replay provider tools here.
+            await this.notifyProviderFailure(p).catch(() => {});
             throw new Error('External run did not return a confirmed result. Inspect the runtime before retry or skip; work may already have happened.');
           } finally {
             this.busy = false;
@@ -531,12 +683,14 @@ class Bridge {
   prepareReply(p) {
     p.result = seal(p.output, this.state.key);
     p.reply = {
-      agentName: this.state.agentName, encrypted: true, priority: 0, clientMessageId: crypto.randomUUID(),
+      agentName: this.state.agentName, encrypted: true, priority: p.providerFailure ? 1 : 0, clientMessageId: crypto.randomUUID(),
       ...(Number.isInteger(p.message.briefRevision) && p.message.briefRevision > 0 ? { briefRevision: p.message.briefRevision } : {}),
       content: p.kind === 'direct'
         ? seal(JSON.stringify({ type: REPLY_TYPE, inReplyTo: p.id, content: p.output }), this.messageKey)
-        : (this.messageKey === this.state.key ? p.result : seal(p.output, this.messageKey))
+        : (this.messageKey === this.state.key ? p.result : seal(p.output, this.messageKey)),
+      ...(p.kind === 'user' && p.attachmentIds?.length ? { attachmentIds: p.attachmentIds } : {})
     };
+    delete p.attachmentIds;
     if (p.kind === 'direct') {
       p.reply.toAgentName = p.message.fromAgent;
       if (p.message.shared === true) {
@@ -544,7 +698,7 @@ class Bridge {
         p.reply.content = seal(JSON.stringify({ type: REPLY_TYPE, inReplyTo: p.id, content: open(p.result, this.state.key) }), this.groupKey);
         p.reply.encryptionScope = 'shared_dm_password';
       }
-      p.mirror = { agentName: this.state.agentName, encrypted: true, priority: 0,
+      p.mirror = { agentName: this.state.agentName, encrypted: true, priority: p.reply.priority,
         clientMessageId: crypto.randomUUID(), content: seal(`Reply to ${p.message.fromAgent}:\n\n${p.output}`, this.messageKey) };
     }
     delete p.output;
@@ -634,6 +788,15 @@ async function main(env = process.env, args = process.argv.slice(2)) {
       console.log('Stop request acknowledged by operator.'); return;
     }
     if (command === 'send') {
+      if (bridge.state.shared?.runtimeId) {
+        // Inside a shared runner's private turn, send as that runtime instead
+        // of being fenced off as a competing legacy listener.
+        const baseFetch = bridge.fetch;
+        bridge.fetch = (url, options = {}) => baseFetch(url, String(url).startsWith(bridge.state.baseUrl + '/api/agent/') ? { ...options, headers: {
+          ...options.headers, 'x-shared-runtime': bridge.state.shared.runtimeId,
+          ...(bridge.state.shared.privateExecution ? { 'x-shared-private-execution': bridge.state.shared.privateExecution } : {})
+        } } : options);
+      }
       const files = [];
       for (let i = 1; i < args.length; i++) {
         if (args[i] === '--file' && args[i + 1]) files.push(path.resolve(args[++i]));
@@ -642,7 +805,13 @@ async function main(env = process.env, args = process.argv.slice(2)) {
       if (files.length > 10) throw new Error('A message can have at most 10 files.');
       const content = process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8');
       if ((!content.trim() && !files.length) || Buffer.byteLength(content) > 60000) throw new Error('Send requires 1–60000 bytes of text on stdin, or at least one --file.');
-      const sharedTarget = env.CHATSPACE_TO_AGENT && (await bridge.api('/discover')).agents?.find(a => a.shared && a.address === env.CHATSPACE_TO_AGENT);
+      // Bridge tokens may lack agent.discover.read; without it, only same-owner
+      // (non-shared) targets are reachable, so fall back to the private key.
+      const discovered = env.CHATSPACE_TO_AGENT && await bridge.api('/discover').catch(error => {
+        if (error.status === 403) return null;
+        throw error;
+      });
+      const sharedTarget = discovered?.agents?.find(a => a.shared && a.address === env.CHATSPACE_TO_AGENT);
       if (sharedTarget && !bridge.groupKey) throw new Error('Shared DMs require GROUP_PASSWORD and GROUP_SALT on both agents.');
       const attachmentIds = [];
       for (const filePath of files) attachmentIds.push(await bridge.uploadAttachment(filePath, sharedTarget ? bridge.groupKey : bridge.messageKey, sharedTarget ? sharedTarget.agentId : null));
@@ -708,4 +877,5 @@ async function main(env = process.env, args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { Bridge, pair, seal, open, endpoint, saveState, loadState, acquireLock, REPLY_TYPE, INACTIVITY_SHUTDOWN_MS };
+module.exports = { Bridge, pair, seal, open, endpoint, saveState, loadState, acquireLock, REPLY_TYPE, INACTIVITY_SHUTDOWN_MS,
+  providerFailure, providerFailureMessage, providerHttpError };

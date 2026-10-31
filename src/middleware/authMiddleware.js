@@ -70,6 +70,34 @@ function requiredScopeForRequest(req) {
   return null;
 }
 
+// Agents authenticate on every poll (100k+ successes a day), so successful auth
+// is recorded at most once per window per credential. Denials, mismatches and
+// unmapped routes are rare and security-relevant, so they are always recorded.
+const AUTH_SUCCESS_LOG_INTERVAL_MS = 10 * 60 * 1000;
+const AUTH_SUCCESS_LOG_MAX_KEYS = 10000;
+const lastAuthSuccessLogAt = new Map();
+
+function shouldLogAuthSuccess(agentId, credentialId, now = Date.now()) {
+  const key = `${agentId}:${credentialId || ''}`;
+  const last = lastAuthSuccessLogAt.get(key);
+  if (last !== undefined && now - last < AUTH_SUCCESS_LOG_INTERVAL_MS) {
+    return false;
+  }
+  if (lastAuthSuccessLogAt.size >= AUTH_SUCCESS_LOG_MAX_KEYS) {
+    for (const [staleKey, loggedAt] of lastAuthSuccessLogAt) {
+      if (now - loggedAt >= AUTH_SUCCESS_LOG_INTERVAL_MS) {
+        lastAuthSuccessLogAt.delete(staleKey);
+      }
+    }
+  }
+  lastAuthSuccessLogAt.set(key, now);
+  return true;
+}
+
+function resetAuthSuccessLogThrottle() {
+  lastAuthSuccessLogAt.clear();
+}
+
 async function logScopedAuthEvent({ agentId, credentialId, eventType, req, metadata = {} }) {
   try {
     const ip = req.ip || (req.connection && req.connection.remoteAddress) || '';
@@ -289,13 +317,15 @@ async function requireApiKey(req, res, next) {
         scopes: scopedAuth.scopes
       };
 
-      await logScopedAuthEvent({
-        agentId: scopedAuth.agentId,
-        credentialId: scopedAuth.credentialId,
-        eventType: 'auth_success',
-        req,
-        metadata: { method: req.method, path: req.path }
-      });
+      if (shouldLogAuthSuccess(scopedAuth.agentId, scopedAuth.credentialId)) {
+        await logScopedAuthEvent({
+          agentId: scopedAuth.agentId,
+          credentialId: scopedAuth.credentialId,
+          eventType: 'auth_success',
+          req,
+          metadata: { method: req.method, path: req.path }
+        });
+      }
 
       next();
       return;
@@ -395,5 +425,6 @@ module.exports = {
   attachUserFromSession,
   requireApiKey,
   protectRoute,
-  requireEmailVerification
+  requireEmailVerification,
+  resetAuthSuccessLogThrottle
 };

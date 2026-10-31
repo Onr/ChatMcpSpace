@@ -11,6 +11,7 @@ function context() {
     pendingOrbitPositions: new Map(), confirmedOrbitPositions: new Map(), agentListCache: {}, cachedGroupPartition: {},
     window: { csrfToken: 'csrf' }, updateAgentListUI: jest.fn(), showErrorMessage: jest.fn(),
     csrfFetch: jest.fn(() => new Promise(resolve => replies.push(resolve))),
+    clearOpenChatUnread: jest.fn(),
     Date, console
   };
   vm.createContext(scope);

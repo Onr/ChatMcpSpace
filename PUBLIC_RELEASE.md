@@ -22,7 +22,7 @@ Before publishing:
 5. Run `npm ci` to install the dependencies pinned in `package-lock.json`.
 6. Run `npm run migrate` to apply the migrations in `src/db/migrations/`, including
    `063_agent_identity_and_proactivity.sql`. Back up your database and configuration first.
-7. Review [the latest release notes](docs/RELEASE_2026-10-27.md).
+7. Review [the latest release notes](docs/RELEASE_2026-10-31.md).
 
 ## Self-hosting with built-in account verification
 

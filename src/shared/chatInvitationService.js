@@ -50,10 +50,11 @@ async function createAccountInvitation(ownerId, conversationId, recipientEmail, 
       check(prior.conversation_id === conversationId && prior.recipient_email === to, 409, 'This invitation request belongs to another conversation or recipient');
       await client.query('COMMIT'); return view(prior);
     }
-    const room = (await client.query(`SELECT c.id,c.agent_id,c.owner_id,a.agent_name FROM shared_conversations c
+    const room = (await client.query(`SELECT c.id,c.agent_id,c.owner_id,c.sharing_enabled,a.agent_name FROM shared_conversations c
       JOIN agents a ON a.agent_id=c.agent_id JOIN shared_members m ON m.conversation_id=c.id
       WHERE c.id=$1 AND c.owner_id=$2 AND m.user_id=$2 AND m.role='owner' AND m.status='active' FOR UPDATE OF c`, [conversationId,ownerId])).rows[0];
     check(room,404,'Conversation not found');
+    check(room.sharing_enabled !== false,403,'Sharing is turned off by the owner');
     const bindingTable=(await client.query(`SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='agent_chat_threads'`)).rows[0];
     if(bindingTable) {
       const binding=(await client.query('SELECT state FROM agent_chat_threads WHERE conversation_id=$1 AND owner_id=$2',[conversationId,ownerId])).rows[0];
@@ -122,6 +123,8 @@ async function acceptAccountInvitation(userId, invitationId, requestId) {
     const row = (await client.query(`SELECT i.*,u.email,u.email_verified FROM conversation_invitations i
       JOIN users u ON u.user_id=$1 WHERE i.invitation_id=$2 FOR UPDATE OF i`,[userId,invitationId])).rows[0];
     check(row && row.email.toLowerCase()===row.recipient_email,404,'Invitation not found');
+    const room = (await client.query('SELECT sharing_enabled FROM shared_conversations WHERE id=$1', [row.conversation_id])).rows[0];
+    check(room?.sharing_enabled !== false,403,'Sharing is turned off by the owner');
     if (row.state==='accepted') { await client.query('COMMIT'); return { conversationId:row.conversation_id,state:'accepted',idempotent:true }; }
     check(row.state==='pending' && new Date(row.expires_at)>new Date(),410,'Invitation is expired or unavailable');
     check(row.email_verified===true,403,'Verify the invited email address before joining');

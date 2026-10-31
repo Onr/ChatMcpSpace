@@ -98,7 +98,7 @@
   }
 
   function roomStatus(room) {
-    if (room.status !== 'active') return 'Waiting for owner key provisioning';
+    if (room.status !== 'active') return 'Waiting for the owner to approve you';
     if (room.rotationRequired) return 'Key rotation required';
     if (!room.keyReady) return 'Encrypted access pending';
     return 'Ready';
@@ -732,7 +732,7 @@
       if (pending || rotating || !context.keys.length) {
         $('guestComposer').hidden = true;
         const ownerName = context.members?.find(member => member.role === 'owner')?.displayName || 'the owner';
-        conversationMessage(pending ? `Waiting for ${ownerName} to unlock encrypted access. This chat will activate automatically; you can leave it open.` : rotating ? 'The owner is updating conversation access. This chat will reconnect automatically.' : 'Encrypted access is being prepared. This chat will activate automatically.');
+        conversationMessage(pending ? `Waiting for ${ownerName} to approve you. This chat will open automatically once approved; you can leave it open.` : rotating ? 'The owner is updating conversation access. This chat will reconnect automatically.' : 'Encrypted access is being prepared. This chat will activate automatically.');
         clearTimeline();
         return;
       }
@@ -745,7 +745,8 @@
       }
       $('guestComposer').hidden = false;
       const lastSeen = context.room.runtimeLastSeenAt ? Date.now() - new Date(context.room.runtimeLastSeenAt).getTime() : Infinity;
-      conversationMessage(context.room.executionUncertain ? 'Work needs owner review' : lastSeen > 120000 ? 'Offline · messages will wait for the agent' : 'Online');
+      const remaining = state.workspace?.share?.maxMessages ? ` · ${state.workspace.share.messagesRemaining} of ${state.workspace.share.maxMessages} messages left` : '';
+      conversationMessage((context.room.executionUncertain ? 'Work needs owner review' : lastSeen > 120000 ? 'Offline · messages will wait for the agent' : 'Online') + remaining);
       const cachedMessages = state.messagesByRoom.get(roomId) || [];
       const hadCache = state.messagesByRoom.has(roomId);
       const lastSequence = cachedMessages.reduce((last, item) => Math.max(last, Number(item.seq) || 0), 0);

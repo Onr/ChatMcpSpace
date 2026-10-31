@@ -817,6 +817,9 @@
       // Owned chats already have their ordinary agent row. Legacy rooms must
       // not appear as indistinguishable duplicate entries in that list.
       const contexts = allContexts.filter(item => item.mode === 'shared' && item.role !== 'owner');
+      const selectedShared = root.DashboardHelpers?.getSelectedChatContext?.();
+      const latestShared = selectedShared?.role !== 'owner' && contexts.find(item => item.conversationId === selectedShared?.conversationId);
+      if (latestShared) root.DashboardHelpers?.refreshSelectedChatContext?.(latestShared);
       void maintainOwnedAccess(allContexts).catch(error => {
         traceSend('keys:maintenance:error', { message: error.message });
       });
@@ -1062,6 +1065,25 @@
       if (selected?.agentId && selected.mode !== 'shared' && selected.role === 'owner' && selected.agentType !== 'news_feed') {
         const context = await resolveAgentContext(selected.agentId);
         if (entryEpoch === contextEpoch && context.mode === 'shared') await root.DashboardHelpers?.selectChatContext?.(context);
+      }
+    }
+    // /guest sends signed-in visitors here when their account still needs an
+    // encrypted sharing identity; create it, then send their access request.
+    const requestSecret = /^#request-access=([A-Za-z0-9_-]{43})$/.exec(location.hash)?.[1];
+    if (requestSecret) {
+      history.replaceState(null, '', location.pathname + location.search);
+      try {
+        await initializeIdentity();
+        const response = await sessionFetch('/api/user/shared/link-requests', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+          body: JSON.stringify({ linkSecret: requestSecret })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error?.message || 'Your access request could not be sent.');
+        root.showSuccessMessage?.(result.state === 'member' ? 'You already have access to this shared chat.'
+          : 'Access request sent. The chat appears here once the owner approves it.');
+      } catch (error) {
+        root.showError?.(error.code === 'ENCRYPTION_LOCKED' ? `${error.message} Then open the shared link again.` : error.message);
       }
     }
     if (invitationId && !conversationId) {

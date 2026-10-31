@@ -146,3 +146,31 @@ test('a mobile tap opens the chat shell immediately and gives a retry if lookup 
   expect(document.querySelector('[data-retry-open-chat]').textContent).toBe('Try again');
   expect(sandbox.openingChatSelection).toBeNull();
 });
+
+test('structured activity/news message renders news card within constrained message-row-body', () => {
+  document.body.innerHTML = '<div id="conversationArea"></div>';
+  const escapeHtml = text => { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; };
+  const sandbox = {
+    document, window: {}, escapeHtml, renderMessageMarkdown: escapeHtml,
+    formatTimestamp: () => '12:00', buildUserMessageReadIndicator: () => '',
+    selectedAgentType: 'news_feed', attachMessageTtsButton: () => {},
+    attachMessageInfoButton: () => {}, attachRunCommandTimestamp: () => {}
+  };
+  vm.runInNewContext(
+    dashboard.slice(dashboard.indexOf('function generateNewsCardHtml('), dashboard.indexOf('function attachRunCommandTimestamp(')),
+    sandbox
+  );
+  const newsContent = '**Agent:** Codex\n**Status:** Completed\n**Summary:** Reverified shared universe audit\n**Context:** /mnt/cgm-atlas/onrh';
+  const el = sandbox.createMessageElement({ messageId: 'news-1', type: 'agent_message', content: newsContent });
+  document.getElementById('conversationArea').appendChild(el);
+  const rowBody = el.querySelector('.message-row-body');
+  expect(rowBody).not.toBeNull();
+  expect(rowBody.className).toContain('min-w-0');
+  expect(rowBody.className).toContain('max-w-full');
+  const card = el.querySelector('.news-feed-card');
+  expect(card).not.toBeNull();
+  expect(card.querySelector('.news-feed-card__header')).not.toBeNull();
+  expect(card.querySelector('.news-feed-card__context')).not.toBeNull();
+  expect(card.querySelector('.news-feed-card__summary')).not.toBeNull();
+  expect(card.querySelector('.news-feed-card__summary').textContent).toContain('Reverified shared universe audit');
+});

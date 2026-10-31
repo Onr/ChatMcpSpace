@@ -150,6 +150,19 @@ test('local permission ceilings reject remote provider and permission escalation
   expect(safeProviderEnv({ PATH: 'ok', USER_PASSWORD: 'secret', API_KEY: 'secret', ANTHROPIC_API_KEY: 'provider-secret' })).toEqual({ PATH: 'ok', ANTHROPIC_API_KEY: 'provider-secret' });
 });
 
+test('Codex full-auto approval preserves the locally approved sandbox on native Windows', () => {
+  const local = { providers: ['codex', 'claude', 'gemini'], allowEdits: true };
+  const config = { model_provider: 'codex', model: 'default', sandbox_mode: 'workspace-write', approval_mode: 'full-auto' };
+  const args = providerArgs('codex', config, local, 'out');
+  expect(args.slice(args.indexOf('--sandbox'), args.indexOf('--sandbox') + 2)).toEqual(['--sandbox', 'workspace-write']);
+  expect(args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+  expect(() => providerArgs('codex', { ...config, sandbox_mode: 'none' }, local, 'out')).toThrow('Unrestricted');
+  expect(() => providerArgs('codex', { ...config, approval_mode: 'bypassPermissions' }, local, 'out')).toThrow('Unrestricted');
+  expect(() => providerArgs('codex', config, { ...local, allowEdits: false }, 'out')).toThrow('not approved locally');
+  expect(() => providerArgs('claude', config, local, 'out')).toThrow('Unrestricted');
+  expect(() => providerArgs('gemini', config, local, 'out')).toThrow('Unrestricted');
+});
+
 test('native provider invocation runs real tools from the selected cwd, carries Unicode on stdin and reads final output', async () => {
   const fixture = path.join(temporary, 'provider.js');
   fs.writeFileSync(fixture, `const fs=require('fs'); const args=process.argv.slice(2); let prompt=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', x=>prompt+=x); process.stdin.on('end',()=>{ fs.writeFileSync('tool-result.txt','tool ran'); fs.writeFileSync(args[args.indexOf('--output-last-message')+1], 'Reply: '+prompt.includes('你好')+' cwd:'+process.cwd()); });`);
@@ -215,6 +228,29 @@ test('native bridge decrypts a user task, runs its local provider, encrypts and 
   expect(open(sent.body.content, key)).toBe('Edited using local tools.');
   expect(requests.at(-1).url).toContain('/responses/ack');
   expect(state.pending).toBeNull(); expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+test('queued Codex full-auto workspace message reaches a local process and delivers a confirmed reply', async () => {
+  const key = crypto.randomBytes(32).toString('base64');
+  const file = path.join(temporary, 'state.json');
+  const fixture = path.join(temporary, 'provider.js');
+  fs.writeFileSync(fixture, `const fs=require('fs');const args=process.argv.slice(2);let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{if(args[args.indexOf('--sandbox')+1]!=='workspace-write')process.exit(2);fs.writeFileSync(args[args.indexOf('--output-last-message')+1],'Confirmed local reply');});`);
+  const state = { version: 1, baseUrl: 'https://example.com', agentName: 'Windows', key, token: 'token', history: {}, pending: null,
+    native: { project: temporary, directory: temporary, providers: ['codex'], allowEdits: true, current: { model_provider: 'codex', sandbox_mode: 'workspace-write', approval_mode: 'auto-edit' } } };
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, body: options.body && JSON.parse(options.body) });
+    const data = url.includes('/responses?') ? { responses: [{ messageId: 'waiting-message', responseType: 'text', encrypted: true, content: seal('Hello', key) }],
+      runOverrides: { model_provider: 'codex', model: 'default', sandbox_mode: 'workspace-write', approval_mode: 'full-auto' } } : {};
+    return { ok: true, headers: new Headers(), json: async () => data };
+  };
+  const bridge = makeBridge(state, file, { fetchImpl, invoke: (current, messages, signal) => invokeProvider(current, messages, signal, { resolve: () => ({ command: process.execPath, prefix: [fixture] }) }) });
+  await bridge.tick();
+  expect(open(requests.find(item => item.url.endsWith('/messages')).body.content, key)).toBe('Confirmed local reply');
+  expect(requests.at(-1).url).toContain('/responses/ack');
+  expect(state.native.setupVerifiedAt).toBeTruthy();
+  expect(state.native.current.approval_mode).toBe('auto-edit');
+  expect(state.pending).toBeNull();
 });
 
 test('first-message password mismatch stays unread, records a useful error and is repairable without re-enrollment', async () => {

@@ -59,16 +59,17 @@
 
   function field([key, label, max, type]) {
     const value = state.draft.document[key] || '';
+    const placeholder = key === 'displayName' ? state.current.agentName || '' : '';
     const control = type === 'textarea'
       ? `<textarea id="brief-${key}" data-brief-field="${key}" maxlength="${max}" rows="3" ${state.current.permissions?.editIdentity === false ? 'disabled' : ''}>${esc(value)}</textarea>`
-      : `<input id="brief-${key}" data-brief-field="${key}" maxlength="${max}" value="${esc(value)}" ${state.current.permissions?.editIdentity === false ? 'disabled' : ''}>`;
-    return `<div class="agent-brief-field"><label for="brief-${key}">${label}</label>${control}<small data-counter="${key}">${value.length}/${max}</small></div>`;
+      : `<input id="brief-${key}" data-brief-field="${key}" maxlength="${max}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${state.current.permissions?.editIdentity === false ? 'disabled' : ''}>`;
+    return `<div class="agent-brief-field"><label for="brief-${key}">${label} (optional)</label>${control}<small data-counter="${key}">${value.length}/${max}</small></div>`;
   }
 
   function goalsHtml() {
     const d = state.draft.document;
-    return `<div class="agent-brief-section-heading"><h3>Goals</h3><button type="button" data-brief-add-goal ${state.current.permissions?.editGoals === false ? 'disabled' : ''}>+ New goal</button></div>
-      <p class="agent-brief-help">Give each goal a clear finish line. Only one can be active.</p>
+    return `<div class="agent-brief-section-heading"><h3>Goals (optional)</h3><button type="button" data-brief-add-goal ${state.current.permissions?.editGoals === false ? 'disabled' : ''}>+ New goal</button></div>
+      <p class="agent-brief-help">Goals are optional. If you add one, give it a clear finish line. Only one can be active.</p>
       ${d.goals.length ? d.goals.map((g, index) => `<article class="agent-brief-goal" data-goal-index="${index}">
         <div class="agent-brief-goal-head"><label><input type="radio" name="activeGoal" data-active-goal="${esc(g.id)}" ${d.activeGoalId === g.id ? 'checked' : ''} ${g.status === 'archived' ? 'disabled' : ''}> Active</label><select data-goal-field="status" aria-label="Goal status"><option value="in_progress" ${g.status === 'in_progress' ? 'selected' : ''}>In progress</option><option value="ready_for_review" ${g.status === 'ready_for_review' ? 'selected' : ''}>Ready for review</option><option value="blocked" ${g.status === 'blocked' ? 'selected' : ''}>Blocked</option><option value="done" ${g.status === 'done' ? 'selected' : ''}>Done</option><option value="archived" ${g.status === 'archived' ? 'selected' : ''}>Archived</option></select><button type="button" data-goal-up="${index}" aria-label="Move goal up" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-goal-down="${index}" aria-label="Move goal down" ${index === d.goals.length - 1 ? 'disabled' : ''}>↓</button></div>
         <label>Desired result<input data-goal-field="title" maxlength="200" value="${esc(g.title)}"></label>
@@ -80,7 +81,7 @@
   function renderIdentity() {
     const estimate = Math.ceil(preview().length / 4);
     const agents = window.AgentBriefUI?.agents || [];
-    content.innerHTML = `<div class="agent-brief-tools"><label>Start from template<select id="briefTemplate"><option value="">Choose a template</option>${Object.keys(templates).map(n => `<option>${esc(n)}</option>`).join('')}</select></label><label>Copy from agent<select id="briefCopy"><option value="">Choose an agent</option>${agents.filter(a => a.agentId !== state.agentId).map(a => `<option value="${esc(a.agentId)}">${esc(a.name)}</option>`).join('')}</select></label></div>
+    content.innerHTML = `<p class="agent-brief-help">Identity and goals are optional. You can chat with this agent without filling in any of these fields.</p><div class="agent-brief-tools"><label>Start from template<select id="briefTemplate"><option value="">Choose a template</option>${Object.keys(templates).map(n => `<option>${esc(n)}</option>`).join('')}</select></label><label>Copy from agent<select id="briefCopy"><option value="">Choose an agent</option>${agents.filter(a => a.agentId !== state.agentId).map(a => `<option value="${esc(a.agentId)}">${esc(a.name)}</option>`).join('')}</select></label></div>
       ${textFields.slice(0, 7).map(field).join('')}${goalsHtml()}
       <details class="agent-brief-advanced"><summary>Advanced guidance &amp; visibility</summary>${textFields.slice(7).map(field).join('')}<fieldset><legend>Hide from collaborator views</legend><p class="agent-brief-help">These fields still reach your agent. Do not put secrets in this brief.</p>${['workspace','preferences','boundaries','instructions','references','goals'].map(key => `<label class="agent-brief-switch"><input type="checkbox" data-private-field="${key}" ${(state.draft.document.privateFields || []).includes(key) ? 'checked' : ''} ${state.current.permissions?.editIdentity === false ? 'disabled' : ''}>${key}</label>`).join('')}</fieldset></details>
       <p class="agent-brief-help" data-brief-token-estimate>About ${estimate} tokens are added to each turn that receives this brief.${estimate > 600 ? ' Consider shortening it.' : ''}</p>
@@ -88,6 +89,18 @@
       ${state.current.suggestions?.length ? `<section class="agent-brief-suggestions"><h3>Suggested by this agent</h3>${state.current.suggestions.map(s => `<article><p>${esc(s.reason)}</p><p>Based on revision ${s.base_revision}</p><details><summary>Review proposed changes</summary><div class="agent-brief-diff"><section><strong>Current</strong><pre>${esc(JSON.stringify(state.current.document, null, 2))}</pre></section><section><strong>Proposed</strong><pre>${esc(JSON.stringify(s.proposed_document, null, 2))}</pre></section></div></details><button type="button" data-suggestion-accept="${esc(s.suggestion_id)}">Accept</button><button type="button" data-suggestion-edit="${esc(s.suggestion_id)}">Edit</button><button type="button" data-suggestion-reject="${esc(s.suggestion_id)}">Reject</button></article>`).join('')}</section>` : ''}`;
     if (state.current.permissions?.editIdentity === false) content.querySelectorAll('#briefTemplate, #briefCopy').forEach(el => { el.disabled = true; });
     if (state.current.permissions?.editGoals === false) content.querySelectorAll('.agent-brief-goal input, .agent-brief-goal textarea, .agent-brief-goal select, .agent-brief-goal button').forEach(el => { el.disabled = true; });
+    const details = document.createElement('details');
+    details.className = 'agent-brief-connected';
+    details.open = true;
+    const fields = [['message-count', 'Messages'], ['last-heartbeat', 'Last heartbeat'], ['last-poll', 'Last poll'], ['parent', 'Parent'], ['children', 'Children'], ['machine-name', 'Computer'], ['project-path', 'Project folder']];
+    const loadStats = window.DashboardHelpers?.loadAgentActionStats;
+    details.innerHTML = `<summary>Connected agent details</summary><dl class="agent-menu-stats"><div><dt>Agent name</dt><dd>${esc(state.current.agentName || 'Agent')}</dd></div>${loadStats && state.current.permissions?.editIdentity !== false ? fields.map(([key, label]) => `<div><dt>${label}</dt><dd data-agent-stat="${key}">…</dd></div>`).join('') : ''}</dl><p class="agent-brief-help">These are your existing connection details. Optional fields below only add guidance.</p>`;
+    content.prepend(details);
+    if (loadStats && state.current.permissions?.editIdentity !== false) {
+      loadStats(state.agentId, details).catch(() => {
+        details.querySelectorAll('[data-agent-stat]').forEach(el => { el.textContent = 'Unavailable'; });
+      });
+    }
   }
 
   function renderPolicy() {
@@ -375,7 +388,10 @@
     const trigger = event.target.closest('[data-open-agent-brief]');
     if (!trigger) return;
     event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-    const agentId = trigger.dataset.agentId || trigger.closest('[data-agent-id]')?.dataset.agentId || window.selectedAgentId;
+    const menu = trigger.closest('#agentContextMenu, #floatingAgentMenu');
+    const agentId = trigger.dataset.agentId || trigger.closest('[data-agent-id]')?.dataset.agentId || window.DashboardHelpers?.getSelectedAgentForActions?.()?.agentId;
+    if (!agentId) return;
+    menu?.classList.add('hidden');
     if (trigger.dataset.quickBrief) { quickEdit(trigger, agentId); return; }
     open(agentId, trigger.dataset.briefTab || 'identity');
   }, true);
@@ -387,26 +403,7 @@
     if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
     else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
   });
-  function offerSetup(agent) {
-    if (!agent?.agentId || document.querySelector(`[data-brief-setup-agent="${agent.agentId}"]`)) return;
-    const card = document.createElement('aside');
-    card.className = 'agent-brief-onboarding';
-    card.dataset.briefSetupAgent = agent.agentId;
-    card.setAttribute('role', 'status');
-    const title = document.createElement('strong');
-    title.textContent = `${agent.name} is connected`;
-    const description = document.createElement('p');
-    description.textContent = 'Optionally describe this agent and give it a goal. Automatic work stays off until you enable it.';
-    const edit = document.createElement('button');
-    edit.type = 'button'; edit.textContent = 'Describe agent';
-    edit.addEventListener('click', () => { card.remove(); open(agent.agentId); });
-    const later = document.createElement('button');
-    later.type = 'button'; later.textContent = 'Later';
-    later.addEventListener('click', () => card.remove());
-    card.append(title, description, edit, later);
-    document.body.appendChild(card);
-  }
-  window.AgentBriefUI = { open, close, offerSetup, agents: [] };
+  window.AgentBriefUI = { open, close, agents: [] };
   const settingsList = document.getElementById('agentBriefSettingsList');
   if (settingsList) {
     const loadSettingsAgents = async () => {

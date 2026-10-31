@@ -717,9 +717,16 @@ async function executeMcpTool(req, name, args) {
   }
   if (!validArgs(name, args)) return toolTextResult('Invalid arguments for this MCP tool.', undefined, true);
   if (name === 'get_connection_status') {
+    // Legacy catalogue grants have no agent or gateway. Say so instead of
+    // reporting a misleading "offline" gateway, so the app can reconnect.
+    if (!req.mcpGrantId) {
+      return toolTextResult('This is a read-only agent catalogue connection. It cannot read or send messages. Reconnect to ChatMCP and approve message access; if the app keeps this result after reconnecting, fully restart it so it loads the new login (Codex: codex mcp logout <server>, codex mcp login <server>, then start a new session).',
+        { identity: null, mode: 'catalogue', gateway: 'not_applicable', messaging: false, reconnectRequired: true, capabilities: scopes });
+    }
     const hosted = !!req.mcpGrantId && await hostedMcp.enabled(req.mcpGrantId, req.mcpUserId);
     const state = req.mcpHostedApproved ? await hostedMcp.readiness(req.mcpGrantId, req.mcpUserId) : messageBroker.statusForGrant({ ownerId: req.mcpUserId, grantId: req.mcpGrantId }).state;
-    return toolTextResult('MCP connection status.', { identity: req.mcpAgentId || null, mode: req.mcpHostedApproved ? 'hosted' : 'browser', browserRequired: !hosted, browserRequiredAfterSetup: !req.mcpHostedApproved, setupRequired: req.mcpHostedApproved && state !== 'connected', gateway: state, capabilities: scopes });
+    return toolTextResult('MCP connection status.', { identity: req.mcpAgentId || null, mode: req.mcpHostedApproved ? 'hosted' : 'browser', browserRequired: !hosted, browserRequiredAfterSetup: !req.mcpHostedApproved, setupRequired: req.mcpHostedApproved && state !== 'connected', gateway: state, capabilities: scopes,
+      ...(state === 'connected' ? {} : { setupUrl: `${getBaseUrl(req)}/mcp/connection?grant_id=${encodeURIComponent(req.mcpGrantId)}` }) });
   }
   if (name === 'list_agents' && scopes.includes(SCOPE) && !req.mcpGrantId) {
     const result = await query('SELECT agent_id AS id, agent_name AS name FROM agents WHERE user_id=$1 ORDER BY position,agent_name LIMIT 100', [req.mcpUserId]);

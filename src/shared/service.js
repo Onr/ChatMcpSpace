@@ -69,6 +69,7 @@ async function roomAccess(c, roomId, userId, manage = false, pending = false) {
   check(room, 404, 'Shared conversation not found');
   const member = await one(c, 'SELECT * FROM shared_members WHERE conversation_id=$1 AND user_id=$2', [roomId, userId]);
   check(member && (member.status === 'active' || pending && member.status === 'pending'), 404, 'Shared conversation not found');
+  check(room.sharing_enabled !== false || room.owner_id === userId, 403, 'Sharing is turned off by the owner');
   check(!manage || ['owner', 'manager'].includes(member.role), 403, 'Manager role required');
   return {
     ...room,
@@ -79,6 +80,65 @@ async function agentRoom(c, roomId, agentId) {
   const room = await one(c, 'SELECT * FROM shared_conversations WHERE id=$1 AND agent_id=$2 FOR UPDATE', [uuid(roomId), agentId]);
   check(room, 404, 'Shared conversation not found');
   return room;
+}
+async function sharingSettings(userId, roomId, enabled) {
+  check(enabled === undefined || typeof enabled === 'boolean', 400, 'enabled must be a boolean');
+  return tx(async c => {
+    const room = await roomAccess(c, roomId, userId);
+    check(room.owner_id === userId, 403, 'Only the owner can change sharing');
+    await assertSharedThreadActive(c, roomId);
+    if (enabled !== undefined && enabled !== (room.sharing_enabled !== false)) {
+      await c.query('UPDATE shared_conversations SET sharing_enabled=$2 WHERE id=$1', [roomId, enabled]);
+      await audit(c, roomId, userId, enabled ? 'sharing_enabled' : 'sharing_disabled');
+    }
+    return { enabled: enabled === undefined ? room.sharing_enabled !== false : enabled };
+  });
+}
+async function approveGuest(userId, roomId, guestId) {
+  return tx(async c => {
+    const room = await roomAccess(c, roomId, userId);
+    check(room.owner_id === userId, 403, 'Only the owner can approve guests');
+    const request = (await eligibleGuestMembers(c, roomId, { requests: true })).find(guest => guest.guest_id === uuid(guestId));
+    check(request, 404, 'This guest request is no longer waiting');
+    await c.query('UPDATE shared_guest_members SET approved_at=NOW() WHERE conversation_id=$1 AND guest_id=$2', [roomId, request.guest_id]);
+    await c.query('UPDATE shared_conversations SET membership_version=membership_version+1 WHERE id=$1', [roomId]);
+    await audit(c, roomId, userId, 'guest_approved', request.guest_id);
+    return { ok: true };
+  });
+}
+// Requests signed-in people sent through a guest link (guestService.requestAccountAccess).
+async function pendingAccountRequests(c, roomId) {
+  const exists = await one(c, `SELECT table_name FROM information_schema.tables
+    WHERE table_schema=current_schema() AND table_name='guest_share_account_requests'`);
+  if (!exists) return [];
+  return (await c.query(`SELECT r.request_id,r.user_id,r.note,r.created_at,si.display_name,u.email
+    FROM guest_share_account_requests r JOIN guest_shares gs ON gs.share_id=r.share_id
+    JOIN users u ON u.user_id=r.user_id LEFT JOIN shared_identities si ON si.principal=('user:' || r.user_id::text)
+    WHERE r.conversation_id=$1 AND r.state='pending' AND gs.revoked_at IS NULL
+      AND (gs.expires_at IS NULL OR gs.expires_at>NOW()) ORDER BY r.created_at`, [roomId])).rows;
+}
+// Approval adds a pending member, exactly like an accepted email invitation; the
+// owner's browser then provisions that member's keys.
+async function decideAccountRequest(userId, roomId, requestId, approve) {
+  return tx(async c => {
+    const room = await roomAccess(c, roomId, userId);
+    check(room.owner_id === userId, 403, 'Only the owner can answer access requests');
+    const request = (await pendingAccountRequests(c, roomId)).find(item => item.request_id === uuid(requestId));
+    check(request, 404, 'This request is no longer waiting');
+    if (approve) {
+      check(room.sharing_enabled !== false, 403, 'Turn sharing on before approving requests');
+      const member = await one(c, 'SELECT status FROM shared_members WHERE conversation_id=$1 AND user_id=$2 FOR UPDATE', [roomId, request.user_id]);
+      if (!member || member.status === 'removed') {
+        await c.query(`INSERT INTO shared_members(conversation_id,user_id,role,status,invited_by)
+          VALUES($1,$2,'participant','pending',$3)
+          ON CONFLICT(conversation_id,user_id) DO UPDATE SET role='participant',status='pending',invited_by=$3,expires_at=NULL`, [roomId, request.user_id, userId]);
+        await c.query('UPDATE shared_conversations SET membership_version=membership_version+1 WHERE id=$1', [roomId]);
+      }
+    }
+    await c.query(`UPDATE guest_share_account_requests SET state=$2,decided_at=NOW() WHERE request_id=$1`, [request.request_id, approve ? 'approved' : 'declined']);
+    await audit(c, roomId, userId, approve ? 'account_request_approved' : 'account_request_declined', request.user_id);
+    return { ok: true };
+  });
 }
 async function writable(c, room, principal = `agent:${room.agent_id}`) {
   check(!room.rotation_required, 409, 'Conversation key rotation is required');
@@ -233,7 +293,8 @@ async function invite(userId, roomId, body) {
 }
 async function accept(userId, roomId) {
   return tx(async c => {
-    await one(c, 'SELECT id FROM shared_conversations WHERE id=$1 FOR UPDATE', [uuid(roomId)]);
+    const room = await one(c, 'SELECT * FROM shared_conversations WHERE id=$1 FOR UPDATE', [uuid(roomId)]);
+    check(room?.sharing_enabled !== false, 403, 'Sharing is turned off by the owner');
     await assertSharedThreadActive(c, roomId);
     const m = await one(c, 'SELECT * FROM shared_members WHERE conversation_id=$1 AND user_id=$2', [roomId, userId]);
     check(m && m.status === 'invited' && new Date(m.expires_at) > new Date(), 404, 'Invitation unavailable or expired');
@@ -293,6 +354,8 @@ async function details(c, room, principal) {
   if (runtime?.capabilities && typeof runtime.capabilities === 'object') delete runtime.capabilities.credentialId;
   const agentIdentity = await one(c, 'SELECT principal,public_key,display_name FROM shared_identities WHERE principal=$1', [`agent:${room.agent_id}`]);
   const guests = await eligibleGuestMembers(c, room.id);
+  const guestRequests = principal === `user:${room.owner_id}` ? await eligibleGuestMembers(c, room.id, { requests: true }) : [];
+  const accountRequests = principal === `user:${room.owner_id}` ? await pendingAccountRequests(c, room.id) : [];
   const taskSchema = await one(c, `SELECT column_name FROM information_schema.columns
     WHERE table_schema=current_schema() AND table_name='shared_tasks' AND column_name='held_result'`);
   return {
@@ -302,19 +365,26 @@ async function details(c, room, principal) {
     runtime,
     agentIdentity,
     guests,
+    guestRequests,
+    accountRequests,
     taskSupport: Boolean(taskSchema)
   };
 }
-async function eligibleGuestMembers(c, roomId) {
+async function eligibleGuestMembers(c, roomId, { requests = false } = {}) {
   const exists = await one(c, `SELECT table_name FROM information_schema.tables
     WHERE table_schema=current_schema() AND table_name='shared_guest_members'`);
   if (!exists) return [];
-  return (await c.query(`SELECT gm.guest_id,gm.status,gm.role,gp.display_name,gp.public_key
+  // A link holder only gets keys after the owner approves them; requests lists
+  // the guests still waiting for that decision.
+  const approval = requests ? "gm.status='pending' AND gm.approved_at IS NULL" : "(gm.status='active' OR gm.approved_at IS NOT NULL)";
+  const noteColumn = await one(c, `SELECT column_name FROM information_schema.columns
+    WHERE table_schema=current_schema() AND table_name='guest_principals' AND column_name='request_note'`);
+  return (await c.query(`SELECT gm.guest_id,gm.status,gm.role,gm.invited_at,gp.display_name,gp.public_key${noteColumn ? ',gp.request_note' : ''}
     FROM shared_guest_members gm JOIN guest_principals gp ON gp.guest_id=gm.guest_id AND gp.share_id=gm.share_id
     JOIN guest_shares gs ON gs.share_id=gm.share_id
     JOIN shared_conversations sc ON sc.id=gm.conversation_id
     JOIN guest_share_agents sa ON sa.share_id=gs.share_id AND sa.agent_id=sc.agent_id
-    WHERE gm.conversation_id=$1 AND gm.status IN ('pending','active') AND gp.status<>'revoked'
+    WHERE gm.conversation_id=$1 AND gm.status IN ('pending','active') AND ${approval} AND gp.status<>'revoked'
       AND gp.public_key IS NOT NULL AND gs.revoked_at IS NULL AND (gs.expires_at IS NULL OR gs.expires_at>NOW())
       AND sa.removed_at IS NULL ORDER BY gm.guest_id`, [roomId])).rows;
 }
@@ -894,14 +964,18 @@ async function claim(agentId, runtimeId, credentialId = null) {
       AND m.conversation_id=CASE WHEN gs.room_mode='common' THEN ga.room_id ELSE gr.room_id END
       AND m.guest_share_revision=gs.revision` : 'FALSE';
     const candidates = (protocol === executionPolicy.PROTOCOL_VERSION && hasGuestSchema ? await c.query(`SELECT DISTINCT ON(m.conversation_id,m.sender_user_id,m.sender_guest_id) m.id,m.conversation_id,m.seq,m.sender_user_id,m.sender_guest_id FROM shared_messages m
+      JOIN shared_conversations access_room ON access_room.id=m.conversation_id
       LEFT JOIN shared_members sm ON sm.conversation_id=m.conversation_id AND sm.user_id=m.sender_user_id
       LEFT JOIN shared_guest_members sgm ON sgm.conversation_id=m.conversation_id AND sgm.guest_id=m.sender_guest_id
       ${guestJoins('$' + (rooms.length + 1))}
       WHERE m.conversation_id IN (${placeholders}) AND ((m.sender_user_id IS NOT NULL AND sm.status='active' AND (sm.expires_at IS NULL OR sm.expires_at>NOW())) OR (${guestPredicate}))
+        AND (access_room.sharing_enabled=TRUE OR m.sender_user_id=access_room.owner_id)
         AND ${guestClaimFilter} AND m.deleted_at IS NULL AND m.batch_id IS NULL ${dispatchFilter} ORDER BY m.conversation_id,m.sender_user_id,m.sender_guest_id,m.seq`, [...rooms.map(r => r.id), ...(guestRevisionSchema ? [agentId] : [])]) : await c.query(`SELECT ${protocol === executionPolicy.PROTOCOL_VERSION ? 'DISTINCT ON(m.conversation_id,m.sender_user_id)' : ''} m.id,m.conversation_id,m.seq,m.sender_user_id FROM shared_messages m
+      JOIN shared_conversations access_room ON access_room.id=m.conversation_id
       JOIN shared_members sm ON sm.conversation_id=m.conversation_id AND sm.user_id=m.sender_user_id
       WHERE m.conversation_id IN (${placeholders}) AND m.sender_user_id IS NOT NULL
         AND sm.status='active' AND (sm.expires_at IS NULL OR sm.expires_at>NOW())
+        AND (access_room.sharing_enabled=TRUE OR m.sender_user_id=access_room.owner_id)
         AND m.deleted_at IS NULL AND m.batch_id IS NULL ${dispatchFilter} ORDER BY ${protocol === executionPolicy.PROTOCOL_VERSION ? 'm.conversation_id,m.sender_user_id,m.seq' : 'm.seq LIMIT 1'}`, rooms.map(r => r.id))).rows;
     if (!candidates.length) return null;
     const agent = await one(c, 'SELECT agent_id,user_id,agent_name FROM agents WHERE agent_id=$1', [agentId]);
@@ -916,6 +990,7 @@ async function claim(agentId, runtimeId, credentialId = null) {
         if (candidate.sender_guest_id && process.env.FEATURE_GUEST_SHARING !== 'true') continue;
         const candidateRoom = await agentRoom(c, candidate.conversation_id, agentId);
         if (candidateRoom.rotation_required) continue;
+        if (candidateRoom.sharing_enabled === false && candidate.sender_user_id !== candidateRoom.owner_id) continue;
         const kind = candidate.sender_guest_id ? 'guest' : 'user', id = candidate.sender_guest_id || candidate.sender_user_id;
         const candidateGrant = trustedExecution.isTrusted(r)
           ? await trustedExecution.requesterAccess(c, agentId, candidateRoom, kind, id)
@@ -930,6 +1005,7 @@ async function claim(agentId, runtimeId, credentialId = null) {
       }
     } else {
       next = candidates[0]; room = await agentRoom(c, next.conversation_id, agentId);
+      if (room.sharing_enabled === false && next.sender_user_id !== room.owner_id) return null;
       requesterKind = 'user'; requesterId = next.sender_user_id;
     }
     if (!next) return null;
@@ -943,9 +1019,11 @@ async function claim(agentId, runtimeId, credentialId = null) {
       JOIN shared_members sm ON sm.conversation_id=m.conversation_id AND sm.user_id=m.sender_user_id
       WHERE m.conversation_id=$1 AND m.sender_user_id=$2 AND sm.status='active'
         AND m.deleted_at IS NULL AND m.batch_id IS NULL ${dispatchFilter} ORDER BY m.seq LIMIT 20` : `SELECT m.* FROM shared_messages m
+      JOIN shared_conversations access_room ON access_room.id=m.conversation_id
       JOIN shared_members sm ON sm.conversation_id=m.conversation_id AND sm.user_id=m.sender_user_id
       WHERE m.conversation_id=$1 AND m.sender_user_id IS NOT NULL
         AND sm.status='active' AND (sm.expires_at IS NULL OR sm.expires_at>NOW())
+        AND (access_room.sharing_enabled=TRUE OR m.sender_user_id=access_room.owner_id)
         AND m.deleted_at IS NULL AND m.batch_id IS NULL ${dispatchFilter} ORDER BY m.seq LIMIT 20`, protocol === executionPolicy.PROTOCOL_VERSION ? [room.id, requesterId, ...(hasGuestSchema && guestRevisionSchema ? [agentId] : [])] : [room.id])).rows;
     const id = crypto.randomUUID();
     const task = {
@@ -1238,6 +1316,8 @@ module.exports = {
   get,
   provision,
   eligibleGuestMembers,
+  approveGuest,
+  decideAccountRequest,
   history,
   messageStatuses,
   messageStatusesInTransaction,
@@ -1260,6 +1340,7 @@ module.exports = {
   finish,
   interrupt,
   control,
+  sharingSettings,
   batches,
   agentHistory,
   agentDetails,

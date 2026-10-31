@@ -103,6 +103,9 @@ async function setup() {
     };
   }
   for (const migration of migrations) await fixture.query(migrationForFixture(migration, Boolean(process.env.SHARED_TEST_DATABASE_URL)));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/065_guest_approval_and_limits.sql'), 'utf8'));
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/066_guest_link_requests.sql'), 'utf8'));
   if (process.env.SHARED_TEST_DATABASE_URL) for (const file of ['048_enforce_guest_room_relationships.sql', '049_retain_guest_history_attribution.sql']) {
     await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations', file), 'utf8'));
   }
@@ -364,6 +367,15 @@ test('common-room rotation retains account and guest keys, excludes removed gues
   const roomSnapshot = async () => snapshots((await request(app).get('/guest/workspace').set('Cookie', second.cookies)).body.rooms);
   const original = await C.newKey();
   const initialRooms = await roomSnapshot();
+  // A guest who opened the link but was not approved cannot receive keys.
+  await expect(guest.provisionGuestKeys(owner.userId, common.shareId, {
+    guestId: first.id, rooms: initialRooms, envelopes: await envelopes(original, 1)
+  })).rejects.toMatchObject({ status: 403 });
+  const shared = require('../../src/shared/service');
+  expect((await shared.get(owner.userId, roomId)).guestRequests.map(item => item.guest_id).sort()).toEqual([first.id, second.id].sort());
+  await shared.approveGuest(owner.userId, roomId, second.id);
+  const approvedRooms = await roomSnapshot();
+  initialRooms.splice(0, initialRooms.length, ...approvedRooms);
   await expect(guest.provisionGuestKeys(owner.userId, common.shareId, {
     guestId: first.id, rooms: initialRooms, envelopes: await envelopes(original, 1, recipients.filter(([id]) => id !== `user:${outsider.userId}`))
   })).rejects.toMatchObject({ status: 409 });

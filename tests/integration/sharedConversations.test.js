@@ -61,6 +61,7 @@ async function setup() {
     };
   }
   await fixture.query(migration);
+  await fixture.query(fs.readFileSync(path.join(__dirname, '../../src/db/migrations/064_add_sharing_switch.sql'), 'utf8'));
   await fixture.query(threadMigration);
   await fixture.query(historyImportMigration);
   await fixture.query(invitationMigration);
@@ -238,6 +239,26 @@ test('migration can run twice and feature is disabled by default', async () => {
   if (process.env.SHARED_TEST_DATABASE_URL) await fixture.query(migration);
   delete process.env.FEATURE_SHARED_CONVERSATIONS;
   expect((await request(app).get('/shared')).status).toBe(404);
+});
+test('only the owner can pause sharing; members lose access and regain it without losing history', async () => {
+  process.env.FEATURE_SHARED_CONVERSATIONS = 'true';
+  await join();
+  await s.send(alice.userId, room.id, await body('Saved conversation'));
+  await expect(s.sharingSettings(bob.userId, room.id, false)).rejects.toMatchObject({ status: 403 });
+  await expect(s.sharingSettings(alice.userId, room.id, 'false')).rejects.toMatchObject({ status: 400 });
+  const off = await request(app).put(`/shared/${room.id}/sharing`).send({ enabled: false });
+  expect(off.status).toBe(200);
+  expect(off.body).toEqual({ enabled: false });
+  await expect(s.history(bob.userId, room.id)).rejects.toMatchObject({ status: 403 });
+  await expect(s.send(bob.userId, room.id, await body('Blocked'))).rejects.toMatchObject({ status: 403 });
+  expect((await threads.getChatContext(bob.userId, room.id)).capabilities.send).toBe(false);
+  expect((await s.history(alice.userId, room.id))).toHaveLength(1);
+  expect((await s.get(alice.userId, room.id)).room.sharing_enabled).toBe(false);
+  expect((await request(app).get(`/shared/${room.id}/sharing`)).body).toEqual({ enabled: false });
+  expect((await request(app).put(`/shared/${room.id}/sharing`).send({ enabled: 'false' })).status).toBe(400);
+  await s.sharingSettings(alice.userId, room.id, true);
+  expect((await threads.getChatContext(bob.userId, room.id)).capabilities.send).toBe(true);
+  expect((await s.history(bob.userId, room.id))).toHaveLength(1);
 });
 test('shared runner listings stay owner-scoped even when a member can see the conversation', async () => {
   const own = await request(app).get('/shared');

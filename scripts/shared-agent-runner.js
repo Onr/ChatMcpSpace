@@ -19,8 +19,16 @@ const {
   endpoint,
   loadState,
   saveState,
-  acquireLock
+  acquireLock,
+  providerFailure,
+  providerFailureMessage,
+  providerHttpError
 } = require('./external-agent-bridge');
+// Older servers can still serve a working runner before their bundle builder
+// is reloaded. Cause-specific notices work even when metadata is unavailable.
+let discoverModels;
+try { ({ discover: discoverModels } = require('./discover-provider-models')); }
+catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
 const {
   RootlessPodmanExecutor,
   RestrictedTaskFiles,
@@ -185,6 +193,9 @@ class SharedRunner {
       bridge.persist();
     }
     this.runtimeId = this.state.shared.runtimeId;
+    // This listener delivers failure outcomes to the originating conversation.
+    // The standalone bridge uses its own owner notification instead.
+    bridge.failureRecoveryHandled = true;
     // The old private bridge continues to process private messages with its own history.
     bridge.fetch = async (url, options = {}) => {
       if (String(url).startsWith(this.state.baseUrl + '/api/agent/')) return this.fetch(url, {
@@ -367,6 +378,32 @@ class SharedRunner {
       }
     }
   }
+  async describeProviderFailure(error, profile, diagnostics = '') {
+    const failure = error.providerFailure || providerFailure(error, diagnostics);
+    if (!profile.managedRunner || !discoverModels ||
+        !['quota', 'rate_limit', 'model_unavailable', 'model_configuration'].includes(failure.category)) return failure;
+    // Metadata only: no inference calls, login flows, model switches or task
+    // replays. Cache failures as well as successes to bound repeated outages.
+    this.failureModelCache ||= new Map();
+    let cached = this.failureModelCache.get(profile.provider);
+    if (!cached || cached.expires <= Date.now()) {
+      const models = await discoverModels(profile.provider).catch(() => []);
+      const values = [...new Set(models.map(row => row.value || row.id || row.slug)
+        .filter(id => typeof id === 'string' && id !== 'default' && /^[a-zA-Z0-9][a-zA-Z0-9._:/@\[\]-]{0,119}$/.test(id)))];
+      cached = { values, expires: Date.now() + 5 * 60000 };
+      this.failureModelCache.set(profile.provider, cached);
+      if (values.length) {
+        cached.synced = await this.bridge.api('/models/sync', {
+          provider: profile.provider, models: values.map(value => ({ value, label: value })), source: 'cli-metadata'
+        }).then(() => true).catch(() => false);
+      }
+    }
+    const alternatives = cached.values.filter(value => value !== profile.model);
+    // A low-effort variant is a useful first suggestion after a quota limit.
+    // Use only IDs returned by the installed provider; never infer a model ID.
+    if (failure.category === 'quota') alternatives.sort((a, b) => Number(/[-:]low$/.test(b)) - Number(/[-:]low$/.test(a)));
+    return { ...failure, alternatives: alternatives.slice(0, 3), modelsRefreshed: Boolean(cached.synced) };
+  }
   async invoke(profile, messages, conversation, signal, context, taskFiles, journal) {
     const trusted = this.trustedContext(context);
     if (trusted && (profile.executor || context.conversation?.id !== conversation ||
@@ -432,7 +469,7 @@ class SharedRunner {
           settled = false,
           timer,
           failure;
-        const finish = error => {
+        const finish = async error => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
@@ -444,7 +481,11 @@ class SharedRunner {
               error.diagnosticsFile = logPath;
             } catch (_) { /* Diagnostic persistence must not replace the provider error. */ }
           }
-          error ? reject(error) : resolve(output);
+          if (error) {
+            try { error.providerFailure = await this.describeProviderFailure(error, profile, diagnostics + '\n' + output); }
+            catch (_) { error.providerFailure = providerFailure(error); }
+            reject(error);
+          } else resolve(output);
         };
         const stop = () => {
           try {
@@ -480,7 +521,9 @@ class SharedRunner {
         child.stderr.on('data', b => { diagnostics = (diagnostics + b.toString()).slice(-64000); });
         child.on('error', finish);
         child.on('close', code => {
-          const error = failure || (code === 0 && !signal?.aborted ? null : new Error('Provider execution did not complete successfully'));
+          const error = failure || (code === 0 && !signal?.aborted
+            ? (output.trim() ? null : Object.assign(new Error('Provider returned no reply'), { code: 'EMPTY_PROVIDER_RESPONSE' }))
+            : new Error('Provider execution did not complete successfully'));
           if (error && signal?.aborted && signal.reason?.name === 'TimeoutError') error.code = 'PROVIDER_TIMEOUT';
           finish(error);
         });
@@ -508,7 +551,11 @@ class SharedRunner {
       signal,
       redirect: 'error'
     });
-    if (!response.ok) throw new Error('External runtime returned HTTP ' + response.status);
+    if (!response.ok) {
+      const error = await providerHttpError(response);
+      error.providerFailure = await this.describeProviderFailure(error, profile);
+      throw error;
+    }
     const data = await response.json();
     const output = data.choices?.[0]?.message?.content;
     if (typeof output !== 'string' || !output.trim() || Buffer.byteLength(output) > 1000000) throw new Error('Invalid runtime response');
@@ -743,6 +790,9 @@ class SharedRunner {
     return watch;
   }
   interruptionReply(p) {
+    if (p.providerFailure) return providerFailureMessage(p.providerFailure, {
+      timeoutMs: this.bridge.timeoutMs, shared: Boolean(p.batch)
+    });
     return p.failureReason === 'timeout'
       ? `This run reached its ${Math.ceil(this.bridge.timeoutMs / 60000)}-minute time limit before finishing. It may have made partial changes. Your request has been preserved; review the work before retrying.`
       : INTERRUPTED_REPLY;
@@ -1014,6 +1064,7 @@ class SharedRunner {
           if (!this.state.shared.retainedExecutions.some(previous => previous.taskId === receipt.taskId)) this.state.shared.retainedExecutions.push(receipt);
         }
         p.phase = 'uncertain';
+        p.providerFailure = e.providerFailure || providerFailure(e);
         if (e.code === 'PROVIDER_TIMEOUT' || e.name === 'TimeoutError') p.failureReason = 'timeout';
         if (e.diagnosticsFile) p.diagnosticsFile = e.diagnosticsFile;
         this.persist();
@@ -1398,12 +1449,17 @@ async function main() {
       }
     }
     const profiles = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    // Trusted private turns run on this computer, so images they reference by
+    // path inside the project can be uploaded with the reply.
+    const replyFileRoots = process.env.CHATSPACE_SHARED_EXECUTION_MODE === 'trusted'
+      ? [process.env.CHATSPACE_SHARED_PROJECT, process.env.CHATSPACE_SHARED_EXPORT_DIR].filter(Boolean) : [];
     let state = loadState(file);
     let bridge = new Bridge(state, {
       file,
       runtimeKey: process.env.EXTERNAL_AGENT_API_KEY || 'managed-local',
       timeoutMs: runtimeTimeout(process.env, command === 'run-managed'),
       sharedFiles: true,
+      replyFileRoots,
       keyCandidates: command === 'run-managed' ? [envMessageKey(process.env)] : []
     });
     const protocolVersion = Number(process.env.CHATSPACE_SHARED_PROTOCOL || '2');
@@ -1434,6 +1490,7 @@ async function main() {
             runtimeKey: process.env.EXTERNAL_AGENT_API_KEY || 'managed-local',
             timeoutMs: runtimeTimeout(process.env, command === 'run-managed'),
             sharedFiles: true,
+            replyFileRoots,
             keyCandidates: [envMessageKey(process.env)]
           });
           runner = new SharedRunner(bridge, profiles, {

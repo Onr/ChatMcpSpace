@@ -33,6 +33,7 @@ suite('shared A2A on isolated real PostgreSQL', () => {
       CREATE TABLE user_messages(user_message_id UUID,agent_id UUID);
       CREATE TABLE user_message_attachments(user_message_id UUID,attachment_id UUID);`);
     await query(fs.readFileSync(path.join(__dirname,'../../src/db/migrations/060_shared_agent_a2a.sql'),'utf8'));
+    await query(fs.readFileSync(path.join(__dirname,'../../src/db/migrations/064_add_sharing_switch.sql'),'utf8'));
     jest.resetModules();
     jest.doMock('../../src/db/connection', () => ({query, getClient:()=>pool.connect(), pool}));
     jest.doMock('../../src/storage',()=>({initializeStorage:async()=>({name:'fixture',retrieve:async()=>Buffer.from('encrypted-file-bytes')})}));
@@ -67,6 +68,7 @@ suite('shared A2A on isolated real PostgreSQL', () => {
     await enable();
     for(const [deny,restore] of [
       ["UPDATE shared_members SET expires_at=NOW()-INTERVAL '1 minute'","UPDATE shared_members SET expires_at=NULL"],
+      ['UPDATE shared_conversations SET sharing_enabled=FALSE','UPDATE shared_conversations SET sharing_enabled=TRUE'],
       ['UPDATE shared_conversations SET rotation_required=TRUE','UPDATE shared_conversations SET rotation_required=FALSE'],
       ["UPDATE agents SET inter_agent_mode='groups'","UPDATE agents SET inter_agent_mode='listen_all'"],
       ["UPDATE shared_runtimes SET capabilities='{\"executionMode\":\"restricted\"}'","UPDATE shared_runtimes SET capabilities='{\"executionMode\":\"trusted\"}'"],

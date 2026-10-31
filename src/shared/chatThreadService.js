@@ -8,10 +8,10 @@ class ChatThreadError extends Error {
 }
 function check(ok, status, message) { if (!ok) throw new ChatThreadError(status, message); }
 function validId(value) { return typeof value === 'string' && UUID.test(value); }
-function capabilities(role, state, membershipStatus = 'active') {
+function capabilities(role, state, membershipStatus = 'active', sharingEnabled = true) {
   const active = membershipStatus === 'active';
   const owner = role === 'owner';
-  const ready = state === 'shared' && active;
+  const ready = state === 'shared' && active && (owner || sharingEnabled);
   return {
     read: owner || ready,
     send: owner ? state === 'private' || ready : ready,
@@ -30,10 +30,11 @@ function context(row, { role, state, status = 'active', lastReadSeq = 0 } = {}) 
     ownerId: row.owner_id,
     mode: row.mode || (state === 'private' || state === 'preparing' && role === 'owner' ? 'private' : 'shared'),
     state,
+    sharingEnabled: row.sharing_enabled !== false,
     role,
     membershipStatus: status,
     lastReadSeq: Number(lastReadSeq || 0),
-    capabilities: capabilities(role, state, status)
+    capabilities: capabilities(role, state, status, row.sharing_enabled !== false)
   };
 }
 
@@ -88,7 +89,7 @@ async function getChatContext(userId, conversationId) {
   if (bound && bound.owner_id === userId) return withPrivateHistory(context(bound, { role: 'owner', state: bound.state }));
 
   const membership = (await db.query(`SELECT c.id AS conversation_id,c.agent_id,c.owner_id,a.agent_name,
-      m.role,m.status,m.last_read_seq
+      m.role,m.status,m.last_read_seq,c.sharing_enabled
     FROM shared_conversations c JOIN agents a ON a.agent_id=c.agent_id
     JOIN shared_members m ON m.conversation_id=c.id
     WHERE c.id=$1 AND m.user_id=$2 AND m.status IN ('active','pending','invited')`, [conversationId, userId])).rows[0];
@@ -131,7 +132,7 @@ async function listChatThreads(userId) {
     result.push(resolved || context(row, { role: 'owner', state: row.state }));
   }
   const shared = (await db.query(`SELECT c.id AS conversation_id,c.agent_id,c.owner_id,a.agent_name,
-      m.role,m.status,m.last_read_seq
+      m.role,m.status,m.last_read_seq,c.sharing_enabled
     FROM shared_members m JOIN shared_conversations c ON c.id=m.conversation_id
     JOIN agents a ON a.agent_id=c.agent_id
     LEFT JOIN agent_chat_threads t ON t.conversation_id=c.id

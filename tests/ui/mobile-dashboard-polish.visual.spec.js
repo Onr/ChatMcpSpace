@@ -5,7 +5,7 @@ const path = require('path');
 const root = path.join(__dirname, '../..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const source = read('public/js/dashboard.js');
-const functions = source.slice(source.indexOf('function bindMobileListToggleControls()'), source.indexOf('function bindMobileOverflowActionControls()')) +
+const functions = source.match(/function isAgentListDocked\(\) \{[\s\S]*?\n\}/)[0] + '\n' + source.slice(source.indexOf('function bindMobileListToggleControls()'), source.indexOf('function bindMobileOverflowActionControls()')) +
   source.slice(source.indexOf('function syncMobilePaperMenuChrome('), source.indexOf('function isDockAgentOutsideViewport('));
 
 async function render(sharing = false) {
@@ -29,7 +29,7 @@ async function render(sharing = false) {
   }
   let html = await ejs.renderFile(path.join(root, 'views/layout.ejs'), { ...locals, body });
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<link\b[^>]*>/gi, '');
-  return html.replace('</head>', `<style>${['tailwind', 'style', 'agent-actions', 'in-place-sharing'].map(f => read(`public/css/${f}.css`)).join('\n')}</style></head>`);
+  return html.replace('</head>', `<style>${['tailwind', 'style', 'agent-actions', 'in-place-sharing', 'recent-chats'].map(f => read(`public/css/${f}.css`)).join('\n')}</style></head>`);
 }
 
 for (const viewport of [{width:320,height:568}, {width:390,height:844}, {width:768,height:1024}, {width:844,height:390}]) {
@@ -60,19 +60,30 @@ for (const viewport of [{width:320,height:568}, {width:390,height:844}, {width:7
         bindMobileListToggleControls();` });
       const toggle = page.locator(fast ? '#fastModeChatListToggle' : '#collapseMobileListBtn');
       await expect(toggle.locator('svg circle')).toHaveCount(11);
-      for (const selector of [fast ? '#fastModeChatListToggle' : '#collapseMobileListBtn', '#userMessageSend', '#agentStopBtn']) {
+      const docked = viewport.width >= 768 && viewport.height >= 601;
+      const controls = ['#userMessageSend', '#agentStopBtn'];
+      if (!docked) controls.push(fast ? '#fastModeChatListToggle' : '#collapseMobileListBtn');
+      for (const selector of controls) {
         const box = await page.locator(selector).boundingBox();
         expect(box).not.toBeNull();
         expect(box.x).toBeGreaterThanOrEqual(0);
         expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
         expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
       }
-      if (!fast) {
+      if (!fast && !docked) {
         const bounds = await page.locator('#mobileStatsToggle > .grid > *').evaluateAll(nodes => nodes.map(el => { const r = el.getBoundingClientRect(); return {left:r.left,right:r.right}; }));
         expect(bounds[0].left).toBeGreaterThanOrEqual(0);
         expect(bounds[0].right).toBeLessThanOrEqual(bounds[1].left);
         expect(bounds[1].right).toBeLessThanOrEqual(bounds[2].left);
         expect(bounds[2].right).toBeLessThanOrEqual(viewport.width);
+      }
+      if (docked) {
+        await expect(toggle).toBeHidden();
+        await expect(page.locator('#agentListSearchInput')).toBeVisible();
+        expect(await page.locator('#agentListScroll').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await context.close();
+        return;
       }
       await toggle.tap();
       await expect(page.locator('#agentListPanel')).toHaveClass(/mobile-expanded/);

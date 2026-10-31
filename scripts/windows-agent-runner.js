@@ -144,7 +144,9 @@ function providerArgs(provider, config, local, resultFile) {
       !['suggest', 'default', 'auto-edit', 'acceptEdits', 'plan', 'full-auto', 'bypassPermissions'].includes(approval)) {
     throw new Error('Unsupported native execution mode. Choose a supported mode in agent settings.');
   }
-  if (['none', 'danger-full-access'].includes(sandbox) || ['full-auto', 'bypassPermissions'].includes(approval)) {
+  // Codex full-auto controls approval prompts; its sandbox still limits access.
+  // Other providers use full-auto to bypass permissions, which is not granted.
+  if (['none', 'danger-full-access'].includes(sandbox) || approval === 'bypassPermissions' || (provider !== 'codex' && approval === 'full-auto')) {
     throw new Error('Unrestricted execution is not enabled by this Windows installation. Change agent settings to the approved workspace/default mode.');
   }
   if (!edit && (sandbox === 'workspace-write' || ['auto-edit', 'acceptEdits'].includes(approval))) {

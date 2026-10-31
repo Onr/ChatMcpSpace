@@ -60,6 +60,8 @@ trap 'rm -f "$partial_file"' EXIT
 
 echo "[backup-db] Creating backup for database '$DB_NAME' at $backup_file"
 
+# agent_auth_events is a high-volume audit log with its own retention job
+# (scripts/prune_auth_events.js); dump its schema but not its rows.
 PGPASSWORD="$DB_PASSWORD" pg_dump \
   --host="$DB_HOST" \
   --port="$DB_PORT" \
@@ -67,6 +69,7 @@ PGPASSWORD="$DB_PASSWORD" pg_dump \
   --format=plain \
   --no-owner \
   --no-privileges \
+  --exclude-table-data=agent_auth_events \
   "$DB_NAME" \
   | gzip > "$partial_file"
 
