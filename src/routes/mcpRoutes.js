@@ -103,6 +103,18 @@ function finishConsent(req, res, completed) {
   return res.redirect(303, completed.callbackUrl);
 }
 
+// A misconfigured BASE_URL must fail these requests, not crash the server:
+// several async handlers below call getBaseUrl outside a try block.
+router.use(['/mcp', '/mcp-guide', '/oauth', '/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server'], (req, res, next) => {
+  try {
+    getBaseUrl(req);
+  } catch (error) {
+    console.error('MCP request refused:', error.message);
+    return res.status(503).json({ error: 'temporarily_unavailable', error_description: 'MCP is not configured on this server.' });
+  }
+  return next();
+});
+
 router.get('/oauth/authorize/complete', (req, res) => {
   const completed = req.session?.mcpCompletedAuthorization;
   if (!completed || req.query.authorize_id !== completed.id ||
@@ -680,7 +692,7 @@ function toolsForScopes(scopes) {
       read_inbox: 'Read bounded unread user messages and, when peer access is approved, permitted peer messages without acknowledging them.',
       read_thread: 'Read visible agent history including attachment metadata and MCP resource URIs.',
       send_message: 'Send encrypted text to the user from the bound agent. Supply a stable UUID idempotencyId for safe retries.',
-      send_peer_message: 'Send encrypted text to an explicitly permitted peer ID. Shared-key setup may be required.',
+      send_peer_message: 'Send encrypted text to an explicitly permitted peer ID. Shared-key setup may be required. Do not send acknowledgement-only replies; without the user\'s explicit OK, send at most 5 messages to the same peer per user request.',
       ack_message: 'Acknowledge a successfully handled user or permitted peer inbox message.',
       upload_attachment: 'Upload any file type as base64 within the account attachment limit. Returns an attachmentId to include in send_message or send_peer_message. Requires always-on setup; use a stable UUID for retries.',
       read_attachment: 'Read decrypted file bytes, including images, PDFs, audio, video, and documents. Large files are read in bounded chunks using nextOffset. Requires attachment permission and always-on setup.'

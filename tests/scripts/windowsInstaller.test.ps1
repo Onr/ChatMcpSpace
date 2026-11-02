@@ -324,6 +324,7 @@ try {
         if ($Prompt -like 'Agent name*') { return '' }
         if ($Prompt -like 'Install one now*') { return '' }
         if ($Prompt -like 'Project folder*') { return '' }
+        if ($Prompt -like 'Install the update*') { return $script:UpdateAnswer }
         return 'n'
     }
     $script:ProviderMode = 'broken'; $script:RunnerCalls = @(); $script:Prompts = @()
@@ -348,7 +349,7 @@ try {
     Assert-That (-not ($script:Prompts | Where-Object { $_ -like 'Provider*' })) 'create never asks for a provider'
     Assert-That ($script:InitPayload.provider -eq 'claude' -and $script:InitPayload.project -eq (Get-Location).Path -and $script:InitPayload.allowEdits -eq $false) 'create defaults to the first installed provider and the current folder'
     Assert-That ($Output.Contains('Found AI CLI: claude, gemini. Default: claude.') -and $Output.Contains('switch between them')) 'create explains the detected providers'
-    Assert-That ($script:Prompts -contains 'Message encryption password' -and $Output.Contains('Settings > Decryption Password')) 'create explains which password must match the website'
+    Assert-That ($script:Prompts -contains 'Agent connection code or message encryption password' -and $Output.Contains('Settings > Decryption Password')) 'create explains which password must match the website'
     $script:RunnerCalls = @(); $script:RepairFailure = $false
     & ([scriptblock]::Create($CliSource)) repair-encryption -Name 'fixture' 6>$null
     Assert-That (($script:RunnerCalls | ForEach-Object { $_[0] }) -join ',' -eq 'stop,repair-encryption,start') 'encryption repair stops the runner, verifies the password and resumes only after success'
@@ -358,6 +359,26 @@ try {
     try { & ([scriptblock]::Create($CliSource)) repair-encryption -Name 'fixture' 6>$null } catch { $Failure = $_ }
     Assert-That ($null -ne $Failure -and ($script:RunnerCalls | ForEach-Object { $_[0] }) -join ',' -eq 'stop,repair-encryption') 'failed repair leaves the agent stopped without starting it'
     $script:RepairFailure = $false
+    # Update: compare installed checksums, install only after confirmation.
+    $CliRoot = Join-Path $env:LOCALAPPDATA 'Jetspace'
+    [IO.File]::WriteAllText((Join-Path $CliRoot 'windows-cli.ps1'), 'installed cli')
+    $InstalledHash = (Get-FileHash -LiteralPath (Join-Path $CliRoot 'windows-cli.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+    function Invoke-RestMethod { param($Uri) $script:ManifestUrl = $Uri; return [pscustomobject]@{ version = 1; files = [pscustomobject]@{ 'windows-cli.ps1' = $script:ManifestHash } } }
+    function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing) $script:SetupUrl = $Uri; Set-Content -LiteralPath $OutFile -Value 'setup' }
+    function powershell.exe { $script:SetupArgs = @($args); $script:SetupExists = Test-Path -LiteralPath $args[4]; $global:LASTEXITCODE = $script:SetupExit }
+    $script:ManifestHash = $InstalledHash; $script:SetupArgs = $null; $script:Prompts = @()
+    $Output = & ([scriptblock]::Create($CliSource)) update 6>&1 | Out-String
+    Assert-That ($Output.Contains('Jetspace is up to date') -and $null -eq $script:SetupArgs -and -not ($script:Prompts -like 'Install the update*') -and $script:ManifestUrl -eq 'https://fixture.example/setup/windows/manifest.json') 'update reports up to date without prompting or installing'
+    $script:ManifestHash = 'a' * 64; $script:UpdateAnswer = ''
+    $Output = & ([scriptblock]::Create($CliSource)) update 6>&1 | Out-String
+    Assert-That ($Output.Contains('An update is available (windows-cli.ps1)') -and ($script:Prompts -contains 'Install the update now? [y/N]') -and $null -eq $script:SetupArgs) 'update asks first and does nothing unless the user approves'
+    $script:UpdateAnswer = 'y'; $script:SetupExit = 0
+    $Output = & ([scriptblock]::Create($CliSource)) update 6>&1 | Out-String
+    Assert-That ($script:SetupUrl -eq 'https://fixture.example/setup.ps1' -and $script:SetupExists -and ($script:SetupArgs -join ' ').EndsWith('-NoCreate') -and -not (Test-Path -LiteralPath $script:SetupArgs[4]) -and $Output.Contains('Jetspace is updated')) 'approved update runs the verified setup without creating an agent and cleans up'
+    $script:SetupExit = 1; $Failure = $null
+    try { & ([scriptblock]::Create($CliSource)) update 6>$null } catch { $Failure = $_ }
+    Assert-That ($null -ne $Failure -and $Failure.ToString().Contains('previous version is still installed')) 'failed update is reported'
+    Remove-Item Function:Invoke-RestMethod, Function:Invoke-WebRequest, Function:powershell.exe
     $script:InitPayload = $null
     $Failure = $null
     try { & ([scriptblock]::Create($CliSource)) create -Name 'fixture' -Provider codex -NoStart 6>$null }
@@ -399,6 +420,15 @@ try {
     Show-JetspaceTui 6>$null
     $MenuCalls = @(Get-Content -LiteralPath (Join-Path $Root 'calls.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-That ($MenuCalls.Count -eq 3 -and $MenuCalls[2].Command -eq 'create' -and $script:Choices.Count -eq 0) 'TUI handles no running agents, cancelled selection and failed actions, then returns to the menu'
+    $MenuLabels = @([regex]::Matches($CliSource, "@\{ Label = '([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+    $UpdateIndex = [array]::IndexOf($MenuLabels, 'Check for Updates')
+    Assert-That ($UpdateIndex -ge 0) 'TUI offers Check for Updates'
+    Set-Content -LiteralPath (Join-Path $Root 'windows-cli.ps1') -Value 'param($Command) if ($Command -eq "update") { Set-Content -LiteralPath $PSCommandPath -Value "updated" }'
+    foreach ($Choice in @($UpdateIndex, 0)) { $script:Choices.Enqueue($Choice) }
+    $Output = Show-JetspaceTui 6>&1 | Out-String
+    Assert-That ($Output.Contains('Run jetspace again') -and $script:Choices.Count -eq 1) 'TUI closes after an update so the new menu is used'
+    $script:Choices.Clear()
+    Set-Content -LiteralPath (Join-Path $Root 'windows-cli.ps1') -Value 'param($Command, $Name, $Message) Add-Content -LiteralPath (Join-Path $PSScriptRoot "calls.jsonl") -Value (@{ Command=$Command; Name=$Name; Message=$Message } | ConvertTo-Json -Compress)'
     function Test-JetspaceTerminal { return $false }
     Show-JetspaceTui 6>$null
     Assert-That (@(Get-Content -LiteralPath (Join-Path $Root 'calls.jsonl')).Count -eq 3) 'redirected input returns without reading keys or executing actions'

@@ -64,3 +64,20 @@ test('server-rendered agent balls include device badges and load the renderer be
   expect(document.querySelector('.agent-avatar .agent-device-badge').title).toBe('Device: office');
   expect(html.indexOf('/js/device-badge.js')).toBeLessThan(html.indexOf('/js/dashboard.js'));
 });
+
+test('browser global is installed even when another script exposes a CommonJS module object', () => {
+  const fs = require('fs');
+  const vm = require('vm');
+  const source = fs.readFileSync(require('path').join(__dirname, '../../public/js/device-badge.js'), 'utf8');
+  const browserWindow = {};
+  const commonjs = { exports: {} };
+  vm.runInNewContext(source, { window: browserWindow, globalThis: browserWindow, module: commonjs });
+  expect(typeof browserWindow.DeviceBadge.render).toBe('function');
+  expect(commonjs.exports).toBe(browserWindow.DeviceBadge);
+});
+
+test('dashboard badge rendering uses the explicit browser global without a fragile bare identifier', () => {
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../../public/js/dashboard.js'), 'utf8');
+  expect(source).toContain('const renderer = window.DeviceBadge;');
+  expect(source).not.toContain('DeviceBadge.render(agent.device)');
+});

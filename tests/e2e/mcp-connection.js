@@ -132,11 +132,11 @@ async function run() {
     await page.locator('#loginTab').click();
     await page.getByRole('heading', { name: 'Connect Browser verification client to ChatMCP' })
       .waitFor({ timeout: 25000 });
-    assert.ok(await page.getByText('It cannot read chat messages or access encryption keys.').isVisible());
+    assert.ok(await page.getByText('This is the existing read-only agent catalogue permission. It does not gain message access.').isVisible());
     await page.screenshot({ path: path.join(artifacts, '03-consent.png'), fullPage: true });
     console.log('PASS visible password sign-in returns automatically to consent');
 
-    await page.getByRole('button', { name: 'Allow access', exact: true }).click();
+    await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByRole('heading', { name: 'Returned to verification client' }).waitFor();
     const returned = new URL(page.url());
     assert.equal(returned.searchParams.get('state'), state);

@@ -129,3 +129,6 @@ data/provider-model-cache/
 # Generated launch video and browser verification output
 brag-output/
 test-results/
+.codex-attachments/
+artifacts/
+__pycache__/

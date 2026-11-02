@@ -108,4 +108,18 @@ describe('modelCatalog', () => {
       expect(values).toEqual(expect.arrayContaining(['x-ai/grok-4', 'x-ai/grok-4-fast', 'x-ai/grok-code-fast-1']));
     }
   });
+  it('offers only the Codex models the account CLI reports once it has synced', () => {
+    updateProviderModelsForUser(userId, 'codex', ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'].map(value => ({ value, label: value })), 'cli-metadata');
+    const catalog = getProviderModelCatalog(userId);
+    expect(catalog.codex.map(m => m.value)).toEqual(['default', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']);
+    expect(catalog.codex.find(m => m.value === 'gpt-6-astra').label).toBe('GPT-6 Astra');
+    // Claude accepts full IDs beyond its alias list, so its built-in IDs stay.
+    updateProviderModelsForUser(userId, 'claude', [{ value: 'opus', label: 'opus' }], 'cli-metadata');
+    expect(getProviderModelCatalog(userId).claude.some(m => m.value === 'claude-opus-5-5')).toBe(true);
+  });
+
+  it('keeps the built-in Codex list when the sync is not from the provider CLI', () => {
+    updateProviderModelsForUser(userId, 'codex', [{ value: 'gpt-6-astra', label: 'x' }], 'public-catalog');
+    expect(getProviderModelCatalog(userId).codex.some(m => m.value === 'gpt-6.1-terra')).toBe(true);
+  });
 });

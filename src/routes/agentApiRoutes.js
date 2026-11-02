@@ -244,7 +244,7 @@ router.get('/connect-guide', (req, res) => {
       heartbeat: 'POST /api/agent/heartbeat { agentName, isWorking }',
       delivery: 'Poll without marking read, persist encrypted reply and its stable UUID, send, then acknowledge. Legacy polling still consumes on delivery.',
       coordination: 'A user-chosen central agent can direct connected agents through permitted direct messages. Remote process control is not implied.',
-      replyEnvelope: 'Encrypted peer replies may contain { type: "chatmcpspace.bridge_reply.v1", inReplyTo, content }. Treat these as results; do not automatically reply to a reply.'
+      replyEnvelope: 'Encrypted peer replies may contain { type: "chatmcpspace.bridge_reply.v1", inReplyTo, content }. Treat these as results: report them to your user; never DM the peer back in reply to a reply.'
     },
 
     preferredOnboarding: {

@@ -123,10 +123,12 @@ Automatic bridge replies to peers use an encrypted JSON envelope:
 }
 ```
 
-A bridge receiving that envelope records it as context and acknowledges it
-without generating another automatic reply. Other clients should likewise treat
-it as a result. This prevents bridge-to-bridge reply loops; it cannot guarantee
-that an unrelated client will follow the same convention.
+A bridge receiving that envelope records it as context, runs the agent once so
+it can report the result to its own user, and posts that answer only to the
+user's conversation. It never sends another DM to the peer for a result, so two
+bridges cannot loop. Other clients should likewise treat it as a result. This
+prevents bridge-to-bridge reply loops; it cannot guarantee that an unrelated
+client will follow the same convention.
 
 Central direction means assignments and responses. The connector does not grant
 the central agent remote shell access, alter Hermes's permissions, or claim to

@@ -58,3 +58,6 @@
 .agent-menu-groups__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-menu-groups__count { flex: none; color: #64748b; font-size: 10px; }
 .agent-menu-groups__create { margin-top: 4px; color: #a78bfa; }
+.agent-menu-stats [data-agent-lineage-row][hidden] { display: none !important; }
+.agent-lineage-link { color: #67e8f9; text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.agent-lineage-link:hover, .agent-lineage-link:focus-visible { color: #a5f3fc; outline: none; }

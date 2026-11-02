@@ -152,9 +152,10 @@ For each significant release, record which commitment it advances, what burden i
 ## Repository basis
 
 - [Dashboard](../views/dashboard.ejs), [dashboard behavior](../public/js/dashboard.js), and [multi-chat](../public/js/multi-chat.js): navigation modes and rich-content surfaces.
-- Page transitions (`public/js/page-transitions.js`, since removed): navigation delay and button morphing.
+- [Page transitions](../public/js/page-transitions.js): navigation delay and button morphing.
 - [Generated setup and runner](../src/utils/apiGuideGenerator.js): news-feed setup, provider instructions, permission profiles, and runtime adapters.
 - [Voice control](../public/js/voice-control.js): speech interaction and opt-in notification setting.
+- [Current decision report](PRODUCT_SHIP_DECISIONS_2026-09-13.md) and [soul review](PROJECT_SOUL_AND_GOALS.md): supporting observations and current gaps.
 
 External research and live production behavior were not independently verified for this paper. Its enduring commitments are normative; proposed mechanisms are not presented as shipped guarantees.
 

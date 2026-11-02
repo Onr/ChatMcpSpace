@@ -47,7 +47,10 @@ async function call(name, args = {}) {
   const verifier=crypto.randomBytes(32).toString('base64url');
   const auth=base+'/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:callback,scope:'agents.read messages.read messages.write peers.read peers.write attachments.read attachments.write',resource:base+'/mcp',state:'live-verification',code_challenge:crypto.createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'});
   browser=await chromium.launch({headless:true,args:['--no-sandbox']});const page=await browser.newPage();page.setDefaultTimeout(30000);
-  const browserErrors=[];page.on('pageerror',e=>browserErrors.push(e.message));
+  const browserErrors=[];page.on('pageerror',e=>{
+   browserErrors.push(e.message);
+   if(process.env.MCP_DEBUG_PAGE_ERRORS==='1') console.log('Browser page error:',new URL(page.url()).pathname,String(e.stack||e.message).replace(/https?:\/\/[^\s)]+/g,'[URL]'));
+  });
   await page.goto(auth);await page.locator('#loginEmail').fill(email);await page.locator('#loginPassword').fill(password);await page.locator('#loginTab').click();
   await page.locator('input[name="allow_peers"]').check();assert.ok(await page.locator('input[name="allow_hosted"]').isChecked());
   await page.getByRole('button',{name:'Approve',exact:true}).click();await page.waitForURL('**/mcp/connection?**');
@@ -60,8 +63,7 @@ async function call(name, args = {}) {
   await page.waitForFunction(()=>document.getElementById('state').textContent==='Connected');
   config=JSON.parse(await page.locator('#mcp-config').textContent());agentId=config.agentId;
   if (!agentId) agentId=(await query('SELECT agent_id FROM mcp_oauth_tokens WHERE grant_id=$1',[config.grantId])).rows[0].agent_id;
-  assert.deepEqual(browserErrors.filter(message=>message!=='DeviceBadge is not defined'),[]);
-  if(browserErrors.length)console.log('Observed existing dashboard DeviceBadge script error; OAuth/unlock completed.');
+  assert.deepEqual(browserErrors,[]);
   await browser.close();browser=null;
   assert.equal((await call('get_connection_status')).browserRequired,false);
   pass('Real HTTPS OAuth, explicit consent and unlock; Chromium closed before messaging/file calls');

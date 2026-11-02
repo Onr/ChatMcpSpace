@@ -593,21 +593,27 @@ class Bridge {
       }
       let envelope;
       try { envelope = JSON.parse(content); } catch (_) { /* Ordinary text. */ }
-      if (p.kind === 'direct' && envelope?.type === REPLY_TYPE) {
-        // Receipt is useful context for the next assignment, not another reason
-        // to invoke an agent and generate an infinite response loop.
+      if (p.kind === 'direct' && envelope?.type === REPLY_TYPE && !p.message.updateAction) {
+        // A peer returned the result of work this agent delegated. Keep it as
+        // context for that peer, then hand it to the agent once so it can
+        // report back to its own user. The answer goes ONLY to the user
+        // conversation (never back to the peer), so two agents cannot loop.
         this.appendHistory(p.channel, [{ role: 'user', content: JSON.stringify({ fromAgent: p.message.fromAgent, reply: envelope.content }) }]);
-        p.phase = 'delivered';
-        this.persist();
-      } else {
+        p.peerResult = true;
+        content = JSON.stringify({ source: 'peer_agent_result', fromAgent: p.message.fromAgent,
+          inReplyTo: envelope.inReplyTo || null, result: typeof envelope.content === 'string' ? envelope.content : JSON.stringify(envelope.content),
+          note: 'This is the result of work you delegated to this peer agent. Report what matters to the user in this conversation and act on it only within the user\'s existing request. You may message the peer agent back only if it moves the user\'s request forward (a follow-up question, a correction or the next step), never just to acknowledge. Without the user\'s explicit OK, send at most 5 messages to the same peer per user request; at that limit, stop and ask the user whether to continue.' });
+      }
+      {
         if (p.message.updateAction) {
           p.output = 'This bridge does not apply managed-runner updates. Ask the user to send the relevant instructions as text.';
           this.prepareReply(p);
         } else {
           if (!this.runtimeKey) throw new Error('EXTERNAL_AGENT_API_KEY is required to invoke the external agent.');
-          const previous = this.state.history[p.channel];
+          // Peer results continue the user's conversation, where the original request lives.
+          const previous = this.state.history[p.peerResult ? 'user' : p.channel];
           const history = previous ? JSON.parse(open(previous, this.state.key)) : [];
-          const prepared = await this.prepareRuntimeInput(content, p.message.attachments, p.kind === 'user' ? 'user' : p.message.fromAgent, p.message.shared ? this.groupKey : this.messageKey);
+          const prepared = await this.prepareRuntimeInput(content, p.message.attachments, p.kind === 'user' || p.peerResult ? 'user' : p.message.fromAgent, p.message.shared ? this.groupKey : this.messageKey);
           const instruction = prepared.instruction;
           p.input = seal(instruction, this.state.key);
           p.phase = 'running';
@@ -653,8 +659,9 @@ class Bridge {
     }
     if (p.phase === 'ready') {
       // The exact encrypted payload and UUID survive delivery retries.
-      await this.api(p.kind === 'direct' ? '/messages/direct' : '/messages', p.reply);
-      if (p.kind === 'direct') {
+      const toPeer = p.kind === 'direct' && !p.peerResult;
+      await this.api(toPeer ? '/messages/direct' : '/messages', p.reply);
+      if (toPeer) {
         // Mirror the result to this agent's user-visible conversation, keeping
         // the user's shared home useful even when work was delegated by a peer.
         await this.api('/messages', p.mirror);
@@ -662,7 +669,7 @@ class Bridge {
       const additions = [];
       if (p.input) additions.push({ role: 'user', content: open(p.input, this.state.key) });
       additions.push({ role: 'assistant', content: open(p.result, this.state.key) });
-      this.appendHistory(p.channel, additions);
+      this.appendHistory(p.peerResult ? 'user' : p.channel, additions);
       p.phase = 'delivered';
       this.persist();
     }
@@ -685,13 +692,15 @@ class Bridge {
     p.reply = {
       agentName: this.state.agentName, encrypted: true, priority: p.providerFailure ? 1 : 0, clientMessageId: crypto.randomUUID(),
       ...(Number.isInteger(p.message.briefRevision) && p.message.briefRevision > 0 ? { briefRevision: p.message.briefRevision } : {}),
-      content: p.kind === 'direct'
+      ...((p.kind === 'user' || p.peerResult) && typeof this.pendingRunCommand === 'string' && this.pendingRunCommand ? { runCommand: this.pendingRunCommand } : {}),
+      content: p.kind === 'direct' && !p.peerResult
         ? seal(JSON.stringify({ type: REPLY_TYPE, inReplyTo: p.id, content: p.output }), this.messageKey)
         : (this.messageKey === this.state.key ? p.result : seal(p.output, this.messageKey)),
-      ...(p.kind === 'user' && p.attachmentIds?.length ? { attachmentIds: p.attachmentIds } : {})
+      ...((p.kind === 'user' || p.peerResult) && p.attachmentIds?.length ? { attachmentIds: p.attachmentIds } : {})
     };
     delete p.attachmentIds;
-    if (p.kind === 'direct') {
+    this.pendingRunCommand = null;
+    if (p.kind === 'direct' && !p.peerResult) {
       p.reply.toAgentName = p.message.fromAgent;
       if (p.message.shared === true) {
         if (!this.groupKey) throw new Error('Shared DM replies require GROUP_PASSWORD and GROUP_SALT.');

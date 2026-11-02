@@ -187,6 +187,11 @@ const STATIC_PROVIDER_MODELS = {
 
 const CACHE_DIR = path.join(process.cwd(), 'data', 'provider-model-cache');
 const SUPPORTED_PROVIDERS = new Set(Object.keys(STATIC_PROVIDER_MODELS));
+const PROVIDER_SYNC_SOURCES = new Set(['cli', 'cli-online', 'cli-metadata']);
+// These CLIs reject any model the signed-in account does not list (Codex with a
+// ChatGPT login rejects API-only IDs such as gpt-6.1-terra), so once the user's
+// own CLI has reported its list, built-in IDs it left out are not offered.
+const ACCOUNT_SCOPED_PROVIDERS = new Set(['codex']);
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -282,6 +287,16 @@ function getProviderModelCatalog(userId) {
     const known = new Set([...staticModels, ...cachedModels].map(option => normalizeModelOption(option)?.value));
     const candidates = (discovered[provider] || []).filter(option => !known.has(option.value))
       .map(option => ({ ...option, label: `${option.label} · New, untested`, unconfirmed: true }));
+    if (ACCOUNT_SCOPED_PROVIDERS.has(provider) && PROVIDER_SYNC_SOURCES.has(cacheSource) &&
+        cachedModels.some(option => normalizeModelOption(option)?.value !== 'default')) {
+      const staticLabels = new Map(staticModels.map(option => [option.value, option.label]));
+      merged[provider] = dedupeAndNormalizeOptions(cachedModels.map(option => {
+        const normalized = normalizeModelOption(option);
+        return normalized && normalized.label === normalized.value && staticLabels.has(normalized.value)
+          ? { ...normalized, label: staticLabels.get(normalized.value) } : option;
+      }));
+      continue;
+    }
     const cliOrdered = ['cli', 'cli-online'].includes(cacheSource);
     merged[provider] = dedupeAndNormalizeOptions([
       ...(cliOrdered ? cachedModels : staticModels),

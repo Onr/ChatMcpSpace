@@ -16,6 +16,11 @@ const SEND_BUTTON_SPACESHIP_ICON_HTML = `
     <circle cx="15.7" cy="8.3" r="1.6" />
   </svg>`;
 
+function renderDeviceBadge(device) {
+  const renderer = window.DeviceBadge;
+  return renderer && typeof renderer.render === 'function' ? renderer.render(device) : '';
+}
+
 function setSendButtonLabel(label) {
   if (!userMessageSendButton) return;
 
@@ -3200,7 +3205,7 @@ function renderAgentSeatsHtml(agents, totalOrbitItems, inGroupView) {
           <span class="text-[10px] font-mono font-bold text-sky-400/70 bg-slate-900/80 px-1.5 py-0.5 rounded border border-sky-400/30">${safePosition}</span>
         </div>
         <div class="agent-avatar relative group flex justify-center">
-          ${DeviceBadge.render(agent.device)}
+          ${renderDeviceBadge(agent.device)}
           ${isNewsAgent ? `
             <div class="agent-badge-news" title="News Feed">
               <span>i</span>
@@ -4595,7 +4600,7 @@ function renderAgentListItemsHtml(orderedAgents) {
            data-agent-last-heartbeat="${agent.lastWorkingHeartbeatTime || ''}"
            data-agent-working="${isWorking ? 'true' : 'false'}">
         <div class="agent-list-item__avatar">
-          ${DeviceBadge.render(agent.device)}
+          ${renderDeviceBadge(agent.device)}
           ${isOpenClaw ? `
             <div class="agent-list-item__marble flex items-center justify-center bg-gradient-to-br from-slate-950 via-orange-950/30 to-slate-900 border border-orange-400/30">
               ${getOpenClawIconSvg('w-6 h-6 text-orange-300')}
@@ -5536,14 +5541,55 @@ function updateAgentMenuStatsDisplay({
     if (lastHeartbeatEl) lastHeartbeatEl.textContent = lastHeartbeat;
     if (visibleCharsEl) visibleCharsEl.textContent = visibleChars;
     if (lastPollEl) lastPollEl.textContent = lastPoll;
-    if (parentEl) parentEl.textContent = parent;
-    if (childrenEl) childrenEl.textContent = children;
+    renderAgentLineageStat(parentEl, parent);
+    renderAgentLineageStat(childrenEl, children);
     if (machineNameEl) machineNameEl.textContent = machineName;
     if (machineIpEl) machineIpEl.textContent = machineIp;
     if (folderNameEl) folderNameEl.textContent = folderName;
     if (projectPathEl) projectPathEl.textContent = projectPath;
     if (folderPathEl) folderPathEl.textContent = folderPath;
   });
+}
+
+// Lineage values are either placeholder text or a list of { agentId, agentName }.
+// Each listed agent becomes a link to its chat; an empty list hides the row.
+function renderAgentLineageStat(el, value) {
+  if (!el) return;
+  const row = el.closest('[data-agent-lineage-row]');
+  if (!Array.isArray(value)) {
+    // Placeholder text while loading or after an error; a lineage row stays
+    // hidden until the agent is known to have a parent or children.
+    el.textContent = value;
+    return;
+  }
+  el.replaceChildren();
+  if (row) row.hidden = value.length === 0;
+  if (!row && value.length === 0) el.textContent = 'None';
+  value.forEach((agent, index) => {
+    if (index > 0) el.append(', ');
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'agent-lineage-link';
+    link.textContent = agent.agentName || 'Agent';
+    link.title = `Open ${agent.agentName || 'agent'} chat`;
+    link.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openAgentLineageChat(agent);
+    });
+    el.append(link);
+  });
+}
+
+function openAgentLineageChat(agent) {
+  if (!agent?.agentId) return;
+  hideFloatingAgentMenu();
+  document.getElementById('agentContextMenu')?.classList.add('hidden');
+  const record = findCachedAgentRecord(agent.agentId);
+  if (record) {
+    selectAgent(record.agentId, record.name || agent.agentName, getChatNavigationMetadata(record));
+    return;
+  }
+  selectAgent(agent.agentId, agent.agentName, { forceMainSelection: true });
 }
 
 function formatAgentStatsHeartbeat(lastHeartbeat) {
@@ -5662,10 +5708,8 @@ async function refreshAgentActionStats(agentId, metadata = {}, options = {}) {
 
   const stats = calculateConversationVisibilityStats(messages);
   const lastPollText = lineage?.lastPollAt ? formatRelativeTime(lineage.lastPollAt) : '\u2014';
-  const parentText = lineage?.parent ? lineage.parent.agentName : 'None';
-  const childrenText = lineage?.children?.length > 0
-    ? lineage.children.map(c => c.agentName).join(', ')
-    : 'None';
+  const parentText = lineage ? (lineage.parent ? [lineage.parent] : []) : '\u2014';
+  const childrenText = lineage ? (Array.isArray(lineage.children) ? lineage.children : []) : '\u2014';
   const machineNameText = runtimeDetails?.machineName || '\u2014';
   const machineIpText = runtimeDetails?.machineIp || '\u2014';
   const folderNameText = runtimeDetails?.folderName || '\u2014';
@@ -5759,6 +5803,8 @@ function setupMessageComposer() {
   }
 
   setupScheduledMessageHold();
+  // Scheduled sends leave the list on their own; keep the count honest.
+  setInterval(() => { if (selectedAgentId && !document.hidden) refreshScheduledMessagesIndicator(); }, 60_000);
 
   if (userMessageInput) {
     userMessageInput.addEventListener('input', () => {
@@ -6081,6 +6127,7 @@ function openScheduleMessageDialog() {
       updateComposerState();
       close();
       window.showNotification?.(`Message scheduled for ${when.toLocaleString()}.`, 'success', 'Scheduled');
+      refreshScheduledMessagesIndicator();
     } catch (error) {
       console.error('Error scheduling user message:', error);
       showErrorMessage(error.message || 'Unable to schedule message.');
@@ -6115,6 +6162,33 @@ async function prepareScheduledMessageForEditing(message) {
   }
 }
 
+let scheduledIndicatorRequest = 0;
+// The composer clock is the always-visible entry point to pending sends; the
+// long-press send menu stays as a secondary path.
+async function refreshScheduledMessagesIndicator() {
+  const indicator = document.getElementById('scheduledMessagesIndicator');
+  if (!indicator) return;
+  if (indicator.dataset.bound !== 'true') {
+    indicator.dataset.bound = 'true';
+    indicator.addEventListener('click', () => openScheduledMessagesDialog());
+  }
+  const agentId = selectedAgentId;
+  const request = ++scheduledIndicatorRequest;
+  let count = 0;
+  if (agentId) {
+    try {
+      const response = await csrfFetch(`/api/user/messages/scheduled?agentId=${encodeURIComponent(agentId)}`, { credentials: 'same-origin' });
+      if (response.ok) count = ((await response.json()).scheduledMessages || []).length;
+    } catch (_) { /* The indicator is advisory; the send menu still lists them. */ }
+  }
+  if (request !== scheduledIndicatorRequest || agentId !== selectedAgentId) return;
+  indicator.classList.toggle('hidden', count === 0);
+  indicator.querySelector('[data-scheduled-count]').textContent = String(count);
+  const label = `View ${count} scheduled message${count === 1 ? '' : 's'}`;
+  indicator.setAttribute('aria-label', label);
+  indicator.title = label;
+}
+
 async function openScheduledMessagesDialog() {
   if (!selectedAgentId) return;
   document.getElementById('scheduledMessagesDialog')?.remove();
@@ -6133,6 +6207,7 @@ async function openScheduledMessagesDialog() {
       const response = await csrfFetch(`/api/user/messages/scheduled?agentId=${encodeURIComponent(selectedAgentId)}`, { credentials: 'same-origin' });
       if (!response.ok) throw buildRequestError(response, await readErrorPayload(response), { fallbackMessage: 'Unable to load scheduled messages' });
       const { scheduledMessages = [] } = await response.json();
+      refreshScheduledMessagesIndicator();
       if (!scheduledMessages.length) { list.innerHTML = '<p class="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-4 text-sm text-slate-400">No scheduled messages for this agent.</p>'; return; }
       const editableMessages = await Promise.all(scheduledMessages.map(prepareScheduledMessageForEditing));
       list.innerHTML = editableMessages.map((message) => `<article class="rounded-xl border border-slate-700 bg-slate-800/60 p-3" data-scheduled-id="${message.scheduledMessageId}"><p class="whitespace-pre-wrap break-words text-sm text-slate-100">${escapeScheduledMessageHtml(message.content)}</p><p class="mt-2 text-xs text-sky-300">Sends ${new Date(message.scheduledFor).toLocaleString()}</p>${message.runOverrides ? `<p class="mt-1 truncate text-xs text-slate-400">Runs with: ${escapeScheduledMessageHtml(summarizeRunOverrides(message.runOverrides))}</p>` : ''}<div class="mt-3 flex gap-2"><button type="button" data-scheduled-edit class="min-h-11 flex-1 rounded-lg bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/20">${message.editableContent ? 'Edit message' : 'Change time'}</button><button type="button" data-scheduled-cancel class="min-h-11 rounded-lg px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-400/10">Cancel</button></div></article>`).join('');
@@ -8796,6 +8871,7 @@ async function selectAgent(agentId, agentName, metadata = {}) {
 
   // Update selected agent
   selectedAgentId = agentId;
+  refreshScheduledMessagesIndicator();
   forceScrollToBottomOnNextRender = true;
   forceScrollToBottomUntil = Date.now() + 2500;
   const cachedAgentName =
@@ -10145,7 +10221,11 @@ function createMessageElement(message) {
         </div>
       `;
     } else if (message.content && message.content.trim()) {
-      dmContentHtml = renderMessageMarkdown(message.content);
+      // Peer bridges wrap results in a JSON envelope; show the result itself.
+      const envelope = parseAgentDmEnvelope(message.content);
+      dmContentHtml = envelope
+        ? `<div class="agent-dm-result-tag">Result${envelope.inReplyTo ? ' to an earlier request' : ''}</div>${renderMessageMarkdown(envelope.content)}`
+        : renderMessageMarkdown(message.content);
     } else {
       dmContentHtml = '<span class="text-slate-500 italic">Empty message</span>';
     }
@@ -10155,7 +10235,9 @@ function createMessageElement(message) {
     const directionClass = isSent ? 'justify-end' : 'justify-start';
     const bubbleClass = isSent ? 'message-bubble--agent-dm-sent' : 'message-bubble--agent-dm-received';
     const otherAgent = message.otherAgent || (isSent ? message.to : message.from);
-    const labelText = isSent ? `To ${otherAgent}` : `From ${otherAgent}`;
+    const otherAgentName = String(otherAgent || 'agent').replace(/^agent:/, '');
+    const peerLinkHtml = `<button type="button" class="agent-dm-peer-link" title="Show ${escapeHtml(otherAgentName)} details" aria-haspopup="dialog">${escapeHtml(otherAgentName)}</button>`;
+    const labelHtml = isSent ? `To ${peerLinkHtml}` : `From ${peerLinkHtml}`;
 
     div.innerHTML = `
       <div class="flex ${directionClass}">
@@ -10168,7 +10250,7 @@ function createMessageElement(message) {
               </svg>
               Agent DM ${directionIcon}
             </span>
-            <span class="text-slate-400">${labelText}</span>
+            <span class="text-slate-400">${labelHtml}</span>
           </div>
           <div class="message-content text-sm text-slate-100 leading-relaxed space-y-2">${dmContentHtml}</div>
           <div class="message-footer">
@@ -10180,6 +10262,11 @@ function createMessageElement(message) {
     `;
 
     const dmBubble = div.querySelector('.message-bubble');
+    div.querySelector('.agent-dm-peer-link')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showAgentDmPeerCard({ agentId: message.otherAgentId || '', name: otherAgentName }, event.currentTarget);
+    });
     attachMessageTtsButton(dmBubble, message);
     attachMessageInfoButton(dmBubble, message);
     attachRunCommandTimestamp(div, message);
@@ -10189,6 +10276,94 @@ function createMessageElement(message) {
     selectedAgentType !== 'news_feed' && !message.ownerPrivateHistory && selectedAgentId &&
       (!selectedChatContext || selectedChatContext.capabilities?.send));
   return div;
+}
+
+const AGENT_DM_REPLY_TYPE = 'chatmcpspace.bridge_reply.v1';
+
+// Returns { content, inReplyTo } for a peer-bridge result envelope, else null.
+function parseAgentDmEnvelope(raw) {
+  const text = String(raw || '').trim();
+  if (!text.startsWith('{') || !text.includes(AGENT_DM_REPLY_TYPE)) return null;
+  try {
+    const value = JSON.parse(text);
+    if (!value || value.type !== AGENT_DM_REPLY_TYPE) return null;
+    const content = typeof value.content === 'string' ? value.content : JSON.stringify(value.content ?? '', null, 2);
+    return { content: content.trim() ? content : '(empty result)', inReplyTo: value.inReplyTo || null };
+  } catch (_) {
+    return null;
+  }
+}
+
+function findAgentForDmPeer(peer) {
+  const byId = peer.agentId ? getChatNavigationAgent(peer.agentId) : null;
+  if (byId) return byId;
+  const name = String(peer.name || '').toLowerCase();
+  if (!name) return null;
+  for (const list of [currentAgentList, agentListCache?.agents]) {
+    if (!Array.isArray(list)) continue;
+    const match = list.find(item => String(item?.name || '').toLowerCase() === name);
+    if (match) return match;
+  }
+  return null;
+}
+
+function closeAgentDmPeerCard() {
+  document.getElementById('agentDmPeerCard')?.remove();
+  document.removeEventListener('keydown', handleAgentDmPeerCardKey, true);
+}
+
+function handleAgentDmPeerCardKey(event) {
+  if (event.key === 'Escape') closeAgentDmPeerCard();
+}
+
+// Small details card for the agent named in an Agent DM, with a jump to its chat.
+function showAgentDmPeerCard(peer, opener) {
+  closeAgentDmPeerCard();
+  const agent = findAgentForDmPeer(peer);
+  const name = agent?.name || peer.name || 'Agent';
+  const rows = [];
+  if (agent) {
+    const availability = typeof getAgentAvailability === 'function' ? getAgentAvailability(agent) : '';
+    const status = agent.isWorking ? 'Working' : availability === 'online' ? 'Online' : availability === 'idle' ? 'Idle' : 'Disconnected';
+    rows.push(['Status', status]);
+    if (agent.externalProvider) rows.push(['Provider', agent.externalProvider]);
+    if (agent.agentType && agent.agentType !== 'standard') rows.push(['Type', agent.agentType.replace(/_/g, ' ')]);
+    if (agent.lastSeenAt) rows.push(['Last poll', formatRelativeTime(agent.lastSeenAt)]);
+    else if (agent.lastActivityTime) rows.push(['Last active', formatRelativeTime(agent.lastActivityTime)]);
+    if (agent.briefSummary?.displayName) rows.push(['Brief', agent.briefSummary.displayName]);
+  }
+  const card = document.createElement('div');
+  card.id = 'agentDmPeerCard';
+  card.className = 'agent-dm-peer-card';
+  card.innerHTML = `
+    <div class="agent-dm-peer-card__backdrop" data-close></div>
+    <div class="agent-dm-peer-card__panel" role="dialog" aria-modal="true" aria-labelledby="agentDmPeerCardTitle">
+      <div class="agent-dm-peer-card__head">
+        <div class="agent-dm-peer-card__avatar" aria-hidden="true">${escapeHtml(name.slice(0, 2).toUpperCase())}</div>
+        <div class="agent-dm-peer-card__title">
+          <h3 id="agentDmPeerCardTitle">${escapeHtml(name)}</h3>
+          <p>${agent ? 'One of your agents' : 'Not in your agent list'}</p>
+        </div>
+        <button type="button" class="agent-dm-peer-card__close" data-close aria-label="Close">×</button>
+      </div>
+      ${rows.length ? `<dl class="agent-dm-peer-card__rows">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`).join('')}</dl>` : ''}
+      ${agent ? '' : '<p class="agent-dm-peer-card__note">This agent may belong to another account or may have been removed, so its chat cannot be opened here.</p>'}
+      <div class="agent-dm-peer-card__actions">
+        <button type="button" class="agent-dm-peer-card__open" ${agent ? '' : 'disabled'}>Open chat</button>
+      </div>
+    </div>`;
+  card.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => {
+    closeAgentDmPeerCard();
+    opener?.focus?.();
+  }));
+  card.querySelector('.agent-dm-peer-card__open')?.addEventListener('click', () => {
+    if (!agent) return;
+    closeAgentDmPeerCard();
+    selectAgent(agent.agentId, agent.name, getChatNavigationMetadata(agent));
+  });
+  document.body.appendChild(card);
+  document.addEventListener('keydown', handleAgentDmPeerCardKey, true);
+  card.querySelector(agent ? '.agent-dm-peer-card__open' : '.agent-dm-peer-card__close')?.focus();
 }
 
 function attachRunCommandTimestamp(container, message) {
@@ -14563,7 +14738,7 @@ function renderDockAgents() {
           `}
           ${statusIndicator}
         </div>
-        ${DeviceBadge.render(agent.device)}
+        ${renderDeviceBadge(agent.device)}
         <span class="dock-agent-name">${escapeHtml(agent.name)}</span>
       </div>
     `;

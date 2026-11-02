@@ -1920,6 +1920,7 @@ router.get('/messages/:agentId([0-9a-fA-F-]{36})', async (req, res) => {
         from: isSender ? agentName : `agent:${row.sender_name}`,
         to: isSender ? `agent:${row.recipient_name}` : agentName,
         otherAgent: isSender ? row.recipient_name : row.sender_name,
+        otherAgentId: isSender ? row.recipient_agent_id : row.sender_agent_id,
         content: row.content,
         encrypted: row.encrypted || false,
         priority: row.priority || 0,

@@ -445,6 +445,20 @@ class SharedRunner {
       return result.output;
     }
     if (profile.command) {
+      // The managed wrapper reports its provider command here for the
+      // dashboard message-info modal. Private turns only: shared rooms never
+      // receive host command lines.
+      const runCommandFile = profile.managedRunner && conversation === 'private'
+        ? path.join(os.tmpdir(), `chatspace-run-command-${crypto.randomUUID()}`) : null;
+      if (conversation === 'private') this.bridge.pendingRunCommand = null;
+      const readRunCommand = () => {
+        if (!runCommandFile) return;
+        try {
+          const command = fs.readFileSync(runCommandFile, 'utf8').trim();
+          if (command) this.bridge.pendingRunCommand = command.slice(0, 500);
+        } catch (_) { /* Older wrappers do not report a command. */ }
+        try { fs.unlinkSync(runCommandFile); } catch (_) { /* Already absent. */ }
+      };
       // Fresh process, explicit transcript. No resume/continue arguments are injected.
       return new Promise((resolve, reject) => {
         const child = spawn(profile.command[0], profile.command.slice(1), {
@@ -458,7 +472,8 @@ class SharedRunner {
               CHATSPACE_SHARED_TURN: '1',
               CHATSPACE_SHARED_PROVIDER: profile.provider,
               CHATSPACE_SHARED_MODEL: profile.model,
-              CHATSPACE_SHARED_RUN_CONFIG: JSON.stringify(profile.runConfig || {})
+              CHATSPACE_SHARED_RUN_CONFIG: JSON.stringify(profile.runConfig || {}),
+              ...(runCommandFile ? { CHATSPACE_SHARED_RUN_COMMAND_FILE: runCommandFile } : {})
             } : {})
           },
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -473,6 +488,7 @@ class SharedRunner {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          readRunCommand();
           signal?.removeEventListener('abort', abort);
           if (error && diagnostics && this.bridge.file) {
             try {

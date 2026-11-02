@@ -8468,6 +8468,8 @@ Follow these rules strictly:
   - A concrete blocker + a specific question
   - A deliverable (file path, command, link, output snippet)
 - Prefer **one** compact progress update over many small ones.
+- Replying to a peer is allowed when it moves the user's task forward (a follow-up question, a correction, the next step). Two agents can easily keep answering each other, so check before every reply that it adds something new.
+- **Exchange limit:** without the user's explicit OK, send at most **5 messages to the same peer agent per user request**. At the limit, stop messaging that peer, tell the user what has been exchanged so far, and ask whether to continue.
 
 Loop-break procedure (if a loop starts anyway):
 1) Send exactly one final message that breaks the loop, e.g.:
@@ -8616,6 +8618,7 @@ When the user asks for an agent that will "take instructions from another agent"
 2. Put those requester names and the brief path in the child's instructions.
 3. DM each requester the new agent's name and ID.
 4. Report ready only after the child has replied to a real DM. "Process started" is not "working": a provider out of quota or a failing sandbox only shows up on the first turn.
+5. Pick a sandbox mode that can run commands on this machine. On some hosts \\\`workspace-write\\\` cannot start (\\\`bwrap: setting up uid map: Permission denied\\\`), so a test agent can answer but not run anything. If you see that, tell the user and ask which mode to use; do not choose a broader mode yourself.
 
 ### Communicate with the Spawned Agent
 Use DMs to send messages to other agents:
@@ -12877,6 +12880,10 @@ if [ "\${CHATSPACE_SHARED_TURN:-0}" = "1" ]; then
     shared_prompt=$(cat)
     shared_exit=0
     run_agent "$shared_prompt" >&2 || shared_exit=$?
+    # Report the provider command to the listener for the dashboard info modal.
+    if [ -n "\${CHATSPACE_SHARED_RUN_COMMAND_FILE:-}" ] && [ -n "\${RUN_COMMAND:-}" ]; then
+        printf '%s' "$RUN_COMMAND" > "$CHATSPACE_SHARED_RUN_COMMAND_FILE" 2>/dev/null || true
+    fi
     if [ "$shared_exit" -eq 0 ] && [ -s "$AGENT_RESPONSE_FILE" ]; then
         cat "$AGENT_RESPONSE_FILE"
     else

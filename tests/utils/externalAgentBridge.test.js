@@ -98,18 +98,30 @@ describe('External agent bridge', () => {
     expect(bridge.api).toHaveBeenCalledTimes(1);
   });
 
-  it('records peer reply context without generating another automatic reply', async () => {
+  it('reports a peer result to the user once and never replies to the peer', async () => {
     const state = fixture();
+    state.history.user = seal(JSON.stringify([{ role: 'user', content: 'Ask the test agent to run E2E.' }]), state.key);
     state.pending.kind = 'direct';
     state.pending.channel = 'agent:peer';
     state.pending.message = { fromAgent: 'Peer', encrypted: true,
-      content: seal(JSON.stringify({ type: REPLY_TYPE, content: 'Here is the result.' }), state.key) };
-    const runtime = jest.fn();
-    const bridge = new Bridge(state, { fetchImpl: runtime });
+      content: seal(JSON.stringify({ type: REPLY_TYPE, inReplyTo: 'm1', content: 'Here is the result.' }), state.key) };
+    const runtime = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'The test agent reported: blocked.' } }] }) });
+    const bridge = new Bridge(state, { fetchImpl: runtime, runtimeKey: 'local-key' });
     bridge.api = jest.fn().mockResolvedValue({});
     await bridge.completePending();
-    expect(runtime).not.toHaveBeenCalled();
+    expect(runtime).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(runtime.mock.calls[0][1].body).messages;
+    expect(sent.some(m => m.content === 'Ask the test agent to run E2E.')).toBe(true);
+    expect(JSON.parse(sent[sent.length - 1].content)).toMatchObject({ source: 'peer_agent_result', fromAgent: 'Peer', result: 'Here is the result.' });
+    const routes = bridge.api.mock.calls.map(([route]) => route);
+    expect(routes).not.toContain('/messages/direct');
+    const posted = bridge.api.mock.calls.filter(([route]) => route === '/messages');
+    expect(posted).toHaveLength(1);
+    expect(posted[0][1].toAgentName).toBeUndefined();
+    expect(open(posted[0][1].content, state.key)).toBe('The test agent reported: blocked.');
+    expect(routes).toContain('/messages/direct/ack');
     expect(open(state.history['agent:peer'], state.key)).toContain('Here is the result.');
+    expect(open(state.history.user, state.key)).toContain('The test agent reported: blocked.');
     expect(state.pending).toBeNull();
   });
 
@@ -368,6 +380,20 @@ describe('shared DM bridge encryption', () => {
     expect(pending.reply.encryptionScope).toBe('shared_dm_password');
     expect(open(pending.reply.content,sender.groupKey)).toContain('Shared result');
     expect(()=>open(pending.reply.content,sender.state.key)).toThrow();
+  });
+  it('attaches the reported provider command to the next user reply only', () => {
+    const bridge = new Bridge(fixture());
+    bridge.pendingRunCommand = 'codex exec --model gpt-6 --sandbox workspace-write (prompt from stdin)';
+    const user = { kind: 'user', id: 'u1', message: {}, output: 'Done' };
+    bridge.prepareReply(user);
+    expect(user.reply.runCommand).toBe('codex exec --model gpt-6 --sandbox workspace-write (prompt from stdin)');
+    const next = { kind: 'user', id: 'u2', message: {}, output: 'Again' };
+    bridge.prepareReply(next);
+    expect(next.reply).not.toHaveProperty('runCommand');
+    bridge.pendingRunCommand = 'claude --model x';
+    const peerReply = { kind: 'direct', id: 'd1', message: { fromAgent: 'peer' }, output: 'For peer' };
+    bridge.prepareReply(peerReply);
+    expect(peerReply.reply).not.toHaveProperty('runCommand');
   });
   it('does not try group keys for user messages or send a shared reply without the key', () => {
     const bridge = new Bridge(fixture(),{groupPassword:'secret',groupSalt:Buffer.from('salt').toString('base64')});

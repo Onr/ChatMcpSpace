@@ -30,6 +30,9 @@
     return `<span class="agent-device-badge${known ? '' : ' agent-device-badge--unknown'}" title="${escape(label)}" aria-label="${escape(label)}" role="img">${svg}</span>`;
   }
   const api = { render };
+  // Some browser pages expose a CommonJS-like `module` global. Exporting only
+  // through that object leaves dashboard.js without the expected global.
+  if (typeof window === 'object') window.DeviceBadge = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.DeviceBadge = api;
 })(typeof window === 'object' ? window : globalThis);

@@ -66,8 +66,9 @@ node /absolute/path/external-agent-bridge.js send < user-update.txt
 
 The final command sends to the user; the preceding one sends to the named peer.
 These explicit sends can run beside the listener. Check the chat before retrying
-a standalone send whose outcome is unknown. Do not automatically answer a
+a standalone send whose outcome is unknown. Never DM a peer back in answer to a
 `chatmcpspace.bridge_reply.v1` result envelope: that creates reply loops.
+Report the result to your user instead.
 
 ## Rich workspace expectations
 

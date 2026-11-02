@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('tui','help','doctor','create','start','stop','restart','status','logs','list','send','retry','skip','repair-encryption','verify')]
+    [ValidateSet('tui','help','doctor','create','start','stop','restart','status','logs','list','send','retry','skip','repair-encryption','verify','update')]
     [string]$Command = 'tui',
     [string]$Name,
     [string]$Message,
@@ -71,6 +71,20 @@ function Invoke-NativeAgent {
     param([string[]]$Arguments)
     & $Node.Source $Runner @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Jetspace command failed. See the error above.' }
+}
+
+function Get-JetspaceUpdate {
+    # Compare the installed runtime with the server's published checksums.
+    $Configuration = Get-Content -LiteralPath (Join-Path $Root 'installation.json') -Raw | ConvertFrom-Json
+    $BaseUrl = "$($Configuration.baseUrl)".TrimEnd('/')
+    try { $Manifest = Invoke-RestMethod -Uri "$BaseUrl/setup/windows/manifest.json" }
+    catch { throw "Could not check for updates at $BaseUrl ($($_.Exception.Message)). Check your connection and try again." }
+    $Changed = @()
+    foreach ($Property in @($Manifest.files.PSObject.Properties)) {
+        $Installed = Join-Path $Root $Property.Name
+        if (-not (Test-Path -LiteralPath $Installed -PathType Leaf) -or (Get-FileHash -LiteralPath $Installed -Algorithm SHA256).Hash.ToLowerInvariant() -ne "$($Property.Value)") { $Changed += $Property.Name }
+    }
+    return [pscustomobject]@{ BaseUrl = $BaseUrl; Changed = $Changed }
 }
 
 function Test-JetspaceTerminal {
@@ -175,6 +189,7 @@ function Show-JetspaceTui {
         @{ Label = 'View Agent Logs'; Command = 'logs' },
         @{ Label = 'Send a Message'; Command = 'send' },
         @{ Label = 'Check Installation and Connection'; Command = 'doctor' },
+        @{ Label = 'Check for Updates'; Command = 'update' },
         @{ Label = 'Help'; Command = 'help' },
         @{ Label = 'Repair Message Encryption'; Command = 'repair-encryption' },
         @{ Label = 'Verify Website Message and Reply'; Command = 'verify' },
@@ -211,9 +226,15 @@ function Show-JetspaceTui {
                 }
             }
             Clear-Host
+            $CliHash = (Get-FileHash -LiteralPath (Join-Path $Root 'windows-cli.ps1') -Algorithm SHA256).Hash
             # Call the existing command as argument objects. Agent names and
             # message text never become executable PowerShell or cmd.exe text.
             & (Join-Path $Root 'windows-cli.ps1') @Arguments
+            if ($Action -eq 'update' -and (Get-FileHash -LiteralPath (Join-Path $Root 'windows-cli.ps1') -Algorithm SHA256).Hash -ne $CliHash) {
+                # This menu is still the old code in memory.
+                Write-Host 'Run jetspace again to open the updated menu.'
+                return
+            }
         } catch {
             Write-Host $_.Exception.Message -ForegroundColor Red
         }
@@ -233,12 +254,13 @@ switch ($Command) {
         Write-Host 'jetspace verify NAME (finish setup by checking a real website message and reply)'
         Write-Host 'jetspace list'
         Write-Host 'jetspace doctor (check installation and available providers; no credentials required)'
+        Write-Host 'jetspace update (check for a newer version and install it after you confirm)'
         Write-Host 'jetspace send NAME "Message to the dashboard"'
         Write-Host ''
         Write-Host 'Agents use your installed, signed-in AI CLI (Codex, Claude Code or Gemini); create offers to install one if none is found.'
         Write-Host 'In Command Prompt, quote messages for send and avoid & | % ^ characters; PowerShell has no such limits.'
         Write-Host 'Chief of Staff spawning, shared rooms and automatic runtime updates are not available here.'
-        Write-Host 'To update, rerun the Windows setup command. It stops your running agents, updates them and starts them again.'
+        Write-Host 'To update, run jetspace update. It stops your running agents, updates them and starts them again.'
         Write-Host 'If a run was interrupted, inspect the project before choosing retry (repeat) or skip (acknowledge).'
     }
     'create' {
@@ -335,6 +357,29 @@ switch ($Command) {
             $PasswordSecret.Dispose()
         }
         if (-not $NoStart) { Invoke-NativeAgent -Arguments @('start', $Name) }
+    }
+    'update' {
+        Write-Host 'Checking for updates...'
+        $Update = Get-JetspaceUpdate
+        if ($Update.Changed.Count -eq 0) {
+            Write-Host 'Jetspace is up to date.' -ForegroundColor Green
+            return
+        }
+        Write-Host "An update is available ($($Update.Changed -join ', '))." -ForegroundColor Cyan
+        Write-Host 'Running agents stop briefly and start again. Your agents, settings and messages are kept.'
+        if ((Read-Host 'Install the update now? [y/N]') -notmatch '^(y|yes)$') {
+            Write-Host 'Not updated. Run jetspace update when you are ready.'
+            return
+        }
+        # Setup verifies every file against the manifest; it runs in its own
+        # process so this script can be replaced while it updates.
+        $Setup = Join-Path ([IO.Path]::GetTempPath()) ('jetspace-setup-' + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$($Update.BaseUrl)/setup.ps1" -OutFile $Setup
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Setup -NoCreate
+            if ($LASTEXITCODE -ne 0) { throw 'The update did not finish. See the error above; your previous version is still installed.' }
+        } finally { Remove-Item -LiteralPath $Setup -Force -ErrorAction SilentlyContinue }
+        Write-Host 'Jetspace is updated.' -ForegroundColor Green
     }
     'send' {
         if (-not $Name -or -not $Message) { throw 'Use: jetspace send NAME "Message"' }

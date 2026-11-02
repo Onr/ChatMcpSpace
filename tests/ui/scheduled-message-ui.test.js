@@ -32,10 +32,73 @@ describe('scheduled message composer UI', () => {
     expect(dashboard).toContain('Scheduled messages');
   });
 
-  test('does not retain a separate scheduled-message composer button', () => {
+  test('does not retain an always-visible scheduled-message composer button', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/dashboard.ejs'), 'utf8');
     expect(view).not.toContain('scheduledMessagesBtn');
     expect(dashboard).not.toContain("getElementById('scheduledMessagesBtn')");
+    // The indicator exists but starts hidden; it appears only with pending sends.
+    expect(view).toMatch(/id="scheduledMessagesIndicator"[\s\S]{0,80}class="hidden /);
+  });
+
+  describe('scheduled messages indicator', () => {
+    const { JSDOM } = require('jsdom');
+    const source = dashboard.match(/let scheduledIndicatorRequest = 0;[\s\S]*?\n}\n/)[0];
+
+    function setup(responses) {
+      const dom = new JSDOM('<button id="scheduledMessagesIndicator" class="hidden"><span data-scheduled-count>0</span></button>');
+      const calls = [];
+      const env = {
+        document: dom.window.document,
+        selectedAgentId: 'agent-1',
+        openScheduledMessagesDialog: jest.fn(),
+        csrfFetch: jest.fn(async (url) => {
+          calls.push(url);
+          const scheduledMessages = responses.shift() || [];
+          return { ok: true, json: async () => ({ scheduledMessages }) };
+        })
+      };
+      // eslint-disable-next-line no-new-func
+      const factory = new Function('env', `with (env) { ${source}; return { refresh: refreshScheduledMessagesIndicator, setAgent: (id) => { env.selectedAgentId = id; } }; }`);
+      return { env, calls, api: factory(env), indicator: dom.window.document.getElementById('scheduledMessagesIndicator') };
+    }
+
+    test('appears with the pending count after a message is scheduled', async () => {
+      const { api, indicator, calls } = setup([[{ scheduledMessageId: 'a' }, { scheduledMessageId: 'b' }]]);
+      await api.refresh();
+      expect(calls[0]).toBe('/api/user/messages/scheduled?agentId=agent-1');
+      expect(indicator.classList.contains('hidden')).toBe(false);
+      expect(indicator.textContent.trim()).toBe('2');
+      expect(indicator.getAttribute('aria-label')).toBe('View 2 scheduled messages');
+    });
+
+    test('opens the scheduled list so messages can be reviewed or cancelled', async () => {
+      const { api, indicator, env } = setup([[{ scheduledMessageId: 'a' }]]);
+      await api.refresh();
+      indicator.click();
+      expect(env.openScheduledMessagesDialog).toHaveBeenCalledTimes(1);
+    });
+
+    test('hides again once the last scheduled message is cancelled or sent', async () => {
+      const { api, indicator } = setup([[{ scheduledMessageId: 'a' }], []]);
+      await api.refresh();
+      expect(indicator.classList.contains('hidden')).toBe(false);
+      await api.refresh();
+      expect(indicator.classList.contains('hidden')).toBe(true);
+    });
+
+    test('ignores a stale response after the user switches agents', async () => {
+      const { api, indicator } = setup([[{ scheduledMessageId: 'a' }]]);
+      const pending = api.refresh();
+      api.setAgent('agent-2');
+      await pending;
+      expect(indicator.classList.contains('hidden')).toBe(true);
+    });
+  });
+
+  test('refreshes the indicator after scheduling, list changes and agent switches', () => {
+    expect(dashboard).toMatch(/'Scheduled'\);\n\s+refreshScheduledMessagesIndicator\(\);/);
+    expect(dashboard).toMatch(/selectedAgentId = agentId;\n\s+refreshScheduledMessagesIndicator\(\);/);
+    expect(dashboard).toMatch(/await response\.json\(\);\n\s+refreshScheduledMessagesIndicator\(\);/);
   });
 
   test('keeps the Send control available to open the manager with an empty draft', () => {

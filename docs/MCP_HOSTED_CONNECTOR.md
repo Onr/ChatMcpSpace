@@ -113,7 +113,7 @@ whitespace checks passed.
 The temporary fixtures use no real account, production database or provider
 session. The connector was deployed on 2026-10-25 with migrations 061/062, durable
 wrapping-key/file storage, verified off-site recovery backups, and a real HTTPS
-browser-closed message/file/restart check. Acceptance in a particular AI client remains a separate check.
+browser-closed message/file/restart check. See [deployment and rollback details](MCP_DEPLOYMENT_2026-10-25.md). Acceptance in a particular AI client remains a separate check.
 
 The resource and embedded-file responses follow the official
 [MCP resource contract](https://modelcontextprotocol.io/specification/2025-11-25/server/resources)
