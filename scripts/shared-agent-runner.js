@@ -398,7 +398,22 @@ class SharedRunner {
         }).then(() => true).catch(() => false);
       }
     }
-    const alternatives = cached.values.filter(value => value !== profile.model);
+    // Model metadata can still list an ID the account just refused; report it
+    // so the dashboard stops offering it, and never suggest it again.
+    const rejected = failure.category === 'model_unavailable' && typeof profile.model === 'string' &&
+      profile.model && profile.model !== 'default' ? profile.model : '';
+    if (rejected && cached.values.length) {
+      cached.rejected ||= new Set();
+      if (!cached.rejected.has(rejected)) {
+        cached.rejected.add(rejected);
+        const accepted = cached.values.filter(value => !cached.rejected.has(value));
+        cached.synced = await this.bridge.api('/models/sync', {
+          provider: profile.provider, models: (accepted.length ? accepted : ['default']).map(value => ({ value, label: value })),
+          source: 'cli-metadata', rejected: [rejected]
+        }).then(() => true).catch(() => false);
+      }
+    }
+    const alternatives = cached.values.filter(value => value !== profile.model && !cached.rejected?.has(value));
     // A low-effort variant is a useful first suggestion after a quota limit.
     // Use only IDs returned by the installed provider; never infer a model ID.
     if (failure.category === 'quota') alternatives.sort((a, b) => Number(/[-:]low$/.test(b)) - Number(/[-:]low$/.test(a)));

@@ -790,6 +790,7 @@ router.get('/usage-limits', async (req, res) => {
  * - provider: string (required)
  * - models: string[] | {value,label}[] (required)
  * - source: string (optional)
+ * - rejected: string[] (optional) - IDs the provider just refused for this account
  */
 router.post('/models/sync', async (req, res) => {
   try {
@@ -808,7 +809,8 @@ router.post('/models/sync', async (req, res) => {
       return validationError(res, 'models must be a non-empty array');
     }
 
-    const result = updateProviderModelsForUser(userId, provider, models, source);
+    const rejected = Array.isArray(req.body.rejected) ? req.body.rejected.filter(value => typeof value === 'string') : [];
+    const result = updateProviderModelsForUser(userId, provider, models, source, { rejected });
     if (!result.updated) {
       return validationError(res, `Could not sync models: ${result.reason}`);
     }

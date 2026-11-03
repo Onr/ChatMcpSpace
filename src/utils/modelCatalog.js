@@ -192,6 +192,9 @@ const PROVIDER_SYNC_SOURCES = new Set(['cli', 'cli-online', 'cli-metadata']);
 // ChatGPT login rejects API-only IDs such as gpt-6.1-terra), so once the user's
 // own CLI has reported its list, built-in IDs it left out are not offered.
 const ACCOUNT_SCOPED_PROVIDERS = new Set(['codex']);
+// A CLI's model metadata can still list IDs the account rejects at run time,
+// so a runner reports each rejected ID once and it stays hidden for a while.
+const REJECTED_MODEL_TTL_MS = 30 * 86400000;
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -267,6 +270,12 @@ function writeUserModelCache(userId, cache) {
   fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));
 }
 
+function activeRejectedModels(entry, now = Date.now()) {
+  const rejected = Array.isArray(entry?.rejected) ? entry.rejected : [];
+  return rejected.filter(row => row && sanitizeModelValue(row.value) && row.value !== 'default' &&
+    now - Date.parse(row.at) < REJECTED_MODEL_TTL_MS);
+}
+
 function getProviderModelCatalog(userId) {
   const staticCatalog = deepClone(STATIC_PROVIDER_MODELS);
   let discovered = {};
@@ -304,10 +313,14 @@ function getProviderModelCatalog(userId) {
       ...candidates
     ]);
   }
+  for (const provider of Object.keys(merged)) {
+    const rejected = new Set(activeRejectedModels(cache[provider]).map(row => row.value));
+    if (rejected.size) merged[provider] = merged[provider].filter(option => !rejected.has(option.value));
+  }
   return merged;
 }
 
-function updateProviderModelsForUser(userId, provider, models, source = 'cli') {
+function updateProviderModelsForUser(userId, provider, models, source = 'cli', { rejected = [] } = {}) {
   if (!userId || !SUPPORTED_PROVIDERS.has(provider)) {
     return { updated: false, reason: 'invalid_user_or_provider' };
   }
@@ -318,10 +331,18 @@ function updateProviderModelsForUser(userId, provider, models, source = 'cli') {
   }
 
   const cache = readUserModelCache(userId);
+  const updatedAt = new Date().toISOString();
+  const rejectedByValue = new Map(activeRejectedModels(cache[provider]).map(row => [row.value, row]));
+  for (const raw of Array.isArray(rejected) ? rejected.slice(0, 20) : []) {
+    const value = sanitizeModelValue(raw);
+    if (value && value !== 'default') rejectedByValue.set(value, { value, at: updatedAt });
+  }
+  // A model the account accepts again is listed again once its entry expires.
   cache[provider] = {
     source,
-    updatedAt: new Date().toISOString(),
-    models: normalized
+    updatedAt,
+    models: normalized.filter(option => !rejectedByValue.has(option.value)),
+    ...(rejectedByValue.size ? { rejected: Array.from(rejectedByValue.values()) } : {})
   };
   writeUserModelCache(userId, cache);
 

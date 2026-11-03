@@ -1510,6 +1510,24 @@ test('a quota subprocess failure discovers future model IDs and keeps raw diagno
   expect(content).not.toMatch(/PRIVATE_TOKEN|PRIVATE_PROMPT|future-generation/);
 });
 
+test('a model the account rejects is reported once and never suggested again', async () => {
+  const discovery = require('../../scripts/discover-provider-models').discover;
+  discovery.mockResolvedValue([{ value: 'gpt-6.1-sol' }, { value: 'gpt-6-astra' }, { value: 'gpt-5.6-sol' }]);
+  runner.bridge.api = jest.fn(async () => ({}));
+  const profile = { managedRunner: true, provider: 'codex', model: 'gpt-6.1-sol' };
+  const rejected = Object.assign(new Error(), { providerFailure: { category: 'model_unavailable' } });
+  const failure = await runner.describeProviderFailure(rejected, profile);
+  expect(failure).toMatchObject({ alternatives: ['gpt-6-astra', 'gpt-5.6-sol'], modelsRefreshed: true });
+  expect(runner.bridge.api).toHaveBeenLastCalledWith('/models/sync', expect.objectContaining({
+    provider: 'codex', rejected: ['gpt-6.1-sol'], models: [{ value: 'gpt-6-astra', label: 'gpt-6-astra' }, { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' }]
+  }));
+  const calls = runner.bridge.api.mock.calls.length;
+  await runner.describeProviderFailure(rejected, profile);
+  expect(runner.bridge.api).toHaveBeenCalledTimes(calls);
+  const quota = await runner.describeProviderFailure(Object.assign(new Error(), { providerFailure: { category: 'quota' } }), { ...profile, model: 'gpt-6-astra' });
+  expect(quota.alternatives).toEqual(['gpt-5.6-sol']);
+});
+
 test('discovery outages preserve actionable errors without claiming a refreshed list or retrying tools', async () => {
   const discovery = require('../../scripts/discover-provider-models').discover;
   discovery.mockRejectedValue(new Error('PRIVATE_API_KEY'));

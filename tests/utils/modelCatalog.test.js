@@ -118,6 +118,21 @@ describe('modelCatalog', () => {
     expect(getProviderModelCatalog(userId).claude.some(m => m.value === 'claude-opus-5-5')).toBe(true);
   });
 
+  it('stops offering a model the provider rejected even when later CLI syncs list it again', () => {
+    const listed = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6.1-terra'].map(value => ({ value, label: value }));
+    updateProviderModelsForUser(userId, 'codex', listed, 'cli-metadata', { rejected: ['gpt-6.1-sol', 'default', 42] });
+    updateProviderModelsForUser(userId, 'codex', listed, 'cli-metadata', { rejected: ['gpt-6.1-terra'] });
+    updateProviderModelsForUser(userId, 'codex', listed, 'cli-metadata');
+    expect(getProviderModelCatalog(userId).codex.map(m => m.value)).toEqual(['default', 'gpt-6-astra']);
+    // Rejections also hide built-in fallbacks, and expire so a re-enabled model returns.
+    updateProviderModelsForUser(userId, 'codex', listed, 'public-catalog');
+    expect(getProviderModelCatalog(userId).codex.some(m => ['gpt-6.1-sol', 'gpt-6.1-terra'].includes(m.value))).toBe(false);
+    const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    cache.codex.rejected.forEach(row => { row.at = '2020-01-01T00:00:00.000Z'; });
+    fs.writeFileSync(cacheFile, JSON.stringify(cache));
+    expect(getProviderModelCatalog(userId).codex.some(m => m.value === 'gpt-6.1-sol')).toBe(true);
+  });
+
   it('keeps the built-in Codex list when the sync is not from the provider CLI', () => {
     updateProviderModelsForUser(userId, 'codex', [{ value: 'gpt-6-astra', label: 'x' }], 'public-catalog');
     expect(getProviderModelCatalog(userId).codex.some(m => m.value === 'gpt-6.1-terra')).toBe(true);
