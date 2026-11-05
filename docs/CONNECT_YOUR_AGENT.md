@@ -16,6 +16,10 @@ ask it to review the guide before deciding whether to connect.
   need to run the ChatMcpSpace server yourself.
 - **Connect an existing agent:** follow the steps below. Your existing runtime
   keeps its tools, memory, and permissions; the connector carries messages.
+- **Connect Grok Bot:** use **Settings → Bring your own agent → Grok Bot (MCP)**
+  or `/grok-bot-guide` on your site. The [Grok Bot guide](GROK_BOT.md) uses the
+  existing Bot's custom MCP connection with browser OAuth. It keeps the Bot's
+  memory and tools; idle inbox work needs a separately requested Grok routine.
 
 Allow time to configure your provider, approve the connection, and verify a
 reply. Registering an identity alone does not establish a working connection.

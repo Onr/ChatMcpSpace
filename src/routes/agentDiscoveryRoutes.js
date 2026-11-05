@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const { setupPrompt } = require('../../public/js/external-agent-setup');
 
 const router = express.Router();
 
@@ -12,6 +13,21 @@ function origin(req) {
   }
   return url.origin;
 }
+
+router.get('/grok-bot-guide', (req, res) => {
+  const baseUrl = origin(req);
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  res.render('grok-bot-guide', {
+    layout: false,
+    baseUrl,
+    setupPrompt: setupPrompt(baseUrl, 'grok-bot', 'Grok Bot'),
+  });
+});
+
+router.get('/grok-bot-setup.md', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.type('text/plain').sendFile(path.join(__dirname, '../../docs/GROK_BOT.md'));
+});
 
 router.get('/for-agents', (req, res) => {
   const baseUrl = origin(req);
@@ -43,6 +59,7 @@ router.get('/llms.txt', (req, res) => {
 - [Technical bridge guide](${baseUrl}/api/agent/external-bridge-guide): Node 22+ runtime requirements, local secrets, and persistent listener.
 - [User walkthrough](${baseUrl}/api/agent/connection-help): Approval and acceptance checklist.
 - [MCP guide](${baseUrl}/mcp-guide): Approve one agent and unlock once for always-on messages and attachments without an open browser. Hosted access protects a server-held key under explicit consent; legacy agents.read grants stay read-only.
+- [Grok Bot setup](${baseUrl}/grok-bot-setup.md): Connect an existing Grok Bot using its custom MCP server support. [User setup page](${baseUrl}/grok-bot-guide). OAuth, replies, and idle-Bot behavior need verification in the actual Grok client.
 
 ## Discovery metadata
 - [ChatMcpSpace setup metadata](${baseUrl}/.well-known/chatmcpspace.json): Project-specific discovery, not an A2A protocol Agent Card.
@@ -86,6 +103,16 @@ router.get('/.well-known/chatmcpspace.json', (req, res) => {
       browserRequiredAfterHostedSetup: false,
       attachments: true,
       backgroundListening: false,
+      clientGuides: {
+        'grok-bot': {
+          name: 'Grok Bot',
+          mode: 'oauth-mcp',
+          guide: `${baseUrl}/grok-bot-guide`,
+          instructions: `${baseUrl}/grok-bot-setup.md`,
+          verificationStatus: 'requires-client-verification',
+          automaticWakeup: false,
+        },
+      },
     },
     verification: ['user_message_and_reply', 'permitted_peer_reply_if_enabled', 'listener_restart_if_background'],
   });

@@ -76,6 +76,76 @@ function pkceChallenge(verifier) {
 }
 
 describe('Gemini MCP OAuth and Streamable HTTP routes', () => {
+  it('offers shared MCP connection help and the Grok Bot setup path', async () => {
+    const context = await makeContext();
+    try {
+      const guide = await request(context.app).get('/mcp-guide').expect(200);
+      expect(guide.text).toContain('Connect an AI app to ChatMCP');
+      expect(guide.text).toContain(`${BASE_URL}/mcp`);
+      expect(guide.text).toContain('href="/grok-bot-guide"');
+      expect(guide.text).not.toContain('Return to Gemini');
+      expect(guide.headers['cache-control']).toBe('no-store');
+    } finally { await context.cleanup(); }
+  });
+
+  it('completes the documented Cursor-backed Grok Bot OAuth flow, including optional spec parameters', async () => {
+    const context = await makeContext();
+    try {
+      const webCallback = 'https://www.cursor.com/agents/mcp/oauth/callback';
+      const challenge = await request(context.app).post('/mcp').send({ jsonrpc: '2.0', id: 1, method: 'initialize' }).expect(401);
+      const metadataUrl = /resource_metadata="([^"]+)"/.exec(challenge.headers['www-authenticate'])[1];
+      expect(metadataUrl).toBe(`${BASE_URL}/.well-known/oauth-protected-resource`);
+      const resource = await request(context.app).get(new URL(metadataUrl).pathname).expect(200);
+      expect(resource.body).toMatchObject({ resource: `${BASE_URL}/mcp`, authorization_servers: [BASE_URL] });
+      const server = await request(context.app).get('/.well-known/oauth-authorization-server').expect(200);
+      expect(server.body.code_challenge_methods_supported).toContain('S256');
+
+      const { body: client } = await request(context.app).post('/oauth/register')
+        .send({ redirect_uris: [webCallback, 'http://localhost:8787/callback'], grant_types: ['authorization_code', 'refresh_token'], token_endpoint_auth_method: 'none' }).expect(201);
+      expect(client.client_name).toBe('AI app');
+      expect(client.token_endpoint_auth_method).toBe('none');
+
+      const browser = request.agent(context.app);
+      await browser.get(`/test-account/${context.userId}`).expect(204);
+      const verifier = 'G'.repeat(43);
+      const page = await browser.get(`/oauth/authorize?${new URLSearchParams({
+        response_type: 'code', client_id: client.client_id, redirect_uri: webCallback,
+        code_challenge: pkceChallenge(verifier), code_challenge_method: 'S256',
+        scope: `${server.body.scopes_supported.join(' ')} offline_access`, state: `server-id-${'s'.repeat(1500)}`
+      })}`).expect(200);
+      const consent = await browser.post('/oauth/authorize/consent').type('form').send({
+        _csrf: page.text.match(/name="_csrf" value="([^"]+)"/)[1],
+        authorize_id: page.text.match(/name="authorize_id" value="([^"]+)"/)[1],
+        decision: 'allow'
+      }).expect(303);
+      const callback = new URL(consent.headers.location);
+      expect(callback.origin + callback.pathname).toBe(webCallback);
+      expect(callback.searchParams.get('state')).toBe(`server-id-${'s'.repeat(1500)}`);
+
+      const tokens = await request(context.app).post('/oauth/token').type('form').send({
+        grant_type: 'authorization_code', client_id: client.client_id, code: callback.searchParams.get('code'),
+        redirect_uri: webCallback, code_verifier: verifier
+      }).expect(200);
+      expect(tokens.body.refresh_token).toBeTruthy();
+
+      const initialized = await request(context.app).post('/mcp').set('Authorization', `Bearer ${tokens.body.access_token}`)
+        .set('MCP-Protocol-Version', '2099-01-01').send({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2099-01-01' } }).expect(200);
+      expect(initialized.body.result.protocolVersion).toBe('2025-11-25');
+      const tools = await request(context.app).post('/mcp').set('Authorization', `Bearer ${tokens.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 3, method: 'tools/list' }).expect(200);
+      expect(tools.body.result.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['get_connection_status', 'read_inbox', 'send_message', 'ack_message']));
+
+      const refreshed = await request(context.app).post('/oauth/token').type('form').send({
+        grant_type: 'refresh_token', client_id: client.client_id, refresh_token: tokens.body.refresh_token
+      }).expect(200);
+      await request(context.app).post('/mcp').set('Authorization', `Bearer ${refreshed.body.access_token}`)
+        .send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'get_connection_status', arguments: {} } }).expect(200);
+      await request(context.app).post('/oauth/token').type('form').send({
+        grant_type: 'refresh_token', client_id: client.client_id, refresh_token: refreshed.body.refresh_token, resource: 'https://wrong.example/mcp'
+      }).expect(400).expect(({ body }) => expect(body.error).toBe('invalid_target'));
+    } finally { await context.cleanup(); }
+  });
+
   it('hands browser consent to a safe GET and recovers an identical repeated submission without issuing another code', async () => {
     const context = await makeContext();
     try {

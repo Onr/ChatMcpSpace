@@ -90,7 +90,7 @@ function escapeHtml(value) {
 
 function consentUnavailable(res) {
   return res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' })
-    .status(400).type('html').send('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Restart your connection</title></head><body><h1>Restart your connection</h1><p>This approval form has already been used or is no longer available. Return to Gemini and start a new connection.</p><p><a href="/mcp-guide">View connection instructions</a></p></body></html>');
+    .status(400).type('html').send('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Restart your connection</title></head><body><h1>Restart your connection</h1><p>This approval form has already been used or is no longer available. Return to your AI app and start a new connection.</p><p><a href="/mcp-guide">View connection instructions</a></p></body></html>');
 }
 
 function finishConsent(req, res, completed) {
@@ -173,15 +173,16 @@ router.get('/.well-known/oauth-authorization-server', (req, res) => {
 
 router.get('/mcp-guide', (req, res) => {
   const endpoint = `${getBaseUrl(req)}/mcp`;
-  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Gemini to ChatMCP</title><style>body{font:16px system-ui;max-width:48rem;margin:3rem auto;padding:0 1.25rem;background:#0f172a;color:#e2e8f0}code{background:#1e293b;padding:.2rem .4rem;border-radius:.3rem}a{color:#6ee7b7}</style></head><body><h1>Connect Gemini to ChatMCP</h1><ol><li>In Gemini, choose <strong>Connect to an MCP server</strong>.</li><li>Enter this MCP server URL: <code>${escapeHtml(endpoint)}</code></li><li>Continue to ChatMCP, sign in, and approve the requested agent and message permissions.</li><li>Leave always-on access selected, unlock once, then return to Gemini. After activation you can close the ChatMCP tab.</li></ol><p>Always-on message and file tools work without an open browser after one-time approval. ChatMCP retains a protected copy of the approved encryption key and processes message and attachment contents for the connected AI. Stored messages and files remain encrypted; this connector is not end-to-end encrypted to the AI app. Files of any type use the configured attachment size limit. Shared peers need their separate key configured once. The AI app controls when tools run and whether it wakes in the background.</p><p>Legacy <code>agents.read</code> grants still provide only the agent catalogue. You can disconnect a message grant from its ChatMCP connection page.</p><p><a href="/settings">Account settings</a></p></body></html>`);
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect an AI app to ChatMCP</title><style>body{font:16px system-ui;max-width:48rem;margin:3rem auto;padding:0 1.25rem;background:#0f172a;color:#e2e8f0}code{background:#1e293b;padding:.2rem .4rem;border-radius:.3rem}a{color:#6ee7b7}</style></head><body><h1>Connect an AI app to ChatMCP</h1><ol><li>In your AI app, add a <strong>custom MCP server</strong>.</li><li>Enter this MCP server URL: <code>${escapeHtml(endpoint)}</code></li><li>Continue to ChatMCP, sign in, and approve the requested agent and message permissions.</li><li>Leave always-on access selected, unlock once, then return to your AI app. After activation you can close the ChatMCP tab.</li></ol><p>Always-on message and file tools work without an open browser after one-time approval. ChatMCP retains a protected copy of the approved encryption key and processes message and attachment contents for the connected AI. Stored messages and files remain encrypted; this connector is not end-to-end encrypted to the AI app. Files of any type use the configured attachment size limit. Shared peers need their separate key configured once. The AI app controls when tools run and whether it wakes in the background.</p><p>Legacy <code>agents.read</code> grants still provide only the agent catalogue. You can disconnect a message grant from its ChatMCP connection page.</p><p>Using Grok Bot? Follow the <a href="/grok-bot-guide">Grok Bot setup guide</a> for its connection request and verification steps.</p><p><a href="/settings">Account settings</a></p></body></html>`);
 });
 
 router.post('/oauth/register', registrationLimiter, async (req, res) => {
   const { client_name: rawName, redirect_uris: redirectUris } = req.body || {};
-  const clientName = typeof rawName === 'string' ? rawName.trim().slice(0, 120) : '';
-  if (!clientName || !Array.isArray(redirectUris) || redirectUris.length < 1 || redirectUris.length > 10 ||
+  // client_name is optional in RFC 7591, so a nameless client still registers.
+  const clientName = (typeof rawName === 'string' ? rawName.trim().slice(0, 120) : '') || 'AI app';
+  if (!Array.isArray(redirectUris) || redirectUris.length < 1 || redirectUris.length > 10 ||
       redirectUris.some(uri => !isSafeRedirectUri(uri)) || new Set(redirectUris).size !== redirectUris.length) {
-    return oauthError(res, 400, 'invalid_client_metadata', 'Provide a client_name and 1-10 valid HTTPS or loopback redirect_uris.');
+    return oauthError(res, 400, 'invalid_client_metadata', 'Provide 1-10 valid HTTPS or loopback redirect_uris.');
   }
   try {
     const clientId = randomToken();
@@ -202,9 +203,14 @@ router.post('/oauth/register', registrationLimiter, async (req, res) => {
 
 router.get('/oauth/authorize', authorizationLimiter, async (req, res) => {
   const { client_id: clientId, redirect_uri: redirectUri, response_type: responseType,
-    code_challenge: codeChallenge, code_challenge_method: method, resource, state } = req.query;
+    code_challenge: codeChallenge, code_challenge_method: method, state } = req.query;
   const base = getBaseUrl(req);
-  const requestedScopes = [...new Set(String(req.query.scope || DEFAULT_REQUESTED_SCOPES.join(' ')).split(/\s+/).filter(Boolean))];
+  // This server has one resource, so an omitted indicator can only mean it. A
+  // mismatched one is still rejected. Refresh tokens are always issued, which
+  // already satisfies offline_access for clients configured to request it.
+  const resource = req.query.resource ?? `${base}/mcp`;
+  const parsedScopes = [...new Set(String(req.query.scope || '').split(/\s+/).filter(scope => scope && scope !== 'offline_access'))];
+  const requestedScopes = parsedScopes.length ? parsedScopes : DEFAULT_REQUESTED_SCOPES;
   if (typeof state !== 'string' || !state.length || state.length > MAX_OAUTH_STATE_LENGTH) {
     return oauthError(res, 400, 'invalid_request', `state must be a non-empty string of at most ${MAX_OAUTH_STATE_LENGTH} characters.`);
   }
@@ -330,8 +336,9 @@ router.post('/oauth/authorize/consent', authorizationLimiter, async (req, res) =
 
 router.post('/oauth/token', tokenLimiter, async (req, res) => {
   const { grant_type: grantType, client_id: clientId, code, redirect_uri: redirectUri,
-    code_verifier: verifier, resource, refresh_token: refreshToken } = req.body || {};
+    code_verifier: verifier, refresh_token: refreshToken } = req.body || {};
   const base = getBaseUrl(req);
+  const resource = req.body?.resource ?? `${base}/mcp`;
   if (resource !== `${base}/mcp`) return oauthError(res, 400, 'invalid_target', 'The resource must be this MCP server.');
   try {
     let identity;
@@ -788,7 +795,8 @@ router.post('/mcp', authenticateMcp, async (req, res) => {
     return res.status(400).json(jsonRpcError(null, -32600, 'Invalid Request'));
   }
   const protocolVersion = req.get('mcp-protocol-version');
-  if (protocolVersion && !SUPPORTED_PROTOCOLS.has(protocolVersion)) {
+  // initialize negotiates the version below, so a newer client can still connect.
+  if (protocolVersion && body.method !== 'initialize' && !SUPPORTED_PROTOCOLS.has(protocolVersion)) {
     return res.status(400).json(jsonRpcError(body.id, -32600, 'Unsupported MCP-Protocol-Version'));
   }
   const origin = req.get('origin');

@@ -45,6 +45,10 @@ For opt-in multi-user conversations with one agent, see the [shared conversation
 
 ## Choose how to connect
 
+- **Connect Grok Bot:** choose **Grok Bot (MCP)** under **Settings → Bring your
+  own agent**, or visit `/grok-bot-guide` on your site. See the
+  [Grok Bot setup guide](docs/GROK_BOT.md) for OAuth, verification, and optional
+  routine instructions. This connects an existing Bot with its memory and tools.
 - **Start a managed agent:** use the Setup Script in the signed-in navigation and
   follow the provider prompts on the machine where it will run.
 - **Bring an existing agent:** follow the [connection walkthrough](docs/CONNECT_YOUR_AGENT.md).

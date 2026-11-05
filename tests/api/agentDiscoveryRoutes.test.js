@@ -74,7 +74,41 @@ describe('Public visiting-agent discovery', () => {
     dom.window.close();
   });
 
-  test.each(['/llms.txt', '/agent-setup.md', '/.well-known/chatmcpspace.json', '/for-agents'])('does not accept connection mutations at %s', async route => {
+  test('offers Grok Bot MCP onboarding without bridge pairing or account mutations', async () => {
+    const application = app();
+    const response = await request(application).get('/grok-bot-guide?token=DO_NOT_COPY')
+      .set('Host', 'attacker.example').expect(200);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    const dom = new JSDOM(response.text);
+    const document = dom.window.document;
+    const prompt = document.getElementById('externalAgentSetupPrompt').value;
+    expect(prompt).toContain('https://workspace.example/mcp');
+    expect(prompt).toContain('https://workspace.example/grok-bot-setup.md');
+    expect(prompt).toContain('existing Grok Bot');
+    expect(prompt).toContain('get_connection_status');
+    expect(prompt).not.toContain('/settings/external-agents/approve');
+    expect(response.text).not.toMatch(/attacker\.example|DO_NOT_COPY/);
+    expect(document.querySelector('form')).toBeNull();
+    expect(document.querySelector('label[for="externalAgentSetupPrompt"]')).not.toBeNull();
+    expect(document.getElementById('externalAgentCopyStatus').getAttribute('role')).toBe('status');
+    expect(document.querySelector('a[href="/grok-bot-setup.md"]')).not.toBeNull();
+    dom.window.close();
+    const guide = await request(application).get('/grok-bot-setup.md').expect(200).expect('Content-Type', /text\/plain/);
+    expect(guide.text).toBe(fs.readFileSync(path.join(root, 'docs/GROK_BOT.md'), 'utf8'));
+    const metadata = await request(application).get('/.well-known/chatmcpspace.json').expect(200);
+    expect(metadata.body.mcp.clientGuides['grok-bot']).toEqual({
+      name: 'Grok Bot', mode: 'oauth-mcp', guide: 'https://workspace.example/grok-bot-guide',
+      instructions: 'https://workspace.example/grok-bot-setup.md',
+      verificationStatus: 'requires-client-verification', automaticWakeup: false,
+    });
+    expect(metadata.body.supportedPairingProviders).not.toContain('grok-bot');
+    const index = await request(application).get('/llms.txt').expect(200);
+    expect(index.text).toContain('https://workspace.example/grok-bot-setup.md');
+  });
+
+  test.each(['/llms.txt', '/agent-setup.md', '/.well-known/chatmcpspace.json', '/for-agents', '/grok-bot-guide', '/grok-bot-setup.md'])('does not accept connection mutations at %s', async route => {
     await request(app()).post(route).send({ pairingCode: 'do-not-redeem' }).expect(404);
     const response = await request(app()).head(route).expect(200);
     expect(response.text).toBeUndefined();

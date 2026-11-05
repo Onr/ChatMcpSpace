@@ -210,7 +210,20 @@ router.get('/connect-guide', (req, res) => {
       humanGuide: `${baseUrl}/for-agents`,
       llms: `${baseUrl}/llms.txt`,
       metadata: `${baseUrl}/.well-known/chatmcpspace.json`,
+      grokBotGuide: `${baseUrl}/grok-bot-setup.md`,
       guidance: 'Read the visiting-agent instructions first. Check compatibility, obtain user approval, and verify replies before reporting connected. A request to review this project alone does not authorize registration or a listener.',
+    },
+
+    mcpClients: {
+      grokBot: {
+        mode: 'oauth-mcp',
+        endpoint: `${baseUrl}/mcp`,
+        guide: `${baseUrl}/grok-bot-guide`,
+        instructions: `${baseUrl}/grok-bot-setup.md`,
+        runtimeOwnership: 'Connects the existing Grok Bot with its memory and tools; no xAI API key or bridge pairing code is required.',
+        verificationStatus: 'requires-client-verification',
+        automaticWakeup: false,
+      },
     },
 
     externalAgentBridge: {

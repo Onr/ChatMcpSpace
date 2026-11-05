@@ -119,7 +119,7 @@ async function run() {
     });
 
     await page.goto(base + '/mcp-guide', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('heading', { name: 'Connect Gemini to ChatMCP' }).waitFor();
+    await page.getByRole('heading', { name: 'Connect an AI app to ChatMCP' }).waitFor();
     assert.ok(await page.getByText(base + '/mcp', { exact: true }).isVisible());
     await page.screenshot({ path: path.join(artifacts, '01-guide.png'), fullPage: true });
     console.log('PASS visible connection guide and exact MCP URL');
