@@ -38,7 +38,8 @@ describe('scoped agent config reads', () => {
     ['GET', '/brief', 'agent.responses.read'],
     ['POST', '/brief/wake/claim', 'agent.responses.read'],
     ['POST', '/brief/wake/11111111-1111-4111-8111-111111111111/outcome', 'agent.responses.read'],
-    ['POST', '/brief/suggestions', 'agent.messages.write']
+    ['POST', '/brief/suggestions', 'agent.messages.write'],
+    ['POST', '/models/sync', 'agent.messages.write']
   ])('%s %s requires %s', async (method, path, scope) => {
     verifyScopedCredential.mockResolvedValue({ agentName: 'Native Agent', agentId: 'agent-id', credentialId: 'credential-id', user: { userId: 'owner-id' }, scopes: [scope] });
     query.mockResolvedValue({ rows: [] });

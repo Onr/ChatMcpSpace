@@ -2,7 +2,7 @@
 
 ## User flow
 
-1. Open an agent from chat header, agent menu, list, Council Chamber, multi-chat, or Settings → Agents. All controls open the same four-tab drawer. A newly connected agent also offers an optional **Describe agent** prompt that can be dismissed.
+1. Choose **Identity & goals (optional)** from the agent menu, the list menu, or expand **Agents: identity & goals (optional)** in Settings. The editor is hidden until requested; there is no identity/goal row below the agent name and no automatic setup prompt. Identity fields and goals are optional for normal chat.
 2. Enter a website display name and emoji avatar, role, purpose, boundaries, and one or more goals. Select one active goal and describe what would count as finished. The connection name used for routing stays stable; provider, tools, memory, and existing permissions remain separate.
 3. Review **What the agent sees**, then save. Saves are explicit and numbered. A message already being processed keeps its old brief. By default, unread and future scheduled messages keep the revision captured when queued. The save flow asks before changing those snapshots.
 4. Use History to inspect changes and restore a prior revision. A restore creates a new revision and pauses automatic work.

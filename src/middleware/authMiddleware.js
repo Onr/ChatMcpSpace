@@ -21,6 +21,8 @@ const AGENT_SCOPE_RULES = [
   { method: 'POST', path: /^\/questions$/, scope: 'agent.questions.write' },
   { method: 'GET', path: /^\/responses$/, scope: 'agent.responses.read' },
   { method: 'GET', path: /^\/config$/, scope: 'agent.responses.read' },
+  // Runners report provider-rejected models here so the picker stops offering them.
+  { method: 'POST', path: /^\/models\/sync$/, scope: 'agent.messages.write' },
   { method: 'GET', path: /^\/brief\/?$/, scope: 'agent.responses.read' },
   { method: 'POST', path: /^\/brief\/wake\/claim$/, scope: 'agent.responses.read' },
   { method: 'POST', path: /^\/brief\/wake\/[^/]+\/outcome$/, scope: 'agent.responses.read' },
