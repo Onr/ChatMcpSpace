@@ -2407,7 +2407,7 @@ router.get('/messages/scheduled', async (req, res) => {
     const result = await query(
       `SELECT sm.scheduled_message_id, sm.agent_id, sm.content, sm.encrypted, sm.scheduled_for, sm.run_overrides, a.agent_name
        FROM scheduled_user_messages sm JOIN agents a ON a.agent_id = sm.agent_id
-       WHERE sm.user_id = $1 AND sm.delivered_at IS NULL AND ($2 IS NULL OR sm.agent_id = $2)
+       WHERE sm.user_id = $1 AND sm.delivered_at IS NULL AND ($2::uuid IS NULL OR sm.agent_id = $2::uuid)
        ORDER BY sm.scheduled_for ASC`, [userId, agentId]
     );
     return res.json({ scheduledMessages: result.rows.map((row) => ({

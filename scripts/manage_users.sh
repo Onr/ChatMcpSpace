@@ -42,6 +42,24 @@ check_column_exists() {
   fi
 }
 
+# Stored bytes per user: chat messages, attachments, and shared-chat files.
+user_data_usage_sql() {
+  cat <<'SQL'
+SELECT a.user_id, SUM(s.bytes)::bigint AS bytes
+FROM (
+  SELECT agent_id, SUM(pg_column_size(m.*)) AS bytes FROM messages m GROUP BY agent_id
+  UNION ALL
+  SELECT agent_id, SUM(pg_column_size(um.*)) FROM user_messages um GROUP BY agent_id
+  UNION ALL
+  SELECT agent_id, SUM(size_bytes) FROM attachments GROUP BY agent_id
+  UNION ALL
+  SELECT c.agent_id, SUM(octet_length(f.bytes)) FROM shared_files f JOIN shared_conversations c ON c.id = f.conversation_id GROUP BY c.agent_id
+) s
+JOIN agents a ON a.agent_id = s.agent_id
+GROUP BY a.user_id
+SQL
+}
+
 list_users() {
   gum style --foreground 212 "Fetching users..."
   
@@ -53,19 +71,19 @@ list_users() {
     return
   fi
 
-  local select_cols="user_id, email, created_at"
-  local header_cols="User ID,Email,Created At"
+  local select_cols="ROW_NUMBER() OVER (ORDER BY u.created_at DESC) AS \"#\", u.email, pg_size_pretty(COALESCE(d.bytes, 0)) AS data_used, to_char(u.created_at, 'YYYY-MM-DD HH24:MI') AS created_at"
 
   if check_column_exists "users" "email_verified"; then
-    select_cols+=", email_verified"
-    header_cols+=", Email Verified"
+    select_cols+=", u.email_verified"
   fi
+
+  select_cols+=", u.user_id"
 
   # Create a temporary CSV file for gum table
   local tmp_csv
   tmp_csv=$(mktemp)
   
-  execute_sql_csv "SELECT $select_cols FROM users ORDER BY created_at DESC" > "$tmp_csv"
+  execute_sql_csv "SELECT $select_cols FROM users u LEFT JOIN ($(user_data_usage_sql)) d ON d.user_id = u.user_id ORDER BY u.created_at DESC" > "$tmp_csv"
   
   gum style --foreground 244 "Found $user_count users:"
   gum table --file "$tmp_csv" --height 10

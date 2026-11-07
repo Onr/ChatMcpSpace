@@ -171,6 +171,12 @@ describe('User API routes (messaging)', () => {
     await pool.end();
   });
 
+  // pg-mem accepts an untyped `$n IS NULL`, but real Postgres rejects it with 42P08.
+  it('casts optional query parameters so Postgres can infer their type', () => {
+    const source = require('fs').readFileSync(require.resolve('../../src/routes/userApiRoutes'), 'utf8');
+    expect(source).not.toMatch(/\$\d+ IS (NOT )?NULL/);
+  });
+
   it('stores validated per-message run overrides on queued and scheduled messages', async () => {
     const { app, query, pool, userId } = await createUserApiTestContext();
     const agentId = uuidv4();
