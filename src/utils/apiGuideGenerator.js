@@ -6578,6 +6578,10 @@ def check_dm(from_agent: str = None, defer_ack: bool = False) -> list:
     if from_agent:
         path += f"&fromAgent={urllib.parse.quote(from_agent)}"
     result = _api_request("GET", path)
+    if result.get("_statusCode") == 409 and not defer_ack:
+        # The shared runtime is this agent's only inbox consumer; a listener still fails below.
+        print("This agent's shared runtime delivers direct messages as new turns; there is nothing to poll here.")
+        sys.exit(0)
     if result.get("error"):
         raise RuntimeError("Could not poll direct messages; they remain pending")
     _save_poll_advice(result)

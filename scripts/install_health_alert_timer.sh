@@ -31,7 +31,8 @@ Environment=DISK_USAGE_MAX_PERCENT=90
 Environment=HEALTH_ALERT_COOLDOWN_SECONDS=3600
 Environment=HEALTH_ALERT_AUTO_REMEDIATE=true
 Environment=HEALTH_ALERT_RECHECK_DELAY_SECONDS=3
-Environment=HEALTH_ALERT_AGENT_DIR=$ROOT_DIR/.chatspace/agentsmcpspace
+Environment=HEALTH_ALERT_AGENT_DIR=${HEALTH_ALERT_AGENT_DIR:-$ROOT_DIR/chatspace/local_news_-_aws_c1}
+Environment=APP_HEALTH_URL=${APP_HEALTH_URL:-http://127.0.0.1:3000/}
 ExecStart=$ROOT_DIR/scripts/health_alert_notify.sh
 EOF
 

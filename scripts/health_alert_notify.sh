@@ -8,7 +8,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 cd "$ROOT_DIR"
 
-AGENT_DIR="${HEALTH_ALERT_AGENT_DIR:-$ROOT_DIR/.chatspace/agentsmcpspace}"
+# Must be an agent without a shared runtime: the server fences shared agents'
+# messaging routes, so a standalone process cannot post as one of them.
+AGENT_DIR="${HEALTH_ALERT_AGENT_DIR:-$ROOT_DIR/chatspace/local_news_-_aws_c1}"
 MESSAGE_HELPER="${HEALTH_ALERT_MESSAGE_HELPER:-$AGENT_DIR/message_helper.py}"
 STATE_DIR="${HEALTH_ALERT_STATE_DIR:-$ROOT_DIR/tmp/health-monitor}"
 STATUS_FILE="$STATE_DIR/status"
@@ -40,7 +42,13 @@ send_chat_message() {
     return 1
   fi
 
-  (cd "$AGENT_DIR" && uv run message_helper.py send "$message" --priority "$priority")
+  # Older helpers exit 0 after "Failed to send", so also require the success line.
+  local send_output
+  if ! send_output="$(cd "$AGENT_DIR" && uv run message_helper.py send "$message" --priority "$priority" 2>&1)" \
+    || [[ "$send_output" != *"Message sent successfully."* ]]; then
+    echo "[health-alert] failed to send chat alert: $send_output" >&2
+    return 1
+  fi
 }
 
 truncate_output() {
@@ -159,7 +167,6 @@ if [ "$previous_status" = "fail" ] && [ $((now - last_alert)) -lt "$ALERT_COOLDO
   exit 0
 fi
 
-echo "$now" > "$LAST_ALERT_FILE"
 echo "fail" > "$STATUS_FILE"
 
 send_chat_message 2 "**Server health alert**
@@ -169,4 +176,7 @@ send_chat_message 2 "**Server health alert**
 **Reported:**
 $(printf '%s\n' "$output" | truncate_output)
 
-**Recommended next step:** check disk usage, service status, and recent logs on the server." || true
+**Recommended next step:** check disk usage, service status, and recent logs on the server." || exit 1
+
+# Only a delivered alert starts the cooldown, so a failed send retries next run.
+echo "$now" > "$LAST_ALERT_FILE"

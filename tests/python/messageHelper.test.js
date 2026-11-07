@@ -1074,3 +1074,24 @@ print("fence-ok")
 `, {CHATSPACE_SHARED_A2A_RUNTIME:'runtime-fixture'});
   expect(result.status).toBe(0);expect(result.stdout).toContain('fence-ok');
 });
+
+it('manual dm check explains the shared-runtime fence while a listener still fails', () => {
+  const fixture = createHelperFixture({ encryptionEnabled: true });
+  const result = runHelper(fixture.helperPath, `
+mod._api_request = lambda *args: {"error": {"message": "fenced"}, "_statusCode": 409}
+try:
+    mod.check_dm(defer_ack=True)
+    raise AssertionError("listener poll should fail")
+except RuntimeError:
+    pass
+try:
+    mod.check_dm()
+    raise AssertionError("manual poll should exit")
+except SystemExit as stop:
+    assert stop.code == 0
+print("manual-fence-ok")
+`);
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain('shared runtime delivers direct messages as new turns');
+  expect(result.stdout).toContain('manual-fence-ok');
+});
