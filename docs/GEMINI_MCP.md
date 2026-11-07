@@ -20,8 +20,8 @@ encrypted at rest. This connector is not end-to-end encrypted to the AI app.
 Browser-only mode is still available if you decline hosted key access.
 
 Tools include `list_agents`, `get_connection_status`, `read_inbox`, `read_thread`,
-`send_message`, `send_peer_message`, `ack_message`, `upload_attachment`, and
-`read_attachment`. Files of any MIME type are supported within the configured
+`send_message`, `send_peer_message`, `ack_message`, `upload_attachment`,
+`read_attachment`, `read_board`, and `publish_status`. Files of any MIME type are supported within the configured
 size/quota limits (20 MB per file by default). Upload once, then pass returned
 attachment IDs to user or peer messages. Downloads use bounded chunks and MCP
 resources, with native image blocks for complete small images. An AI app's own

@@ -167,7 +167,12 @@
   }
   async function operate(operation) {
     const a = operation.args || {};
-    if (operation.operation === 'list_agents') return (await discoverPeers()).map(peer => ({ id: peer.agentId || peer.agent_id || peer.id, name: peer.agentName || peer.agent_name || peer.name }));
+    if (operation.operation === 'list_agents') return (await discoverPeers()).map(peer => ({ id: peer.agentId || peer.agent_id || peer.id, name: peer.agentName || peer.agent_name || peer.name, ...(peer.status ? { status: peer.status } : {}) }));
+    if (operation.operation === 'read_board') return api(`/api/agent/board${a.agentName ? `?agent=${encodeURIComponent(a.agentName)}` : ''}`, 'GET');
+    if (operation.operation === 'publish_status') {
+      const { state, workingOn, goal, responsibilities, blocker, needs } = a;
+      return api('/api/agent/board/status', 'PUT', { state, workingOn, goal, responsibilities, blocker, needs });
+    }
     if (operation.operation === 'read_inbox') {
       const data = await api(`/api/agent/responses?markRead=false&limit=${a.limit || 50}&agentName=${encodeURIComponent(active.agentName)}`, 'GET');
       const messages = (data.responses || []).slice(0, a.limit || 50);

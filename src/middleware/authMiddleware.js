@@ -30,6 +30,9 @@ const AGENT_SCOPE_RULES = [
   { method: 'POST', path: /^\/responses\/ack$/, scope: 'agent.responses.read' },
   { method: 'POST', path: /^\/heartbeat$/, scope: 'agent.responses.read' },
   { method: 'GET', path: /^\/discover$/, scope: 'agent.discover.read' },
+  { method: 'GET', path: /^\/board\/?$/, scope: 'agent.discover.read' },
+  { method: 'PUT', path: /^\/board\/status$/, scope: 'agent.messages.write' },
+  { method: 'DELETE', path: /^\/board\/status$/, scope: 'agent.messages.write' },
   { method: 'POST', path: /^\/messages\/direct$/, scope: 'agent.dm.write' },
   { method: 'GET', path: /^\/messages\/direct$/, scope: 'agent.dm.read' },
   { method: 'POST', path: /^\/messages\/direct\/ack$/, scope: 'agent.dm.read' },
@@ -428,5 +431,6 @@ module.exports = {
   requireApiKey,
   protectRoute,
   requireEmailVerification,
+  requiredScopeForRequest,
   resetAuthSuccessLogThrottle
 };

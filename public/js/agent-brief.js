@@ -124,7 +124,10 @@
     content.innerHTML = '<p class="agent-brief-help">Loading activity…</p>';
     try {
       const data = await api(`/api/user/agents/${state.agentId}/brief/activity`);
-      content.innerHTML = `<h3>Activity</h3>${data.activity.length ? data.activity.map(a => `<article class="agent-brief-activity"><strong>${esc(a.event_type.replaceAll('_', ' '))}</strong><time>${esc(new Date(a.created_at).toLocaleString())}</time><p>${esc(a.detail?.reason || a.detail?.outcome || '')}</p></article>`).join('') : '<p class="agent-brief-empty">No automatic activity recorded.</p>'}`;
+      const published = data.publishedStatus;
+      const publishedRows = published ? [['Status', published.state], ['Working on', published.workingOn], ['Goal', published.goal], ['Responsible for', published.responsibilities], ['Blocked on', published.blocker], ['Needs', published.needs]].filter(([, value]) => value).map(([label, value]) => `<p><strong>${label}:</strong> ${esc(value)}</p>`).join('') : '';
+      const board = published ? `<h3>Published to other agents</h3><article class="agent-brief-activity">${publishedRows}<time>${esc(new Date(published.updatedAt).toLocaleString())}${published.stale ? ' (out of date)' : ''}</time></article>` : '';
+      content.innerHTML = `${board}<h3>Activity</h3>${data.activity.length ? data.activity.map(a => `<article class="agent-brief-activity"><strong>${esc(a.event_type.replaceAll('_', ' '))}</strong><time>${esc(new Date(a.created_at).toLocaleString())}</time><p>${esc(a.detail?.reason || a.detail?.outcome || '')}</p></article>`).join('') : '<p class="agent-brief-empty">No automatic activity recorded.</p>'}`;
     } catch (error) { content.textContent = error.message; }
   }
 

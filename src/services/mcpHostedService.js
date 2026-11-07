@@ -210,7 +210,9 @@ async function operate(ctx, name, args) {
   const { api, key, grant, scopes } = ctx;
   const agentQuery = `agentName=${encodeURIComponent(grant.agent_name)}`;
   const discover = async () => (await api('/api/agent/discover')).agents || [];
-  if (name === 'list_agents') return { agents: (await discover()).map(peer => ({ id: peerId(peer), name: peer.agentName, shared: !!peer.shared })) };
+  if (name === 'list_agents') return { agents: (await discover()).map(peer => ({ id: peerId(peer), name: peer.agentName, shared: !!peer.shared, ...(peer.status ? { status: peer.status } : {}) })) };
+  if (name === 'read_board') return api(`/api/agent/board${args.agentName ? `?agent=${encodeURIComponent(args.agentName)}` : ''}`);
+  if (name === 'publish_status') return api('/api/agent/board/status', 'PUT', args);
   if (name === 'read_inbox') {
     const limit = args.limit || 50;
     const inbox = await api(`/api/agent/responses?markRead=false&limit=${limit}&${agentQuery}`);

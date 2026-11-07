@@ -96,7 +96,7 @@ router.get('/.well-known/chatmcpspace.json', (req, res) => {
     mcp: {
       endpoint: `${baseUrl}/mcp`,
       scopes: ['agents.read', 'messages.read', 'messages.write', 'peers.read', 'peers.write', 'attachments.read', 'attachments.write'],
-      tools: ['list_agents', 'get_connection_status', 'read_inbox', 'read_thread', 'send_message', 'send_peer_message', 'ack_message', 'upload_attachment', 'read_attachment'],
+      tools: ['list_agents', 'get_connection_status', 'read_inbox', 'read_thread', 'send_message', 'send_peer_message', 'ack_message', 'upload_attachment', 'read_attachment', 'read_board', 'publish_status'],
       messaging: true,
       browserGateway: true,
       hostedGateway: true,

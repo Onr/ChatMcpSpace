@@ -90,6 +90,17 @@ CREATE TABLE agents (
   UNIQUE(user_id, agent_name)
 );
 
+CREATE TABLE agent_status (
+  agent_id UUID PRIMARY KEY REFERENCES agents(agent_id) ON DELETE CASCADE,
+  state VARCHAR(20) NOT NULL DEFAULT 'available' CHECK (state IN ('available', 'busy', 'blocked', 'away')),
+  working_on VARCHAR(300) NOT NULL DEFAULT '',
+  goal VARCHAR(300) NOT NULL DEFAULT '',
+  responsibilities VARCHAR(600) NOT NULL DEFAULT '',
+  blocker VARCHAR(300) NOT NULL DEFAULT '',
+  needs VARCHAR(300) NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE agent_briefs (
   agent_id UUID PRIMARY KEY REFERENCES agents(agent_id) ON DELETE CASCADE,
   revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),

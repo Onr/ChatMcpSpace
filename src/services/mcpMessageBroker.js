@@ -92,7 +92,7 @@ function statusForGrant({ ownerId, grantId }) {
 
 function request({ ownerId, grantId, operation, args = {} }) {
   expire();
-  if (!['read_inbox', 'read_thread', 'send_message', 'send_peer_message', 'ack_message', 'list_agents'].includes(operation)) {
+  if (!['read_inbox', 'read_thread', 'send_message', 'send_peer_message', 'ack_message', 'list_agents', 'read_board', 'publish_status'].includes(operation)) {
     return Promise.reject(safeError('Unsupported browser operation.', 'INVALID_OPERATION'));
   }
   let size;

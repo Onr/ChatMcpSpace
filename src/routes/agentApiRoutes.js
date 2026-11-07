@@ -50,6 +50,7 @@ const {
 const { getProviderModelCatalog, getProviderModels, updateProviderModelsForUser, SUPPORTED_PROVIDERS } = require('../utils/modelCatalog');
 const { readPidFromFile, terminateProcessWithEscalation } = require('../utils/agentStopUtils');
 const { getBrief, contextForSnapshot } = require('../services/agentBriefService');
+const { reachableAgents, statusesFor, statusSummary } = require('../services/agentBoardService');
 const { issueScopedCredential } = require('../services/agentCredentialService');
 const fs = require('fs');
 const path = require('path');
@@ -641,6 +642,7 @@ router.use(requireApiKey);
 // Apply rate limiting to all agent API routes
 router.use(agentApiRateLimiter);
 router.use('/brief', require('./agentBriefAgentRoutes'));
+router.use('/board', require('./agentBoardRoutes'));
 router.use('/shared', require('../shared/routes').agents);
 router.use(require('../shared/routes').fenceLegacy);
 
@@ -2949,151 +2951,25 @@ router.get('/cli-script', async (req, res) => {
  *   - isMe: boolean - True if this agent is the calling agent
  *   - groups: array - Group names this agent belongs to
  *   - interAgentMode: string - 'disabled', 'listen_all', or 'groups'
+ *   - status: object (optional) - Short published status; full details are on GET /api/agent/board
  */
 router.get('/discover', async (req, res) => {
   try {
     const userId = req.user.userId;
     const myAgentName = req.headers['x-agent-name'];
-
-    // Get calling agent's inter-agent permissions
-    let myInterAgentMode = 'disabled';
-    let myGroups = [];
-
-    if (myAgentName) {
-      // DB-only: rely on agents + group membership tables
-    }
-
-    // Look up the agent and its mode in one go
-    let myAgentId = null;
-
-    if (myAgentName) {
-      const agent = await findAgentByName(userId, myAgentName);
-      if (agent) {
-        myAgentId = agent.agent_id;
-        // Check if inter_agent_mode is in the agent object (need to ensure findAgentByName returns it or query it)
-        const modeResult = await query(
-          'SELECT inter_agent_mode FROM agents WHERE agent_id = $1',
-          [myAgentId]
-        );
-        if (modeResult.rows.length > 0 && modeResult.rows[0].inter_agent_mode) {
-          myInterAgentMode = modeResult.rows[0].inter_agent_mode;
-        }
-
-        // Get groups
-        const groupsResult = await query(
-          `SELECT g.group_name 
-                  FROM agent_group_members gm
-                  JOIN agent_groups g ON gm.group_id = g.group_id
-                  WHERE gm.agent_id = $1`,
-          [myAgentId]
-        );
-        myGroups = groupsResult.rows.map(r => r.group_name);
-      }
-    }
+    const { agents, callerId: myAgentId, mode: myInterAgentMode, groups: myGroups } =
+      await reachableAgents(userId, myAgentName);
 
     // If caller has inter-agent disabled, return empty list (can't see anyone)
     if (myInterAgentMode === 'disabled') {
       return res.json({ agents: [], myInterAgentMode: 'disabled' });
     }
 
-    // Get all agents first (keep query simple for pg-mem compatibility in tests)
-    const result = await query(`
-      SELECT 
-        a.agent_id,
-        a.agent_name,
-        a.agent_type,
-        a.last_seen_at,
-        a.inter_agent_mode,
-        CASE
-          -- last_seen_at is TIMESTAMP (no timezone). Cast NOW() (timestamptz) to TIMESTAMP
-          -- to avoid type-cast issues in pg-mem during tests.
-          WHEN last_seen_at > (NOW()::timestamp - INTERVAL '5 minutes') THEN true
-          ELSE false
-        END as is_online
-      FROM agents a
-      WHERE a.user_id = $1
-      ORDER BY a.agent_name ASC
-    `, [userId]);
-
-    // Load all group memberships in a second pass
-    const groupsByAgentId = new Map();
-    const groupsResult = await query(
-      `SELECT gm.agent_id, g.group_name
-       FROM agent_group_members gm
-       JOIN agent_groups g ON gm.group_id = g.group_id
-       JOIN agents a ON a.agent_id = gm.agent_id
-       WHERE a.user_id = $1`,
-      [userId]
-    );
-
-    for (const row of groupsResult.rows) {
-      if (!groupsByAgentId.has(row.agent_id)) {
-        groupsByAgentId.set(row.agent_id, []);
-      }
-      groupsByAgentId.get(row.agent_id).push(row.group_name);
-    }
-
-    // Filter agents based on caller's permissions
-    const filteredAgents = [];
-
-    for (const row of result.rows) {
-      // Skip self
-      if (row.agent_name === myAgentName) {
-        const myRowGroups = groupsByAgentId.get(row.agent_id) || [];
-        filteredAgents.push({
-          agentId: row.agent_id,
-          agentName: row.agent_name,
-          agentType: row.agent_type,
-          isOnline: row.is_online,
-          lastSeenAt: row.last_seen_at ? row.last_seen_at.toISOString() : null,
-          isMe: true,
-          groups: myRowGroups,
-          interAgentMode: myInterAgentMode
-        });
-        continue;
-      }
-
-      // Use DB values
-      const targetInterAgentMode = row.inter_agent_mode || 'disabled';
-      const targetGroups = groupsByAgentId.get(row.agent_id) || [];
-
-      // Skip agents with inter-agent disabled
-      if (targetInterAgentMode === 'disabled') {
-        continue;
-      }
-
-      // Check if caller can communicate with target
-      let canCommunicate = false;
-
-      if (myInterAgentMode === 'listen_all') {
-        // listen_all can see all agents that have inter-agent enabled
-        canCommunicate = true;
-      } else if (myInterAgentMode === 'groups') {
-        // groups mode can see:
-        // 1. Agents with listen_all mode
-        // 2. Agents in at least one of the same groups
-        if (targetInterAgentMode === 'listen_all') {
-          canCommunicate = true;
-        } else if (targetInterAgentMode === 'groups') {
-          // Check for shared groups
-          const sharedGroups = myGroups.filter(g => targetGroups.includes(g));
-          canCommunicate = sharedGroups.length > 0;
-        }
-      }
-
-      if (canCommunicate) {
-        filteredAgents.push({
-          agentId: row.agent_id,
-          agentName: row.agent_name,
-          agentType: row.agent_type,
-          isOnline: row.is_online,
-          lastSeenAt: row.last_seen_at ? row.last_seen_at.toISOString() : null,
-          isMe: false,
-          groups: targetGroups,
-          interAgentMode: targetInterAgentMode
-        });
-      }
-    }
+    const statuses = await statusesFor(agents.map(agent => agent.agentId));
+    const filteredAgents = agents.map(({ isWorking, ...agent }) => {
+      const status = statusSummary(statuses.get(agent.agentId));
+      return status ? { ...agent, status } : agent;
+    });
 
     if (myAgentId) {
       const peers = await require('../shared/a2aAccess').peers(userId, myAgentId);

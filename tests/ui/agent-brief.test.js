@@ -29,6 +29,7 @@ function boot(bootOptions = {}) {
   window.fetch = jest.fn(async (url, options = {}) => {
     const payload = options.body ? JSON.parse(options.body) : null;
     if (String(url).endsWith('/brief/queued')) return { ok: true, status: 200, json: async () => ({ pendingCount: 0 }) };
+    if (String(url).endsWith('/brief/activity')) return { ok: true, status: 200, json: async () => ({ activity: [], publishedStatus: bootOptions.publishedStatus || null }) };
     if (String(url).endsWith('/brief/history')) return { ok: true, status: 200, json: async () => ({ revisions: [{ revision: 1, document: { ...savedDoc, role: 'Original' }, policy, changed_fields: ['role'], actor_type: 'owner', created_at: new Date().toISOString() }] }) };
     if (String(url).includes('/brief/suggestions/') && options.method === 'POST') {
       revision += 1; savedDoc = payload.document;
@@ -149,4 +150,27 @@ test('owner can edit a suggestion before accepting it as a revision', async () =
   document.querySelector('#agentBriefSave').click(); await settle();
   expect(db.current()).toMatchObject({ revision: 1, document: { role: 'Owner revised role' } });
   expect(window.fetch.mock.calls.some(([url]) => String(url).includes('/brief/suggestions/') && String(url).endsWith('/decision'))).toBe(true);
+});
+
+test('activity tab renders published board status when present', async () => {
+  boot({
+    publishedStatus: {
+      state: 'busy',
+      workingOn: 'Auditing board permissions',
+      goal: 'Ship agent board',
+      responsibilities: 'API & security',
+      blocker: '',
+      needs: 'UI sign-off',
+      updatedAt: new Date().toISOString(),
+      stale: false,
+    },
+  });
+  await window.AgentBriefUI.open(id, 'activity');
+  await settle();
+  const content = document.querySelector('#agentBriefContent').textContent;
+  expect(content).toContain('Published to other agents');
+  expect(content).toContain('Auditing board permissions');
+  expect(content).toContain('Ship agent board');
+  expect(content).toContain('API & security');
+  expect(content).toContain('UI sign-off');
 });

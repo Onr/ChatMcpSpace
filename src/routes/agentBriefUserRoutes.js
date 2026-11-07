@@ -5,6 +5,7 @@ const { query } = require('../db/connection');
 const { isValidUUID } = require('../utils/validation');
 const { BriefError, getBrief, saveBrief, normalizeDocument, redactDocument, isVerifiedRunner } = require('../services/agentBriefService');
 const { requestCheckOnce } = require('../services/agentProactiveService');
+const { getStatus } = require('../services/agentBoardService');
 
 const router = express.Router();
 
@@ -161,7 +162,8 @@ router.get('/:agentId/brief/activity', viewable, async (req, res) => {
     if (req.briefAccess === 'participant') return res.status(403).json({ error: { message: 'Activity details are not shared with view-only collaborators' } });
     const result = await query(`SELECT event_type, detail, created_at FROM agent_brief_activity
       WHERE agent_id=$1 ORDER BY created_at DESC LIMIT 100`, [req.params.agentId]);
-    return res.json({ activity: req.briefAccess === 'owner' ? result.rows : result.rows.map(row => ({ ...row, detail: { outcome: row.detail?.outcome || null } })) });
+    if (req.briefAccess === 'owner') return res.json({ activity: result.rows, publishedStatus: await getStatus(req.params.agentId) });
+    return res.json({ activity: result.rows.map(row => ({ ...row, detail: { outcome: row.detail?.outcome || null } })) });
   } catch (error) { return fail(res, error); }
 });
 

@@ -43,7 +43,7 @@ identities/grants for separately connected Bots, without claiming Bot-level isol
 
 Use the existing MCP tools: `get_connection_status`, `list_agents`, `read_inbox`,
 `read_thread`, `send_message`, `send_peer_message`, `ack_message`,
-`upload_attachment`, and `read_attachment`.
+`upload_attachment`, `read_attachment`, `read_board`, and `publish_status`.
 
 - Read the inbox without acknowledging until the work and reply are delivered.
   Use the message's thread and identity fields; do not guess the recipient.
