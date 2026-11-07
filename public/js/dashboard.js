@@ -933,7 +933,7 @@ let pendingImages = []; // Array of {file, previewUrl, status, attachmentId, err
 let isUploadingImages = false; // Flag to track if images are currently being uploaded
 const MAX_IMAGES_PER_MESSAGE = 10; // Maximum attachments allowed per message
 const MAX_ATTACHMENT_SIZE_MB = 20;
-const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_SIZE_MB * 1_000_000; // Same decimal MB as the server limit
 let lastAgentRestorationAttempted = false; // Flag to ensure we only try to restore once on page load
 let promptedAgentUpdateVersions = new Map(); // Map<agentId, latestVersionAlreadyPrompted>
 const interactiveRichMessageCountByAgent = new Map(); // agentId -> number of known rich messages
@@ -1330,11 +1330,15 @@ function renderSideChatPickerList() {
 
   const query = String(search?.value || '').trim().toLowerCase();
   const agents = getSideChatPickerAgents()
-    .filter(agent => !query || String(agent.name || '').toLowerCase().includes(query))
+    .filter(agent => !query || window.AgentFuzzySearch.score(query, [agent.name]) > 0)
     .sort((a, b) => {
       const aPinned = window.MultiChatManager?.isOpen?.(a.agentId) ? 1 : 0;
       const bPinned = window.MultiChatManager?.isOpen?.(b.agentId) ? 1 : 0;
       if (aPinned !== bPinned) return aPinned - bPinned;
+      if (query) {
+        const scoreDifference = window.AgentFuzzySearch.score(query, [b.name]) - window.AgentFuzzySearch.score(query, [a.name]);
+        if (scoreDifference !== 0) return scoreDifference;
+      }
       const aTime = a.lastMessageTime ? new Date(a.lastMessageTime).getTime() : 0;
       const bTime = b.lastMessageTime ? new Date(b.lastMessageTime).getTime() : 0;
       if (bTime !== aTime) return bTime - aTime;
@@ -4338,6 +4342,17 @@ function setAgentListStatusFilter(nextFilter) {
   updateAgentListPanel(currentAgentList);
 }
 
+function getAgentSearchScore(agent, query) {
+  return window.AgentFuzzySearch.score(query, [
+    { text: agent?.name },
+    { text: agent?.briefSummary?.displayName },
+    { text: agent?.briefSummary?.role, weight: 0.8 },
+    { text: agent?.externalProvider, weight: 0.6 },
+    // Every agent shares a type, so a loose match here would match the whole list.
+    { text: agent?.agentType, weight: 0.4, literal: true }
+  ]);
+}
+
 function filterAgentListBySearch(agents) {
   const statusFiltered = filterAgentListByStatus(agents);
   const normalizedQuery = normalizeAgentListSearchQuery(agentListSearchQuery);
@@ -4345,19 +4360,11 @@ function filterAgentListBySearch(agents) {
     return statusFiltered;
   }
 
-  return statusFiltered.filter((agent) => {
-    const haystack = [
-      agent?.name,
-      agent?.briefSummary?.displayName,
-      agent?.briefSummary?.role,
-      agent?.externalProvider,
-      agent?.agentType
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return haystack.includes(normalizedQuery);
-  });
+  return statusFiltered
+    .map((agent) => ({ agent, score: getAgentSearchScore(agent, normalizedQuery) }))
+    .filter((match) => match.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((match) => match.agent);
 }
 
 function clearAgentListSearch({ blur = false, update = true } = {}) {
@@ -4527,8 +4534,12 @@ function updateAgentListPanel(agents) {
   // Determine which agents to show in list
   const listAgents = (currentGroups.length > 0) ? filteredUngrouped : filteredAgentList;
 
-  // Sort by lastMessageTime (most recent first), fallback to position
+  // Sort by search match, then lastMessageTime (most recent first), fallback to position
   const orderedAgents = [...listAgents].sort((a, b) => {
+    if (hasActiveSearch) {
+      const scoreDifference = getAgentSearchScore(b, normalizedSearchQuery) - getAgentSearchScore(a, normalizedSearchQuery);
+      if (scoreDifference !== 0) return scoreDifference;
+    }
     const aTime = a.lastMessageTime ? new Date(a.lastMessageTime).getTime() : 0;
     const bTime = b.lastMessageTime ? new Date(b.lastMessageTime).getTime() : 0;
     if (bTime !== aTime) return bTime - aTime;
@@ -6289,6 +6300,9 @@ function updateComposerState() {
   const generalFileInput = document.getElementById('generalFileInput');
   const generalFileUploadLabel = document.getElementById('generalFileUploadLabel');
   if (imageUploadLabel && !pendingImages.length) imageUploadLabel.style.position = '';
+  const needsEncryptionKey = hasAgent && !hasEncryptionKey && !isNewsFeed;
+  imageUploadLabel?.classList.toggle('attach-needs-key', needsEncryptionKey);
+  generalFileUploadLabel?.classList.toggle('attach-needs-key', needsEncryptionKey);
 
   // For news feed agents, show read-only activity log placeholder
   if (isNewsFeed) {
@@ -7720,6 +7734,16 @@ function setupImageUpload() {
   }
   if (imageUploadLabel) imageUploadLabel.style.position = '';
 
+  // Keyless attach buttons stay tappable so they can ask for the password
+  const promptForEncryptionKey = (event) => {
+    if (!event.currentTarget.classList.contains('attach-needs-key')) return;
+    event.preventDefault();
+    showDecryptionPasswordModal();
+  };
+  imageUploadLabel?.addEventListener('click', promptForEncryptionKey);
+  document.getElementById('generalFileUploadLabel')?.addEventListener('click', promptForEncryptionKey);
+  window.addEventListener('encryption:unlocked', updateComposerState);
+
   // Handle file selection
   imageFileInput.addEventListener('change', (event) => {
     const files = Array.from(event.target.files);
@@ -7733,35 +7757,9 @@ function setupImageUpload() {
       files.splice(remainingSlots);
     }
 
-    // Add files to pending attachments
-    files.forEach(file => {
-      // Validate file type
-      const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-      const isAllowedImage = allowedImageTypes.includes(file.type);
-      const isAllowedVideo = String(file.type || '').startsWith('video/');
-      if (!isAllowedImage && !isAllowedVideo) {
-        showErrorMessage(`${file.name}: Invalid file type. Only PNG, JPEG, WebP, GIF, and video files are allowed.`);
-        return;
-      }
-
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        showErrorMessage(`${file.name}: File too large. Maximum size is ${MAX_ATTACHMENT_SIZE_MB}MB.`);
-        return;
-      }
-
-      // Create preview URL
-      const previewUrl = URL.createObjectURL(file);
-
-      // Add to pending images
-      pendingImages.push({
-        id: crypto.randomUUID(),
-        file,
-        previewUrl,
-        status: 'pending', // pending, uploading, success, error
-        attachmentId: null,
-        error: null
-      });
-    });
+    // Add files to pending attachments. The picker already limits this button
+    // to media, and phones also return HEIC or typeless files from it.
+    files.forEach(file => queuePendingAttachment(file));
 
     // Clear the input so the same file can be selected again
     imageFileInput.value = '';
@@ -7793,26 +7791,7 @@ function setupImageUpload() {
       }
 
       // Add files to pending attachments
-      files.forEach(file => {
-        if (file.size > MAX_ATTACHMENT_BYTES) {
-          showErrorMessage(`${file.name}: File too large. Maximum size is 20MB.`);
-          return;
-        }
-
-        // Create preview URL (will show file icon for non-images)
-        const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
-
-        // Add to pending images (reusing the same array for all attachments)
-        pendingImages.push({
-          id: crypto.randomUUID(),
-          file,
-          previewUrl,
-          isFile: true, // Flag to indicate this is a general file, not just an image
-          status: 'pending',
-          attachmentId: null,
-          error: null
-        });
-      });
+      files.forEach(file => queuePendingAttachment(file, { isFile: true }));
 
       // Clear the input so the same file can be selected again
       generalFileInput.value = '';
@@ -7891,41 +7870,13 @@ function setupImageUpload() {
       }
 
       // Process each image file
-      for (const file of imageFiles) {
-        // Validate file type
-        const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-        if (!allowedTypes.includes(file.type)) {
-          showErrorMessage(`${file.name || 'Pasted image'}: Invalid file type. Only PNG, JPEG, WebP, and GIF are allowed.`);
-          continue;
-        }
-
-        // Validate file size (5MB max)
-        const maxSize = 5 * 1024 * 1024;
-        if (file.size > maxSize) {
-          showErrorMessage(`${file.name || 'Pasted image'}: File too large. Maximum size is 5MB.`);
-          continue;
-        }
-
-        // Create preview URL
-        const previewUrl = URL.createObjectURL(file);
-
-        // Add to pending images
-        pendingImages.push({
-          id: crypto.randomUUID(),
-          file,
-          previewUrl,
-          status: 'pending',
-          attachmentId: null,
-          error: null
-        });
-      }
+      const addedCount = imageFiles.filter(file => queuePendingAttachment(file)).length;
 
       // Update the UI
       renderImagePreviews();
       updateComposerState();
 
       // Show feedback
-      const addedCount = imageFiles.length;
       if (addedCount > 0) {
         showSuccessMessage(`Added ${addedCount} image${addedCount > 1 ? 's' : ''} from clipboard`);
       }
@@ -7959,41 +7910,13 @@ function setupImageUpload() {
         }
 
         // Process each image file
-        for (const file of files) {
-          // Validate file type
-          const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-          const isAllowedImage = allowedImageTypes.includes(file.type);
-          const isAllowedVideo = String(file.type || '').startsWith('video/');
-          if (!isAllowedImage && !isAllowedVideo) {
-            showErrorMessage(`${file.name}: Invalid file type. Only PNG, JPEG, WebP, GIF, and video files are allowed.`);
-            continue;
-          }
-
-          if (file.size > MAX_ATTACHMENT_BYTES) {
-            showErrorMessage(`${file.name}: File too large. Maximum size is ${MAX_ATTACHMENT_SIZE_MB}MB.`);
-            continue;
-          }
-
-          // Create preview URL
-          const previewUrl = URL.createObjectURL(file);
-
-          // Add to pending images
-          pendingImages.push({
-            id: crypto.randomUUID(),
-            file,
-            previewUrl,
-            status: 'pending',
-            attachmentId: null,
-            error: null
-          });
-        }
+        const addedCount = files.filter(file => queuePendingAttachment(file)).length;
 
         // Update the UI
         renderImagePreviews();
         updateComposerState();
 
         // Show feedback
-        const addedCount = files.length;
         if (addedCount > 0) {
           showSuccessMessage(`Added ${addedCount} attachment${addedCount > 1 ? 's' : ''} from drag & drop`);
         }
@@ -8075,8 +7998,8 @@ function renderImagePreviews() {
     }
 
     // Determine if this is an image or a general file
-    const isImage = img.file.type.startsWith('image/') && img.previewUrl;
-    const isVideo = img.file.type.startsWith('video/') && img.previewUrl;
+    const isImage = isAttachmentImage(img.file) && img.previewUrl;
+    const isVideo = isAttachmentVideo(img.file) && img.previewUrl;
 
     // Content to display (image preview or file icon)
     let contentHtml;
@@ -8171,6 +8094,10 @@ const ATTACHMENT_EXTENSION_CONTENT_TYPES = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
   '.mp4': 'video/mp4',
   '.m4v': 'video/mp4',
   '.webm': 'video/webm',
@@ -8198,9 +8125,19 @@ function inferAttachmentContentType(fileOrAttachment) {
   return ATTACHMENT_EXTENSION_CONTENT_TYPES[extMatch[0]] || explicitContentType || 'application/octet-stream';
 }
 
+// Other image formats (HEIC, TIFF, RAW) send fine but most browsers can't draw them
+const BROWSER_DISPLAYABLE_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+  'image/avif',
+  'image/bmp'
+]);
+
 function isAttachmentImage(fileOrAttachment) {
-  const contentType = inferAttachmentContentType(fileOrAttachment);
-  return contentType.startsWith('image/');
+  return BROWSER_DISPLAYABLE_IMAGE_TYPES.has(inferAttachmentContentType(fileOrAttachment));
 }
 
 function isAttachmentVideo(fileOrAttachment) {
@@ -8208,8 +8145,28 @@ function isAttachmentVideo(fileOrAttachment) {
   return contentType.startsWith('video/');
 }
 
-function getAttachmentContentType(file) {
-  return String(file?.type || '').trim() || 'application/octet-stream';
+/**
+ * Add a file to the composer's pending attachments
+ * @param {File} file - The file to attach
+ * @param {Object} [extra] - Extra fields for the pending entry
+ * @returns {boolean} Whether the file was added
+ */
+function queuePendingAttachment(file, extra = {}) {
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    showErrorMessage(`${file.name || 'Attachment'}: File too large. Maximum size is ${MAX_ATTACHMENT_SIZE_MB}MB.`);
+    return false;
+  }
+
+  pendingImages.push({
+    id: crypto.randomUUID(),
+    file,
+    previewUrl: isAttachmentImage(file) || isAttachmentVideo(file) ? URL.createObjectURL(file) : null,
+    status: 'pending', // pending, uploading, success, error
+    attachmentId: null,
+    error: null,
+    ...extra
+  });
+  return true;
 }
 
 /**
@@ -8237,9 +8194,10 @@ async function uploadSingleImage(imageEntry) {
     // Read file as ArrayBuffer
     const arrayBuffer = await imageEntry.file.arrayBuffer();
 
+    // Dimensions are optional, so a damaged image can still be sent as a file
     let dimensions = { width: 0, height: 0 };
     if (isAttachmentImage(imageEntry.file)) {
-      dimensions = await getImageDimensions(imageEntry.file);
+      dimensions = await getImageDimensions(imageEntry.file).catch(() => dimensions);
     }
 
     // Encrypt the image data
@@ -8251,7 +8209,7 @@ async function uploadSingleImage(imageEntry) {
     formData.append('file', new Blob([ciphertext], { type: 'application/octet-stream' }), imageEntry.file.name);
     formData.append('ivBase64', window.E2EEncryption.arrayBufferToBase64(iv.buffer));
     formData.append('authTagBase64', window.E2EEncryption.arrayBufferToBase64(authTag.buffer));
-    formData.append('contentType', getAttachmentContentType(imageEntry.file));
+    formData.append('contentType', inferAttachmentContentType(imageEntry.file));
     if (dimensions.width > 0) formData.append('width', dimensions.width.toString());
     if (dimensions.height > 0) formData.append('height', dimensions.height.toString());
 

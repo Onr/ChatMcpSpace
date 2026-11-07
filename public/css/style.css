@@ -5950,6 +5950,13 @@ button:focus-visible {
   pointer-events: none;
 }
 
+/* Without a key the buttons still take the tap, to ask for the password */
+#imageUploadLabel.disabled.attach-needs-key,
+#generalFileUploadLabel.disabled.attach-needs-key {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 /* File preview item (for non-image files) */
 .file-preview-item {
   background: rgba(30, 41, 59, 0.9);
@@ -9731,4 +9738,17 @@ a:focus-visible, select:focus-visible, summary:focus-visible, textarea:focus-vis
   background: rgba(100, 116, 139, 0.4);
   color: #cbd5e1;
   cursor: not-allowed;
+}
+
+/* The open list sits over the chat on phones: mark its edges and hide the chat behind it. */
+@media (max-width: 767px) {
+  #agentListPanel.mobile-expanded {
+    background: rgb(3, 7, 18);
+    border-bottom: 2px solid rgba(52, 211, 153, 0.65);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.65);
+  }
+
+  #agentListPanel.mobile-expanded .agent-list-header {
+    border-bottom-color: rgba(148, 163, 184, 0.4);
+  }
 }

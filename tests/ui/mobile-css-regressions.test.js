@@ -71,7 +71,7 @@ describe('Mobile layout regression guards', () => {
   it('allows the mobile photo picker to select and render videos as encrypted attachments', () => {
     expect(dashboard).toContain('accept="image/*,video/*"');
     expect(dashboard).toContain('title="Attach photos or videos"');
-    expect(js).toMatch(/const isAllowedVideo = String\(file\.type \|\| ''\)\.startsWith\('video\/'\)/);
+    expect(js).toMatch(/isAttachmentImage\(file\) \|\| isAttachmentVideo\(file\) \? URL\.createObjectURL\(file\)/);
     expect(js).toMatch(/isAttachmentVideo\(fileOrAttachment\)/);
     expect(js).toMatch(/document\.createElement\('video'\)/);
     expect(js).toMatch(/function inferAttachmentContentType\(fileOrAttachment\)/);

@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 
+const AgentFuzzySearch = require('../../public/js/agent-fuzzy-search');
+
 function normalizeAgentListSearchQuery(query) {
   return String(query || '').trim().toLowerCase();
 }
@@ -12,13 +14,11 @@ function filterAgentListBySearch(agents, query) {
     return Array.isArray(agents) ? agents : [];
   }
 
-  return (Array.isArray(agents) ? agents : []).filter((agent) => {
-    const haystack = [agent?.name, agent?.externalProvider, agent?.agentType]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return haystack.includes(normalizedQuery);
-  });
+  return (Array.isArray(agents) ? agents : []).filter((agent) => AgentFuzzySearch.score(normalizedQuery, [
+    { text: agent?.name },
+    { text: agent?.externalProvider, weight: 0.6 },
+    { text: agent?.agentType, weight: 0.4, literal: true }
+  ]) > 0);
 }
 
 function getAgentListEmptyStateHtml(message) {
