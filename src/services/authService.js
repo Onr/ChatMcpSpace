@@ -60,7 +60,7 @@ function generateScriptToken() {
  * @returns {Promise<Object>} Created user object with userId, email, and apiKey
  * @throws {Error} If email already exists or registration fails
  */
-async function registerUser(email, password) {
+async function registerUser(email, password, options = {}) {
   try {
     // Hash the password
     const passwordHash = await hashPassword(password);
@@ -81,6 +81,12 @@ async function registerUser(email, password) {
     // already verified and can sign in immediately.
     if (isLocalAuthMode()) {
       columns.push('email_verified', 'email_verified_at');
+      values.push(true, new Date());
+    }
+
+    // Project news emails are strictly opt-in: only an explicit true is stored.
+    if (options.newsOptIn === true) {
+      columns.push('news_opt_in', 'news_opt_in_at');
       values.push(true, new Date());
     }
 

@@ -1195,8 +1195,9 @@ router.post('/register', authRateLimiter, validateCsrfToken, async (req, res) =>
       });
     }
 
-    // Register user
-    const user = await registerUser(email, password);
+    // Register user (news opt-in is an unchecked-by-default checkbox)
+    const newsOptIn = req.body.newsOptIn === 'on' || req.body.newsOptIn === 'true';
+    const user = await registerUser(email, password, { newsOptIn });
 
     // Local mode: there is no verification email to wait on, so log the new
     // user in straight away.
@@ -1961,7 +1962,7 @@ router.get('/settings', protectRoute, async (req, res) => {
 
     // Fetch user's API key and encryption salt
     let userResult = await query(
-      'SELECT api_key, encryption_salt FROM users WHERE user_id = $1',
+      'SELECT api_key, encryption_salt, news_opt_in FROM users WHERE user_id = $1',
       [userId]
     );
 
@@ -1973,6 +1974,7 @@ router.get('/settings', protectRoute, async (req, res) => {
     }
 
     const apiKey = userResult.rows[0].api_key;
+    const newsOptIn = userResult.rows[0].news_opt_in === true;
     let encryptionSalt = userResult.rows[0].encryption_salt;
 
     // Generate encryption_salt if missing (legacy user)
@@ -2001,8 +2003,11 @@ router.get('/settings', protectRoute, async (req, res) => {
       defaultAgentName,
       encryptionSalt: encryptionSalt,
       mfaEnabled: userMfa?.enabled === true,
+      newsOptIn,
       csrfToken: res.locals.csrfToken,
-      success: req.query.success === 'true' ? 'API key regenerated successfully' : null
+      success: req.query.success === 'true' ? 'API key regenerated successfully'
+        : req.query.news === 'on' ? 'You are subscribed to project news.'
+        : req.query.news === 'off' ? 'You are unsubscribed from project news.' : null
     });
 
   } catch (error) {
@@ -2135,6 +2140,27 @@ router.post('/settings/regenerate-key', protectRoute, validateCsrfToken, async (
 
   } catch (error) {
     console.error('API key regeneration error:', error);
+    res.redirect('/settings?error=true');
+  }
+});
+
+/**
+ * POST /settings/news-opt-in
+ * Subscribe or unsubscribe the signed-in user from project news emails
+ */
+router.post('/settings/news-opt-in', protectRoute, validateCsrfToken, async (req, res) => {
+  try {
+    const optIn = req.body.newsOptIn === 'true';
+    await query(
+      `UPDATE users SET news_opt_in = $1,
+         news_opt_in_at = CASE WHEN $1 THEN NOW()::timestamp ELSE NULL END,
+         updated_at = NOW()::timestamp
+       WHERE user_id = $2`,
+      [optIn, req.user.userId]
+    );
+    res.redirect(`/settings?news=${optIn ? 'on' : 'off'}#project-news`);
+  } catch (error) {
+    console.error('News opt-in update error:', error);
     res.redirect('/settings?error=true');
   }
 });

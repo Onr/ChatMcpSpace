@@ -382,6 +382,28 @@
 
             </div>
 
+            <!-- Project News -->
+            <div id="project-news" class="glass-panel p-6 slide-in-up" style="animation-delay: 0.3s;">
+              <div class="flex items-center justify-between gap-4 p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                <div>
+                  <h2 class="text-sm font-medium text-slate-200">Project news</h2>
+                  <p class="text-xs text-slate-500 mt-0.5">
+                    <% if (typeof newsOptIn !== 'undefined' && newsOptIn) { %>You get occasional emails about new features and updates.<% } else { %>Get occasional emails about new features and updates.<% } %>
+                  </p>
+                </div>
+                <form action="/settings/news-opt-in" method="POST" class="flex-shrink-0">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <% if (typeof newsOptIn !== 'undefined' && newsOptIn) { %>
+                    <input type="hidden" name="newsOptIn" value="false">
+                    <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200">Unsubscribe</button>
+                  <% } else { %>
+                    <input type="hidden" name="newsOptIn" value="true">
+                    <button type="submit" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white">Subscribe</button>
+                  <% } %>
+                </form>
+              </div>
+            </div>
+
             <!-- Two-Factor Authentication -->
             <div class="glass-panel p-6 slide-in-up" style="animation-delay: 0.31s;">
               <div class="flex items-center gap-3 mb-6">

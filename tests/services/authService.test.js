@@ -81,6 +81,18 @@ describe('Auth Service', () => {
       });
     });
 
+    it('stores news opt-in only when explicitly requested', async () => {
+      query.mockResolvedValue({ rows: [{ user_id: 'user-id', email: validUser.email, api_key: 'mock-uuid', encryption_salt: 'mock-salt', created_at: new Date() }] });
+
+      await authService.registerUser(validUser.email, validUser.password, { newsOptIn: true });
+      expect(query.mock.calls[0][0]).toContain('news_opt_in, news_opt_in_at');
+      expect(query.mock.calls[0][1].slice(-2)).toEqual([true, expect.any(Date)]);
+
+      query.mockClear();
+      await authService.registerUser(validUser.email, validUser.password, { newsOptIn: 'yes' });
+      expect(query.mock.calls[0][0]).not.toContain('news_opt_in');
+    });
+
     it('should throw error on duplicate email', async () => {
       const error = new Error('Duplicate');
       error.code = '23505';

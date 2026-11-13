@@ -40,6 +40,8 @@ CREATE TABLE users (
   encryption_salt VARCHAR(255) NOT NULL, -- User-specific salt for E2E encryption (never used for decryption by server)
   email_verified BOOLEAN DEFAULT FALSE,
   email_verified_at TIMESTAMP DEFAULT NULL,
+  news_opt_in BOOLEAN NOT NULL DEFAULT FALSE, -- opted in to project news emails
+  news_opt_in_at TIMESTAMP DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

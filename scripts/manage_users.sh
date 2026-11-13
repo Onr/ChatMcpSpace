@@ -77,6 +77,10 @@ list_users() {
     select_cols+=", u.email_verified"
   fi
 
+  if check_column_exists "users" "news_opt_in"; then
+    select_cols+=", CASE WHEN u.news_opt_in THEN 'yes' ELSE 'no' END AS news"
+  fi
+
   select_cols+=", u.user_id"
 
   # Create a temporary CSV file for gum table

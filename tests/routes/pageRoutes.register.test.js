@@ -136,6 +136,25 @@ describe('pageRoutes registration email flow', () => {
     } finally { dom.window.close(); }
   });
 
+  it('passes the optional news opt-in checkbox to registration', async () => {
+    const { app, registerUser } = buildApp({ sendVerificationEmailResult: { success: true } });
+    const base = { email: 'news@example.com', password: 'Password123!', confirmPassword: 'Password123!' };
+    await request(app).post('/register').type('form').send({ ...base, newsOptIn: 'on' }).expect(302);
+    expect(registerUser).toHaveBeenLastCalledWith('news@example.com', 'Password123!', { newsOptIn: true });
+    await request(app).post('/register').type('form').send(base).expect(302);
+    expect(registerUser).toHaveBeenLastCalledWith('news@example.com', 'Password123!', { newsOptIn: false });
+  });
+
+  it('ships the news opt-in checkbox unchecked by default', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const view = fs.readFileSync(path.join(__dirname, '../../views/register.ejs'), 'utf8');
+    const tag = view.match(/<input[^>]*id="newsOptIn"[^>]*>/s)[0];
+    expect(tag).toContain('name="newsOptIn"');
+    expect(tag).toContain('type="checkbox"');
+    expect(tag).not.toMatch(/\bchecked\b|\brequired\b/);
+  });
+
   it('redirects to verify-email-sent after successful registration and send', async () => {
     const { app, session, sendVerificationEmail } = buildApp({
       sendVerificationEmailResult: { success: true, messageId: 'msg-1' },
