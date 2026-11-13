@@ -95,13 +95,14 @@ function buildApp({ sendVerificationEmailResult = { success: true }, verifyEmail
   app.use(express.json());
   app.use((req, res, next) => {
     req.session = session;
+    if (session.testUser) req.user = session.testUser;
     res.locals.csrfToken = 'csrf-token';
     res.render = (view, locals) => res.status(200).json({ view, ...locals });
     next();
   });
   app.use(pageRoutes);
 
-  return { app, session, registerUser, sendVerificationEmail, verifyEmailCode, createSession };
+  return { app, session, query, registerUser, sendVerificationEmail, verifyEmailCode, createSession };
 }
 
 describe('pageRoutes registration email flow', () => {
@@ -143,6 +144,17 @@ describe('pageRoutes registration email flow', () => {
     expect(registerUser).toHaveBeenLastCalledWith('news@example.com', 'Password123!', { newsOptIn: true });
     await request(app).post('/register').type('form').send(base).expect(302);
     expect(registerUser).toHaveBeenLastCalledWith('news@example.com', 'Password123!', { newsOptIn: false });
+  });
+
+  it('lets a signed-in user subscribe and unsubscribe from project news in settings', async () => {
+    const { app, session, query } = buildApp();
+    session.testUser = { userId: 'user-123', email: 'new@example.com' };
+    const on = await request(app).post('/settings/news-opt-in').type('form').send({ newsOptIn: 'true' }).expect(302);
+    expect(on.headers.location).toBe('/settings?news=on#project-news');
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining('SET news_opt_in = $1'), [true, 'user-123']);
+    const off = await request(app).post('/settings/news-opt-in').type('form').send({ newsOptIn: 'false' }).expect(302);
+    expect(off.headers.location).toBe('/settings?news=off#project-news');
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining('SET news_opt_in = $1'), [false, 'user-123']);
   });
 
   it('ships the news opt-in checkbox unchecked by default', () => {
