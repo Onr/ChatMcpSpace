@@ -365,6 +365,27 @@
     });
     return names.includes('Owner') ? `Owner${names.filter(name => name !== 'Owner').length ? ' + ' + [...new Set(names.filter(name => name !== 'Owner'))].join(', ') : ' only'}` : names.join(', ');
   }
+  function updateRuntimeNotice(context, roomData) {
+    let notice = document.getElementById('sharingRuntimeNotice');
+    const lastSeen = Date.parse(roomData?.runtime?.last_seen_at);
+    const offline = !Number.isFinite(lastSeen) || Date.now() - lastSeen > 120000;
+    if (!offline) { if (notice) notice.hidden = true; return; }
+    const area = document.getElementById('conversationArea');
+    if (!notice && area) {
+      notice = document.createElement('aside');
+      notice.id = 'sharingRuntimeNotice';
+      notice.className = 'mx-4 my-2 shrink-0 rounded-lg border border-amber-500/30 bg-slate-900 p-3 text-sm text-amber-100';
+      notice.setAttribute('role', 'status');
+      notice.setAttribute('aria-live', 'polite');
+      area.before(notice);
+    }
+    if (!notice) return;
+    notice.hidden = false;
+    notice.textContent = 'Agent runner offline — no recent check-in.' +
+      (Number.isFinite(lastSeen) ? ` Last check-in: ${new Date(lastSeen).toISOString()}.` : '') +
+      ' Messages received by the server wait for the runner to reconnect. ' +
+      (context.role === 'owner' ? 'Reconnect this agent’s shared runner on its machine; check its provider login and quota if it cannot start.' : 'Ask the owner to reconnect this agent’s shared runner on its machine.');
+  }
   function updateExecutionNotice(context, roomData) {
     const notice = document.getElementById('sharingExecutionNotice');
     if (!notice) return;
@@ -513,6 +534,7 @@
     }
     if (!context.capabilities?.read) throw new Error('You do not have access to this conversation yet.');
     root.DashboardHelpers?.refreshSelectedChatContext?.(context, roomData);
+    updateRuntimeNotice(context, roomData);
     updateExecutionNotice(context, roomData);
     if (timelineCacheRoomId !== context.conversationId) {
       timelineCacheRoomId = context.conversationId;
@@ -970,6 +992,8 @@
     contextEpoch += 1;
     const executionNotice = document.getElementById('sharingExecutionNotice');
     if (executionNotice) executionNotice.hidden = true;
+    const runtimeNotice = document.getElementById('sharingRuntimeNotice');
+    if (runtimeNotice) runtimeNotice.hidden = true;
     root.DashboardHelpers?.ownerHistoryStatus?.(context?.conversationId, '');
     root.DashboardHelpers?.sharedHistoryLoading?.(false);
     root.DashboardHelpers?.sharedHistoryError?.('');

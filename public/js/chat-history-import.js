@@ -337,10 +337,21 @@
       const details = await response.json();
       if (!isCurrent(epoch, conversationId)) return;
       previewNode.replaceChildren();
-      for (const person of [...(details.members || []), ...(details.guests || [])].filter(person => person.status !== 'removed')) {
+      const viewerId = document.getElementById('dashboardRoot')?.dataset.userId;
+      const people = [...(details.members || []), ...(details.guests || [])].filter(person => person.status !== 'removed');
+      const isViewer = person => Boolean(viewerId && person.user_id === viewerId);
+      people.sort((a, b) => Number(isViewer(b)) - Number(isViewer(a)));
+      for (const person of people) {
         const row = document.createElement('p');
-        row.textContent = `${person.display_name || 'Participant'} · ${person.role === 'owner' ? 'Owner' : person.status === 'active' ? 'Joined' : 'Access pending'}`;
+        row.textContent = `${person.display_name || 'Participant'}${isViewer(person) ? ' · You (signed in)' : ''} · ${person.role === 'owner' ? 'Owner' : person.status === 'active' ? 'Joined' : 'Access pending'}`;
+        if (isViewer(person)) row.dataset.currentUser = 'true';
         previewNode.append(row);
+      }
+      if (viewerId && !people.some(isViewer)) {
+        const warning = document.createElement('p');
+        warning.textContent = 'Your signed-in account is missing from the participant roster. Refresh the conversation and ask the owner to check membership if this continues.';
+        warning.dataset.rosterMismatch = 'true';
+        previewNode.append(warning);
       }
     } catch (error) { if (isCurrent(epoch, conversationId)) status.textContent = error.message; }
   }

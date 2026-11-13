@@ -15,7 +15,7 @@ function context(status = 'active') {
     capabilities: { read: status === 'active', send: status === 'active' }
   };
 }
-function mount({ pending = false, activateOnRoom = false, delayRoom = false, includeQuestion = false, longHistory = false, scrollArea = false } = {}) {
+function mount({ pending = false, activateOnRoom = false, delayRoom = false, includeQuestion = false, longHistory = false, scrollArea = false, runtime = null } = {}) {
   document.body.innerHTML = '<div id="dashboardRoot" data-user-id="viewer-one" data-display-name="Viewer"></div>';
   if (scrollArea) document.body.insertAdjacentHTML('beforeend', '<div id="conversationArea"></div>');
   Object.defineProperty(window, 'crypto', { configurable: true, value: webcrypto });
@@ -60,6 +60,7 @@ function mount({ pending = false, activateOnRoom = false, delayRoom = false, inc
         await new Promise(resolve => { releaseRoom = resolve; });
       }
       return response({
+      runtime,
       room: { id: 'room-one', owner_id: 'owner-one', agent_id: 'agent-one', key_version: 1, membership_version: 2, rotation_required: false, member: { status: activateOnRoom || !pending ? 'active' : 'pending', role: 'participant' } },
       keys: [{ key_version: 1, wrapped_key: 'wrapped' }],
       members: [{ user_id: 'viewer-one', display_name: 'Viewer', status: 'active' }, { user_id: 'peer-one', display_name: 'Peer', status: 'active' }],
@@ -86,6 +87,27 @@ function mount({ pending = false, activateOnRoom = false, delayRoom = false, inc
   window.InPlaceChat.setContext(context(pending ? 'pending' : 'active'));
   return { calls, messages, waitForRoomRequest: () => roomStarted, releaseRoom: () => releaseRoom?.() };
 }
+
+test('an offline shared runner is explained, then a fresh check-in clears the notice without changing messages', async () => {
+  const runtime = { last_seen_at: '2026-10-21T06:20:28.677Z' };
+  const fixture = mount({ scrollArea: true, runtime });
+  await window.InPlaceChat.loadTimeline();
+  const notice = document.getElementById('sharingRuntimeNotice');
+  expect(notice.hidden).toBe(false);
+  expect(notice.textContent).toContain('Agent runner offline');
+  expect(notice.textContent).toContain('2026-10-21T06:20:28.677Z');
+  expect(notice.textContent).toContain('Ask the owner');
+  expect(fixture.calls.filter(call => call.options.method === 'POST').map(call => call.url)).not.toContain('/api/user/shared/room-one/messages');
+  runtime.last_seen_at = new Date().toISOString();
+  await window.InPlaceChat.loadTimeline();
+  expect(notice.hidden).toBe(true);
+  runtime.last_seen_at = 'invalid';
+  await window.InPlaceChat.loadTimeline();
+  expect(notice.hidden).toBe(false);
+  expect(notice.textContent).not.toContain('Invalid Date');
+  window.InPlaceChat.setContext({ mode: 'private', conversationId: 'private' });
+  expect(notice.hidden).toBe(true);
+});
 
 test('access setup explains a maintenance response and clears the notice after recovery', async () => {
   mount();

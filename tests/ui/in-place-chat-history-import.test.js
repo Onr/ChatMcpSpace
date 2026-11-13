@@ -9,12 +9,13 @@ function response(body, status=200) { return { ok:status<300,status,json:async()
 function tick() { return new Promise(resolve=>setTimeout(resolve,5)); }
 
 
-test('a participant count opens the same sharing controls with a read-only audience for members', async () => {
+test.each([true, false])('a participant count identifies the signed-in account or warns about a roster mismatch (present=%s)', async present => {
   document.body.innerHTML = `<div id="shareExistingChatDialog" class="hidden"><button id="shareExistingChatClose"></button><button id="shareExistingChatCancel"></button><p id="shareExistingChatStatus"></p><div id="shareExistingChatPreview"></div><div id="shareExistingChatInvites"><input id="shareInviteEmail"></div><div id="shareGuestControls"></div><button id="shareInviteSubmit"></button><button id="shareExistingChatPrepare"></button></div><button id="headerShareExistingChatBtn" hidden></button><button id="selectedChatContextStatus"><svg></svg><span>3</span></button>`;
   window.DashboardHelpers = { getSelectedAgentIdentity: () => ({ agentId: id, conversationId: id, mode: 'shared', role: 'participant' }) };
+  document.body.insertAdjacentHTML('afterbegin', '<div id="dashboardRoot" data-user-id="viewer"></div>');
   window.fetch = jest.fn(async url => {
     if (url === `/api/user/shared/${id}`) return response({ members: [
-      { display_name: 'Host', role: 'owner', status: 'active' }, { display_name: 'Reviewer', status: 'active' }
+      { user_id: 'host', display_name: 'Host', role: 'owner', status: 'active' }, { user_id: present ? 'viewer' : 'other', display_name: 'onr', status: 'active' }
     ], guests: [{ display_name: 'Guest', status: 'active' }] });
     throw new Error(`Member must not request owner controls: ${url}`);
   });
@@ -23,7 +24,15 @@ test('a participant count opens the same sharing controls with a read-only audie
   count.focus();
   count.click();
   await tick();
-  expect(document.getElementById('shareExistingChatPreview').textContent).toBe('Host · OwnerReviewer · JoinedGuest · Joined');
+  const preview = document.getElementById('shareExistingChatPreview');
+  if (present) {
+    expect(preview.firstChild.textContent).toBe('onr · You (signed in) · Joined');
+    expect(preview.querySelector('[data-current-user="true"]')).toBe(preview.firstChild);
+    expect(preview.querySelector('[data-roster-mismatch]')).toBeNull();
+  } else {
+    expect(preview.querySelector('[data-roster-mismatch]').textContent).toContain('signed-in account is missing');
+    expect(preview.querySelector('[data-current-user]')).toBeNull();
+  }
   expect(document.getElementById('shareExistingChatInvites').hidden).toBe(true);
   expect(document.getElementById('shareGuestControls').hidden).toBe(true);
   expect(document.getElementById('shareExistingChatPrepare').hidden).toBe(true);

@@ -306,8 +306,11 @@
       manager = ['owner', 'manager'].includes(mine.role),
       members = $('sharedMembers');
     members.replaceChildren();
-    for (const m of context.members) {
-      const row = node('div', `${m.display_name || 'Invited member'} · ${m.user_id.slice(0, 6)} — ${m.role}, ${m.status}`);
+    const roster = [...context.members].sort((a, b) => Number(b.user_id === userId) - Number(a.user_id === userId));
+    for (const m of roster) {
+      const isCurrentUser = m.user_id === userId;
+      const row = node('div', `${m.display_name || 'Invited member'} · ${m.user_id.slice(0, 6)}${isCurrentUser ? ' · You (signed in)' : ''} — ${m.role}, ${m.status}`);
+      if (isCurrentUser) row.dataset.currentUser = 'true';
       if (m.status === 'recovering' && manager && m.user_id !== userId) row.append(action('Approve key recovery', async () => {
         if (!confirm('Verify this participant requested a new encryption identity before granting access to retained history.')) return;
         await api(`/${active}/members/${m.user_id}/recover`, {});
@@ -330,6 +333,11 @@
         await refresh();
       }));
       members.append(row);
+    }
+    if (!roster.some(m => m.user_id === userId)) {
+      const warning = node('div', 'You · signed-in account is missing from the participant roster. Refresh the conversation; if this remains, ask the owner to check membership.');
+      warning.dataset.rosterMismatch = 'true';
+      members.append(warning);
     }
     for (const id of ['sharedInvite', 'sharedProfile', 'sharedStop', 'sharedRetry', 'sharedSkip']) $(id).hidden = !manager;
     const profiles = $('sharedProfile').elements.profile;
