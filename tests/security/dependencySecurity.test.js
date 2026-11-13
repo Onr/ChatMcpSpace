@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
+const merge = require('deepmerge');
+const deepmergePackage = require('deepmerge/package.json');
 const request = require('supertest');
 
 describe('security dependency compatibility', () => {
@@ -40,5 +42,24 @@ describe('security dependency compatibility', () => {
       subject: 'Depth safety check',
       text: 'ok'
     })).resolves.toHaveProperty('message');
+  });
+
+  test('Jest uses the patched deepmerge build and rejects prototype poisoning', () => {
+    const nullPrototypeTarget = Object.create(null);
+    nullPrototypeTarget.debug = false;
+    const malicious = JSON.parse('{"__proto__":{"isAdmin":true}}');
+    const merged = merge(nullPrototypeTarget, malicious);
+
+    expect(deepmergePackage.version).toBe('4.3.2-security.0');
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
+    expect(merged.isAdmin).toBeUndefined();
+    expect(merged.debug).toBe(false);
+
+    const nested = merge(
+      { session: null },
+      JSON.parse('{"session":{"__proto__":{"isAdmin":true}}}')
+    );
+    expect(Object.getPrototypeOf(nested.session)).toBe(Object.prototype);
+    expect(nested.session.isAdmin).toBeUndefined();
   });
 });
