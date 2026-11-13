@@ -12,6 +12,7 @@
   const invitesPanel = document.getElementById('shareExistingChatInvites');
   const inviteList = document.getElementById('shareInviteList');
   const guestControls = document.getElementById('shareGuestControls');
+  const linkAvailability = document.getElementById('shareLinkAvailability');
   const prepareButton = document.getElementById('shareExistingChatPrepare');
   const retryButton = document.getElementById('shareExistingChatRetry');
   const sharingSwitch = document.getElementById('agentSharingSwitch');
@@ -44,6 +45,13 @@
       invitesPanel.hidden = !enabled;
       if (guestControls) guestControls.hidden = !enabled;
     }
+  }
+
+  function renderLinkAvailability(isShared) {
+    if (!linkAvailability) return;
+    linkAvailability.hidden = Boolean(isShared);
+    linkAvailability.textContent = isShared ? ''
+      : 'Guest link options appear here after the private history finishes converting. You can invite an account by email now; the invitation is sent when sharing completes.';
   }
 
   async function toggleSharing() {
@@ -232,6 +240,7 @@
     if (retryButton) retryButton.hidden = true;
     invitesPanel.hidden = true;
     if (guestControls) guestControls.hidden = true;
+    if (linkAvailability) linkAvailability.hidden = true;
     prepareButton.disabled = true;
     const title = document.getElementById('shareExistingChatTitle');
     if (title) title.textContent = captured?.agentName ? `Share ${captured.agentName}` : 'Share this conversation';
@@ -243,6 +252,7 @@
       return;
     }
     if (captured.mode === 'shared') {
+      renderLinkAvailability(true);
       prepareButton.hidden = true;
       document.getElementById('shareExistingChatCancel').textContent = 'Done';
       if (captured.role !== 'owner') {
@@ -392,6 +402,7 @@
         status.textContent = context.state === 'preparing'
           ? `Saved preparation: ${activeImport?.importedItems || 0} of ${activeImport?.expectedItems || 0} messages converted. Resume here; your history remains private until completion.`
           : 'Review the source scope before converting. Your private history is read and re-encrypted in this browser.';
+        renderLinkAvailability(false);
         prepareButton.disabled = false;
         renderSharingSwitch(false);
         if (context.state === 'preparing') prepareButton.textContent = 'Resume preparation';
@@ -802,15 +813,18 @@
     if (busy || !captured || !preview || preview.excludedAttachments || preview.pendingScheduledMessages) return;
     const epoch = dialogEpoch;
     const target = { ...captured };
+    let started = Boolean(activeImport);
     busy = true;
     prepareButton.disabled = true;
+    prepareButton.textContent = 'Preparing…';
+    status.textContent = started ? 'Resuming history conversion… Your private history stays unchanged until conversion finishes.'
+      : 'Preparing your conversation for sharing… Your private history stays unchanged until conversion finishes.';
     document.getElementById('shareExistingChatClose').disabled = true;
     document.getElementById('shareExistingChatCancel').disabled = true;
     const input = document.getElementById('userMessageInput');
     const draft = input?.value || '';
     const area = document.getElementById('conversationArea');
     const scroll = area?.scrollTop || 0;
-    let started = Boolean(activeImport);
     try {
       const requestKey = `sharing-import-request:${target.conversationId}`;
       let requestId = sessionStorage.getItem(requestKey);
@@ -825,7 +839,7 @@
       const importKey = `sharing-import-mappings:${result.importId}`;
       let mappings = {};
       try { mappings = JSON.parse(sessionStorage.getItem(importKey) || '{}'); } catch (_) {}
-      const ownerKey = root.DashboardHelpers?.getEncryptionKey?.();
+      const ownerKey = await root.E2EEncryption?.getStoredEncryptionKey?.() || root.DashboardHelpers?.getEncryptionKey?.();
       const prepared = await root.InPlaceChat.prepareOwnerShare({ ...captured, mode: 'shared', capabilities: { read: true, send: false } });
       const chunkSize = 40;
       for (let offset = Number(result.importedItems || 0); offset < result.expectedItems; ) {
@@ -843,7 +857,10 @@
           let text = source.content || '';
           if (source.encrypted) {
             if (!ownerKey) throw new Error('Unlock your account encryption to convert this history.');
-            text = await root.E2EEncryption.decryptMessage(text, ownerKey);
+            try { text = await root.E2EEncryption.decryptMessage(text, ownerKey); }
+            catch (_) {
+              throw new Error(`A saved message (${offset + converted.length + 1} of ${result.expectedItems}) could not be decrypted with the active account key. Unlock with the original message encryption password on this device, then press Resume conversion. The private conversation has not been shared.`);
+            }
           }
           const fileIds = [];
           const sharedFiles = [];
@@ -863,9 +880,13 @@
               let plain = new Uint8Array(await response.arrayBuffer());
               if (sourceFile.encrypted) {
                 if (!ownerKey) throw new Error('Unlock your account encryption to convert this attachment.');
-                plain = new Uint8Array(await root.E2EEncryption.decryptBinaryWithKey(plain,
-                  new Uint8Array(root.E2EEncryption.base64ToArrayBuffer(sourceFile.ivBase64)),
-                  new Uint8Array(root.E2EEncryption.base64ToArrayBuffer(sourceFile.tagBase64)), ownerKey));
+                try {
+                  plain = new Uint8Array(await root.E2EEncryption.decryptBinaryWithKey(plain,
+                    new Uint8Array(root.E2EEncryption.base64ToArrayBuffer(sourceFile.ivBase64)),
+                    new Uint8Array(root.E2EEncryption.base64ToArrayBuffer(sourceFile.tagBase64)), ownerKey));
+                } catch (_) {
+                  throw new Error(`An attached file (${sourceFile.fileName || 'unnamed file'}) could not be decrypted with the active account key. Unlock with the original message encryption password on this device, then press Resume conversion. The private conversation has not been shared.`);
+                }
               }
               const encrypted = await root.InPlaceChat.encryptImportedFile(target.conversationId, plain, prepared.room.key_version);
               encryptedBytesBase64 = root.SharedCrypto.b64(encrypted);
@@ -933,6 +954,7 @@
       if (guestControls) guestControls.hidden = false;
       document.getElementById('shareInviteDelivery').textContent = 'The conversation is shared. Send an invitation now; guests can join from the link controls below.';
       status.textContent = 'Your conversation is shared. Invite someone to join this same chat.';
+      renderLinkAvailability(true);
       focusReturn = document.getElementById('shareInviteEmail');
       document.getElementById('shareInviteEmail').focus();
       void discoverGuestShare(epoch, target.conversationId, target.agentId);

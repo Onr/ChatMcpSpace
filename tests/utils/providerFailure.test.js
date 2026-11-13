@@ -17,6 +17,8 @@ test('preserves the actual Antigravity quota cause and reset time without copyin
 
 test.each([
   [401, '{"error":{"type":"authentication_error","message":"private"}}', 'authentication'],
+  [undefined, 'Authentication failed: invalid_grant; please reauthenticate.', 'authentication'],
+  [undefined, 'Could not refresh token: login expired.', 'authentication'],
   [429, '{"error":{"code":"insufficient_quota"}}', 'quota'],
   [429, '{"error":{"type":"rate_limit_error"}}', 'rate_limit'],
   [404, '{"error":{"code":"model_not_found"}}', 'model_unavailable'],
@@ -49,6 +51,8 @@ test('shared notices omit owner model choices and private metadata; unknown erro
   expect(shared).toContain('agent owner');
   expect(shared).not.toMatch(/future-model|SECRET/);
   expect(providerFailureMessage({ category: 'new_provider_code', raw: 'SECRET' })).toContain('runner log');
+  expect(providerFailureMessage({ category: 'authentication' })).toContain('not your ChatMCP account');
+  expect(providerFailureMessage({ category: 'authentication' })).toContain('restart the agent runner');
   expect(providerFailureMessage({ category: 'timeout' }, { timeoutMs: 1800000 })).toContain('30-minute time limit');
 });
 

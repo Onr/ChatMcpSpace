@@ -51,7 +51,7 @@ function providerFailure(error = {}, diagnostics = '', { now = Date.now(), retry
   if (error.code === 'PROVIDER_TIMEOUT' || error.name === 'TimeoutError') category = 'timeout';
   else if (error.code === 'ENOENT') category = 'not_installed';
   else if (/insufficient[_ ]quota|quota.{0,80}(?:reach|exceed|exhaust|limit)|usage[_ ]limit|hit your limit|(?:credit|balance).{0,40}(?:exhaust|insufficient|empty|too low)|billing[_ ]hard[_ ]limit/i.test(evidence) || status === 402) category = 'quota';
-  else if (status === 401 || /unauthenticated|invalid[_ ]api[_ ]key|(?:token|session|credentials?).{0,35}(?:expired|invalid)|(?:login|sign.?in|authentication) (?:is )?required/i.test(evidence)) category = 'authentication';
+  else if (status === 401 || /unauthenticated|unauthorized|invalid[_ ](?:api[_ ]key|grant)|authentication[_ ](?:error|failed)|auth[_ ]failed|(?:token|session|credentials?).{0,45}(?:expired|invalid|refresh failed|could not refresh)|(?:failed to refresh|could not refresh).{0,35}(?:token|credential)|(?:not logged in|login expired|please (?:re)?authenticate|(?:login|sign.?in|authentication) (?:is )?required)/i.test(evidence)) category = 'authentication';
   else if (/invalid model selection|(?:model|effort).{0,80}conflicts? with|unsupported.{0,30}(?:effort|reasoning)/i.test(evidence)) category = 'model_configuration';
   else if (/(?:model|deployment).{0,100}(?:not[_ ]found|does not exist|no longer|retired|deprecated|not available|unavailable|not supported)|(?:unknown|invalid|unsupported)[_ ]model/i.test(evidence)) category = 'model_unavailable';
   else if (status === 429 || /rate[_ -]?limit|too many requests|resource_exhausted|overloaded/i.test(evidence)) category = 'rate_limit';
@@ -79,7 +79,7 @@ function providerFailureMessage(failure, { timeoutMs = 600000, shared = false } 
   const messages = {
     quota: ['The AI provider has reached a usage or credit limit.', 'Choose another model or provider in the agent settings, or check your provider usage and wait for the limit to reset.'],
     rate_limit: ['The AI provider is temporarily limiting requests.', 'Wait before sending this task again, or choose another model or provider in the agent settings.'],
-    authentication: ['The AI provider could not authenticate this agent.', 'Sign in again to the provider CLI on the machine running this agent, using the same OS user, or renew its API credential.'],
+    authentication: ['The AI provider could not authenticate this agent.', 'This is the provider CLI or API credential on the agent machine, not your ChatMCP account. Sign in again as the same OS user (or renew the API credential), restart the agent runner, then resume this request.'],
     model_unavailable: ['The selected model is no longer available or is not enabled for this account.', 'Open the agent settings, refresh the model list, and select a currently listed model.'],
     model_configuration: ['The selected model and reasoning settings are incompatible.', 'Open the agent settings and choose a thinking effort supported by that model, or clear the effort override.'],
     permission: ['The AI provider could not obtain a required permission.', 'Review the agent permissions and provider CLI settings on the machine running it, then approve only the access needed for this task.'],

@@ -38,7 +38,7 @@ test('a participant count opens the same sharing controls with a read-only audie
 test('ordinary dashboard Share flow previews, browser-reencrypts a source row, and activates the same conversation', async () => {
   document.body.innerHTML = `
     <div id="shareExistingChatDialog" class="hidden"><button id="shareExistingChatClose"></button><button id="shareExistingChatCancel"></button>
-      <p id="shareExistingChatStatus"></p><div id="shareExistingChatPreview"></div><div id="shareExistingChatInvites" hidden></div>
+      <p id="shareExistingChatStatus"></p><div id="shareExistingChatPreview"></div><div id="shareExistingChatInvites" hidden></div><p id="shareLinkAvailability" hidden></p>
       <button id="shareExistingChatPrepare"></button><input id="shareInviteEmail"><button id="shareInviteSubmit"></button><p id="shareInviteDelivery"></p><div id="shareInviteSignupResult" hidden><input id="shareInviteSignupLink"><button id="shareInviteSignupCopy"></button></div><div id="shareInviteList"></div>
     </div><button id="headerShareExistingChatBtn"></button><button id="selectedChatContextStatus"><svg></svg><span>3</span></button><textarea id="userMessageInput">unsent draft</textarea><div id="conversationArea"></div>`;
   window.crypto = webcrypto;
@@ -81,10 +81,13 @@ test('ordinary dashboard Share flow previews, browser-reencrypts a source row, a
   document.getElementById('headerShareExistingChatBtn').click();
   await tick();
   expect(document.getElementById('shareExistingChatPrepare').disabled).toBe(false);
+  expect(document.getElementById('shareLinkAvailability').textContent).toContain('after the private history finishes converting');
   document.getElementById('shareInviteEmail').value = 'new@example.com';
   document.getElementById('shareExistingChatPrepare').click();
+  expect(document.getElementById('shareExistingChatStatus').textContent).toContain('Preparing your conversation');
   for(let i=0;i<40 && !selected.length;i++) await tick();
   expect(selected).toHaveLength(1);
+  expect(document.getElementById('shareLinkAvailability').hidden).toBe(true);
   expect(selected[0]).toMatchObject({conversationId:id,mode:'shared'});
   const chunk = calls.find(call=>call.url.endsWith('/messages') && call.options.method==='POST');
   expect(JSON.parse(chunk.options.body).items[0]).toMatchObject({sourceKind:'user_message',payload:{v:1,data:'ciphertext-envelope',keyVersion:1}});
@@ -117,6 +120,31 @@ test('ordinary dashboard Share flow previews, browser-reencrypts a source row, a
   document.querySelector('#shareInviteList button[aria-label="Remove Reviewer"]').click();
   await tick();
   expect(calls.some(call=>call.url===`/api/user/shared/${id}/members/66666666-6666-4666-8666-666666666666` && call.options.method==='DELETE')).toBe(true);
+});
+
+test('an undecryptable saved message leaves preparation resumable with actionable guidance', async () => {
+  document.body.innerHTML = `<div id="shareExistingChatDialog" class="hidden"><button id="shareExistingChatClose"></button><button id="shareExistingChatCancel"></button><p id="shareExistingChatStatus"></p><div id="shareExistingChatPreview"></div><div id="shareExistingChatInvites" hidden><input id="shareInviteEmail"><button id="shareInviteSubmit"></button><p id="shareInviteDelivery"></p><div id="shareInviteList"></div></div><p id="shareLinkAvailability" hidden></p><button id="shareExistingChatPrepare"></button></div><button id="headerShareExistingChatBtn"></button>`;
+  window.crypto = webcrypto;
+  window.DashboardHelpers = { getSelectedAgentIdentity: () => ({ agentId: id, agentName: 'Mira', agentType: 'standard', mode: 'private', role: 'owner' }), getEncryptionKey: () => ({ key: 'fallback' }) };
+  window.E2EEncryption = { getStoredEncryptionKey: async () => ({ key: 'stored' }), decryptMessage: async () => { throw new Error('private ciphertext diagnostic'); } };
+  window.InPlaceChat = { ensureIdentity: async () => {}, prepareOwnerShare: async () => ({ room: { key_version: 1 } }) };
+  window.fetch = jest.fn(async (url, options = {}) => {
+    if (url === '/api/user/chat-threads/resolve') return response({ conversationId: id, agentId: id, ownerId: 'owner', state: 'private' });
+    if (url === `/api/user/chat-threads/${id}/share-preview`) return response({ conversationId: id, agentName: 'Mira', includedMessages: 1, includedFiles: 0, sourceFingerprint: 'fingerprint' });
+    if (url === `/api/user/chat-threads/${id}/imports` && options.method === 'POST') return response({ importId, conversationId: id, revision: 1, state: 'importing', expectedItems: 1, importedItems: 0, expectedFiles: 0 });
+    if (url === `/api/user/chat-threads/imports/${importId}/source?offset=0&limit=40`) return response({ items: [{ sourceKind: 'user_message', sourceId: '33333333-3333-4333-8333-333333333333', sourceFingerprint: 'row-fingerprint', content: 'ciphertext', encrypted: true, metadata: {} }], nextOffset: 1, total: 1 });
+    throw new Error(`Unexpected request ${url}`);
+  });
+  window.eval(script);
+  document.getElementById('headerShareExistingChatBtn').click();
+  await tick();
+  document.getElementById('shareExistingChatPrepare').click();
+  for (let i = 0; i < 20 && document.getElementById('shareExistingChatPrepare').textContent !== 'Resume conversion'; i++) await tick();
+  expect(document.getElementById('shareExistingChatStatus').textContent).toContain('A saved message (1 of 1) could not be decrypted');
+  expect(document.getElementById('shareExistingChatStatus').textContent).toContain('original message encryption password');
+  expect(document.getElementById('shareExistingChatStatus').textContent).not.toContain('private ciphertext diagnostic');
+  expect(document.getElementById('shareExistingChatPrepare').textContent).toBe('Resume conversion');
+  expect(window.fetch.mock.calls.some(([url]) => String(url).includes('/imports/') && String(url).includes('/messages'))).toBe(false);
 });
 
 test('Share stays disabled with runner guidance when the agent runtime is offline', async () => {

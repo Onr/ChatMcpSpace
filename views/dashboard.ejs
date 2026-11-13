@@ -1321,6 +1321,7 @@
                 <details id="shareInvitationHistory" hidden class="mt-3 rounded-lg border border-slate-700 p-3"><summary class="cursor-pointer text-xs text-slate-400">Past invitations</summary><div id="shareHistoricalInvitationList" class="mt-2 space-y-2 text-xs text-slate-400"></div></details>
             </div>
             <% if (process.env.FEATURE_GUEST_SHARING === 'true') { %>
+            <p id="shareLinkAvailability" class="text-xs text-slate-400" aria-live="polite" hidden></p>
             <div id="shareGuestControls" hidden class="space-y-2 rounded-xl border border-slate-700 bg-slate-950/40 p-4">
                 <div id="shareLinkQuick" class="share-link-quick">
                     <div><strong>Share link</strong><p id="shareLinkQuickHint">Anyone with the link can ask to join this conversation as a guest.</p></div>
